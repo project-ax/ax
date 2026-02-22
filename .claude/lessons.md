@@ -96,6 +96,12 @@
 **Lesson:** When seeding identity/access files, remember that the seeded value (OS username) only works for CLI/local access. Channel providers (Slack, Discord, etc.) use their own user ID formats. For channel access during bootstrap, use an auto-promotion mechanism (`.bootstrap-admin-claimed` atomic claim file) to let the first channel user become admin.
 **Tags:** bootstrap, admin, channels, slack, user-id, access-control
 
+### :memory: SQLite databases don't work with separate connections
+**Date:** 2026-02-22
+**Context:** Converting stores to use Kysely migrations. Kysely creates its own better-sqlite3 connection, runs migrations, then we destroy it and open a new connection via openDatabase(). For file paths this works since both connections see the same file. For :memory:, each connection is an independent in-memory database.
+**Lesson:** When using createKyselyDb() + openDatabase() pattern (two separate connections), :memory: paths won't work because migrations run on one connection and queries on another. Tests must use temp file paths instead: `join(mkdtempSync(...), 'test.db')`. This is already the pattern in conversation-store and job-store tests.
+**Tags:** sqlite, memory, testing, kysely, migrations, better-sqlite3
+
 ### Multiple TestHarness instances need careful dispose ordering
 **Date:** 2026-02-22
 **Context:** "database is not open" error when afterEach tried to dispose a harness that was already disposed

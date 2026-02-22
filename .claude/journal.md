@@ -156,6 +156,24 @@
 **Outcome:** Success — both tests pass
 **Notes:** This factory is used by stores during migration — they create a Kysely instance, run migrations, destroy it, then open their own raw SQLite connection for queries. The PostgreSQL path is lazy-loaded since `pg` isn't installed yet.
 
+## [2026-02-22 18:10] — Integrate Kysely migrations into all 6 stores
+
+**Task:** Replace inline SQL CREATE TABLE/INDEX statements with Kysely migration calls in all 6 stores, convert 4 class-based stores to async create() factories, update all callers
+**What I did:**
+- Converted MessageQueue, SessionStore, ConversationStore, SqliteJobStore from synchronous constructors with inline migrate() to private constructors + static async create() factories
+- Updated memory/sqlite.ts and audit/sqlite.ts providers to use createKyselyDb + runMigrations instead of inline SQL
+- Updated server.ts to await the new async factory calls
+- Updated 11+ test files to use async create() instead of new constructors
+- Converted TestHarness (e2e) to static async create() factory, updated 13 e2e scenario test files
+- Replaced :memory: usage in tests with temp file paths (MessageQueue, router, e2e harness, integration tests)
+**Files touched:**
+- Modified: src/db.ts, src/session-store.ts, src/conversation-store.ts, src/job-store.ts, src/providers/memory/sqlite.ts, src/providers/audit/sqlite.ts, src/host/server.ts
+- Modified: tests/db.test.ts, tests/session-store.test.ts, tests/conversation-store.test.ts, tests/job-store.test.ts, tests/host/router.test.ts, tests/e2e/harness.ts
+- Modified: tests/integration/e2e.test.ts, tests/integration/phase1.test.ts, tests/integration/phase2.test.ts, tests/integration/smoke.test.ts, tests/integration/history-smoke.test.ts
+- Modified: 13 tests/e2e/scenarios/*.test.ts files
+**Outcome:** Success — 142 test files, 1421 tests pass, clean TypeScript build
+**Notes:** Pattern: createKyselyDb() for migration → destroy → openDatabase() for queries. For :memory: databases in tests, switched to temp files since Kysely and raw sqlite use separate connections. The TestHarness required converting from sync constructor to async factory since MessageQueue.create() is async.
+
 ## [2026-02-22 17:57] — Add Kysely migration definitions for all 6 stores
 
 **Task:** Define Kysely migrations for messages, sessions, conversations, jobs, memory, and audit stores
