@@ -1,0 +1,623 @@
+/**
+ * E2E Test Harness — wires together mock providers, router, and IPC handler
+ * to simulate full AX operation flows without real processes or network calls.
+ *
+ * Every external dependency is replaced with a recording mock. The harness
+ * provides helpers to drive events (inbound messages, cron triggers, timer
+ * fires) and assert on outcomes (audit trail, channel output, memory state,
+ * workspace files, identity files).
+ *
+ * Usage:
+ *   const h = new TestHarness({ llmTurns: [...] });
+ *   await h.sendMessage('Hello!');
+ *   expect(h.lastChannelReply()).toBe('Hi there!');
+ *   h.dispose();
+ */
+
+import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
+
+import { MessageQueue } from '../../src/db.js';
+import { createRouter, type Router } from '../../src/host/router.js';
+import { createIPCHandler, type IPCContext } from '../../src/host/ipc-server.js';
+import type { ProviderRegistry } from '../../src/types.js';
+import type { AuditEntry } from '../../src/providers/audit/types.js';
+import type { InboundMessage, SessionAddress, ChannelProvider, OutboundMessage } from '../../src/providers/channel/types.js';
+import type { MemoryEntry, MemoryQuery } from '../../src/providers/memory/types.js';
+import type { FetchRequest, FetchResponse, SearchResult } from '../../src/providers/web/types.js';
+import type { ChatChunk } from '../../src/providers/llm/types.js';
+import type { CronJobDef } from '../../src/providers/scheduler/types.js';
+import type { BrowserSession, PageSnapshot } from '../../src/providers/browser/types.js';
+import type { SkillProposal, ProposalResult, SkillMeta, SkillLogEntry } from '../../src/providers/skills/types.js';
+
+import { ScriptedLLM, textTurn, type LLMTurn } from './scripted-llm.js';
+
+// ─── Types ───────────────────────────────────────────
+
+export interface ChannelMessage {
+  session: SessionAddress;
+  content: string;
+  replyTo?: string;
+}
+
+export interface WebFetchStub {
+  url: string | RegExp;
+  response: FetchResponse;
+}
+
+export interface WebSearchStub {
+  query: string | RegExp;
+  results: SearchResult[];
+}
+
+export interface HarnessOptions {
+  /** LLM turn script. */
+  llmTurns?: LLMTurn[];
+  /** Fallback LLM turn when script is exhausted. */
+  llmFallback?: LLMTurn;
+  /** IPC handler profile (paranoid, balanced, yolo). Default: balanced. */
+  profile?: string;
+  /** Canned web fetch responses. */
+  webFetches?: WebFetchStub[];
+  /** Canned web search responses. */
+  webSearches?: WebSearchStub[];
+  /** Canned browser snapshot. */
+  browserSnapshot?: PageSnapshot;
+  /** Initial memory entries to seed. */
+  seedMemory?: MemoryEntry[];
+  /** Initial skills to seed. */
+  seedSkills?: { name: string; content: string }[];
+  /** Skill proposal verdict override. */
+  skillProposalVerdict?: ProposalResult;
+  /** Whether skill screener is enabled. */
+  enableSkillScreener?: boolean;
+  /** Scanner input verdict override. */
+  scannerInputVerdict?: 'PASS' | 'FLAG' | 'BLOCK';
+  /** Scanner output verdict override. */
+  scannerOutputVerdict?: 'PASS' | 'FLAG' | 'BLOCK';
+}
+
+// ─── TestHarness ─────────────────────────────────────
+
+export class TestHarness {
+  readonly tmpDir: string;
+  readonly agentDir: string;
+  readonly db: MessageQueue;
+  readonly router: Router;
+  readonly handleIPC: (raw: string, ctx: IPCContext) => Promise<string>;
+  readonly llm: ScriptedLLM;
+  readonly providers: ProviderRegistry;
+
+  // Recording stores
+  readonly auditLog: Partial<AuditEntry>[] = [];
+  readonly channelMessages: ChannelMessage[] = [];
+  readonly memoryStore = new Map<string, MemoryEntry>();
+  readonly schedulerJobs: CronJobDef[] = [];
+  readonly schedulerOnceJobs: { job: CronJobDef; fireAt: Date }[] = [];
+  readonly skillStore = new Map<string, string>();
+  readonly skillProposals: { proposal: SkillProposal; result: ProposalResult }[] = [];
+  readonly skillLog: SkillLogEntry[] = [];
+
+  // Browser state
+  private browserSessions = new Map<string, { url?: string }>();
+  private browserSnapshot: PageSnapshot;
+
+  // Web stubs
+  private webFetches: WebFetchStub[];
+  private webSearches: WebSearchStub[];
+
+  // Skill config
+  private skillProposalVerdict: ProposalResult | undefined;
+
+  private readonly mockChannel: ChannelProvider;
+
+  private originalAxHome: string | undefined;
+
+  constructor(opts: HarnessOptions = {}) {
+    this.tmpDir = mkdtempSync(join(tmpdir(), 'ax-e2e-harness-'));
+    this.agentDir = join(this.tmpDir, 'agents', 'main');
+    mkdirSync(this.agentDir, { recursive: true });
+
+    // Point AX_HOME to our temp dir so workspace/identity paths resolve there
+    this.originalAxHome = process.env.AX_HOME;
+    process.env.AX_HOME = this.tmpDir;
+
+    this.webFetches = opts.webFetches ?? [];
+    this.webSearches = opts.webSearches ?? [];
+    this.browserSnapshot = opts.browserSnapshot ?? {
+      title: 'Test Page', url: 'https://example.com',
+      text: 'Mock page content', refs: [{ ref: 0, tag: 'a', text: 'Link' }],
+    };
+    this.skillProposalVerdict = opts.skillProposalVerdict;
+
+    // Seed memory
+    if (opts.seedMemory) {
+      for (const entry of opts.seedMemory) {
+        const id = entry.id ?? randomUUID();
+        this.memoryStore.set(id, { ...entry, id });
+      }
+    }
+
+    // Seed skills
+    if (opts.seedSkills) {
+      for (const skill of opts.seedSkills) {
+        this.skillStore.set(skill.name, skill.content);
+      }
+    }
+
+    // Build providers
+    this.llm = new ScriptedLLM(opts.llmTurns ?? [textTurn('Hello!')], opts.llmFallback);
+    this.mockChannel = this.buildMockChannel();
+    this.providers = this.buildProviders(opts);
+
+    // Wire up
+    this.db = new MessageQueue(':memory:');
+    this.router = createRouter(this.providers, this.db);
+    this.handleIPC = createIPCHandler(this.providers, {
+      agentDir: this.agentDir,
+      agentName: 'main',
+      profile: opts.profile ?? 'balanced',
+    });
+  }
+
+  // ─── Event Drivers ───────────────────────────────
+
+  /** Send an inbound message through the full pipeline (router + IPC + router). */
+  async sendMessage(
+    content: string,
+    opts?: { sender?: string; channel?: string; scope?: 'dm' | 'channel' | 'thread' },
+  ): Promise<{
+    inbound: Awaited<ReturnType<Router['processInbound']>>;
+    llmResponse?: string;
+    outbound?: Awaited<ReturnType<Router['processOutbound']>>;
+  }> {
+    const msg: InboundMessage = {
+      id: `msg-${randomUUID()}`,
+      session: {
+        provider: opts?.channel ?? 'test-channel',
+        scope: opts?.scope ?? 'dm',
+        identifiers: { peer: opts?.sender ?? 'test-user' },
+      },
+      sender: opts?.sender ?? 'test-user',
+      content,
+      attachments: [],
+      timestamp: new Date(),
+    };
+
+    // Inbound
+    const inResult = await this.router.processInbound(msg);
+    if (!inResult.queued) {
+      return { inbound: inResult };
+    }
+
+    // Dequeue
+    const queued = this.db.dequeue();
+    if (!queued) {
+      return { inbound: inResult };
+    }
+
+    // LLM call via IPC
+    const ctx: IPCContext = { sessionId: inResult.sessionId, agentId: 'agent-1' };
+    const llmResult = JSON.parse(await this.handleIPC(JSON.stringify({
+      action: 'llm_call',
+      messages: [{ role: 'user', content: queued.content }],
+    }), ctx));
+
+    let agentResponse = '';
+    if (llmResult.ok && llmResult.chunks) {
+      agentResponse = llmResult.chunks
+        .filter((c: ChatChunk) => c.type === 'text')
+        .map((c: ChatChunk) => c.content ?? '')
+        .join('');
+    }
+
+    // Outbound
+    const outResult = await this.router.processOutbound(
+      agentResponse, inResult.sessionId, inResult.canaryToken,
+    );
+
+    this.db.complete(queued.id);
+
+    return { inbound: inResult, llmResponse: agentResponse, outbound: outResult };
+  }
+
+  /** Call an IPC action directly (bypassing router). */
+  async ipcCall(action: string, params: Record<string, unknown>, ctx?: Partial<IPCContext>): Promise<any> {
+    const fullCtx: IPCContext = {
+      sessionId: ctx?.sessionId ?? 'test-session',
+      agentId: ctx?.agentId ?? 'agent-1',
+      ...ctx,
+    };
+    const raw = JSON.stringify({ action, ...params });
+    const result = JSON.parse(await this.handleIPC(raw, fullCtx));
+    return result;
+  }
+
+  /** Simulate a cron job firing by injecting a scheduler-style inbound message. */
+  async fireCronJob(job: CronJobDef): Promise<{
+    llmResponse?: string;
+  }> {
+    const ctx: IPCContext = { sessionId: `cron-${job.id}`, agentId: job.agentId };
+    const llmResult = JSON.parse(await this.handleIPC(JSON.stringify({
+      action: 'llm_call',
+      messages: [{ role: 'user', content: job.prompt }],
+    }), ctx));
+
+    let response: string | undefined;
+    if (llmResult.ok && llmResult.chunks) {
+      response = llmResult.chunks
+        .filter((c: ChatChunk) => c.type === 'text')
+        .map((c: ChatChunk) => c.content ?? '')
+        .join('');
+    }
+
+    return { llmResponse: response };
+  }
+
+  /**
+   * Run a multi-turn agent loop: send messages to LLM, handle tool_use by
+   * dispatching tool calls through IPC, feed tool_results back, repeat until
+   * the LLM returns text-only (no tool_use).
+   *
+   * This simulates the actual agent runner loop without needing a real agent process.
+   */
+  async runAgentLoop(
+    userMessage: string,
+    opts?: { maxTurns?: number; sessionId?: string },
+  ): Promise<{
+    finalText: string;
+    turns: { role: string; chunks: ChatChunk[] }[];
+    toolCalls: { name: string; args: Record<string, unknown>; result: any }[];
+  }> {
+    const maxTurns = opts?.maxTurns ?? 10;
+    const ctx: IPCContext = {
+      sessionId: opts?.sessionId ?? `loop-${randomUUID()}`,
+      agentId: 'agent-1',
+    };
+
+    const messages: { role: string; content: string | any[] }[] = [
+      { role: 'user', content: userMessage },
+    ];
+
+    const turns: { role: string; chunks: ChatChunk[] }[] = [];
+    const toolCalls: { name: string; args: Record<string, unknown>; result: any }[] = [];
+    let finalText = '';
+
+    for (let turn = 0; turn < maxTurns; turn++) {
+      // Call LLM
+      const llmResult = JSON.parse(await this.handleIPC(JSON.stringify({
+        action: 'llm_call',
+        messages,
+      }), ctx));
+
+      if (!llmResult.ok) {
+        throw new Error(`LLM call failed: ${llmResult.error}`);
+      }
+
+      const chunks: ChatChunk[] = llmResult.chunks ?? [];
+      turns.push({ role: 'assistant', chunks });
+
+      // Extract text and tool_use chunks
+      const textContent = chunks
+        .filter((c: ChatChunk) => c.type === 'text')
+        .map((c: ChatChunk) => c.content ?? '')
+        .join('');
+
+      const toolUseChunks = chunks.filter((c: ChatChunk) => c.type === 'tool_use');
+
+      if (toolUseChunks.length === 0) {
+        // No tool calls — LLM is done
+        finalText = textContent;
+        break;
+      }
+
+      // Build assistant message with content blocks
+      const assistantContent: any[] = [];
+      if (textContent) {
+        assistantContent.push({ type: 'text', text: textContent });
+      }
+      for (const tc of toolUseChunks) {
+        assistantContent.push({
+          type: 'tool_use',
+          id: tc.toolCall!.id,
+          name: tc.toolCall!.name,
+          input: tc.toolCall!.args,
+        });
+      }
+      messages.push({ role: 'assistant', content: assistantContent });
+
+      // Execute each tool call through IPC
+      const toolResults: any[] = [];
+      for (const tc of toolUseChunks) {
+        const toolCall = tc.toolCall!;
+        const result = await this.ipcCall(toolCall.name, toolCall.args, ctx);
+        toolCalls.push({ name: toolCall.name, args: toolCall.args, result });
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: toolCall.id,
+          content: JSON.stringify(result),
+        });
+      }
+
+      messages.push({ role: 'user', content: toolResults });
+
+      // If we've hit final text alongside tool_use, capture it
+      if (turn === maxTurns - 1) {
+        finalText = textContent;
+      }
+    }
+
+    return { finalText, turns, toolCalls };
+  }
+
+  // ─── Assertion Helpers ───────────────────────────
+
+  /** Get the last message sent to the mock channel. */
+  lastChannelReply(): string | undefined {
+    return this.channelMessages[this.channelMessages.length - 1]?.content;
+  }
+
+  /** Get all channel replies. */
+  allChannelReplies(): string[] {
+    return this.channelMessages.map(m => m.content);
+  }
+
+  /** Get audit entries matching an action name. */
+  auditEntriesFor(action: string): Partial<AuditEntry>[] {
+    return this.auditLog.filter(e => e.action === action);
+  }
+
+  /** Check if an audit action was logged. */
+  wasAudited(action: string): boolean {
+    return this.auditLog.some(e => e.action === action);
+  }
+
+  /** Get all memory entries for a scope. */
+  memoryForScope(scope: string): MemoryEntry[] {
+    return [...this.memoryStore.values()].filter(e => e.scope === scope);
+  }
+
+  /** Read an identity file (SOUL.md or IDENTITY.md). */
+  readIdentityFile(file: 'SOUL.md' | 'IDENTITY.md'): string | null {
+    const path = join(this.agentDir, file);
+    if (!existsSync(path)) return null;
+    return readFileSync(path, 'utf-8');
+  }
+
+  /** Read a workspace file. */
+  readWorkspaceFile(tier: string, path: string): string | null {
+    const fullPath = join(this.tmpDir, 'workspace', tier, path);
+    if (!existsSync(fullPath)) return null;
+    return readFileSync(fullPath, 'utf-8');
+  }
+
+  // ─── Cleanup ─────────────────────────────────────
+
+  dispose(): void {
+    this.db.close();
+    // Restore AX_HOME
+    if (this.originalAxHome !== undefined) {
+      process.env.AX_HOME = this.originalAxHome;
+    } else {
+      delete process.env.AX_HOME;
+    }
+    rmSync(this.tmpDir, { recursive: true, force: true });
+  }
+
+  // ─── Private: Provider Construction ──────────────
+
+  private buildMockChannel(): ChannelProvider {
+    return {
+      name: 'test-channel',
+      async connect() {},
+      onMessage() {},
+      shouldRespond() { return true; },
+      send: async (_session: SessionAddress, msg: OutboundMessage) => {
+        this.channelMessages.push({
+          session: _session,
+          content: msg.content,
+          replyTo: msg.replyTo,
+        });
+      },
+      async disconnect() {},
+    };
+  }
+
+  private buildProviders(opts: HarnessOptions): ProviderRegistry {
+    const self = this;
+
+    return {
+      llm: this.llm,
+
+      memory: {
+        async write(entry: MemoryEntry) {
+          const id = entry.id ?? randomUUID();
+          self.memoryStore.set(id, { ...entry, id });
+          return id;
+        },
+        async query(q: MemoryQuery) {
+          const entries = [...self.memoryStore.values()]
+            .filter(e => e.scope === q.scope);
+          if (q.tags?.length) {
+            return entries.filter(e => e.tags?.some(t => q.tags!.includes(t))).slice(0, q.limit ?? 100);
+          }
+          return entries.slice(0, q.limit ?? 100);
+        },
+        async read(id: string) {
+          return self.memoryStore.get(id) ?? null;
+        },
+        async delete(id: string) {
+          self.memoryStore.delete(id);
+        },
+        async list(scope: string, limit?: number) {
+          return [...self.memoryStore.values()]
+            .filter(e => e.scope === scope)
+            .slice(0, limit ?? 100);
+        },
+      },
+
+      scanner: {
+        canaryToken() { return `CANARY-e2e-${Date.now()}`; },
+        checkCanary(output: string, token: string) { return output.includes(token); },
+        async scanInput(msg: { content: string }) {
+          const verdict = opts.scannerInputVerdict ?? 'PASS';
+          if (verdict === 'BLOCK') {
+            return { verdict: 'BLOCK' as const, reason: 'Scanner blocked', patterns: ['test'] };
+          }
+          if (verdict === 'FLAG') {
+            return { verdict: 'FLAG' as const, reason: 'Scanner flagged', patterns: ['test'] };
+          }
+          return { verdict: 'PASS' as const };
+        },
+        async scanOutput(msg: { content: string }) {
+          const verdict = opts.scannerOutputVerdict ?? 'PASS';
+          if (verdict === 'BLOCK') {
+            return { verdict: 'BLOCK' as const, reason: 'Sensitive data', patterns: ['pii'] };
+          }
+          if (verdict === 'FLAG') {
+            return { verdict: 'FLAG' as const, reason: 'PII detected', patterns: ['ssn'] };
+          }
+          return { verdict: 'PASS' as const };
+        },
+      },
+
+      channels: [this.mockChannel],
+
+      web: {
+        async fetch(req: FetchRequest): Promise<FetchResponse> {
+          const stub = self.webFetches.find(s =>
+            typeof s.url === 'string' ? s.url === req.url : s.url.test(req.url)
+          );
+          if (stub) return stub.response;
+          return {
+            status: 200,
+            headers: { 'content-type': 'text/html' },
+            body: '<html><body>Mock page</body></html>',
+            taint: { source: 'web_fetch', trust: 'external' as const, timestamp: new Date() },
+          };
+        },
+        async search(query: string, maxResults?: number): Promise<SearchResult[]> {
+          const stub = self.webSearches.find(s =>
+            typeof s.query === 'string' ? s.query === query : s.query.test(query)
+          );
+          if (stub) return stub.results.slice(0, maxResults ?? 10);
+          return [{
+            title: `Result for: ${query}`,
+            url: 'https://example.com/result',
+            snippet: `Mock search result for "${query}"`,
+            taint: { source: 'web_search', trust: 'external' as const, timestamp: new Date() },
+          }];
+        },
+      },
+
+      browser: {
+        async launch() {
+          const id = `browser-${randomUUID().slice(0, 8)}`;
+          self.browserSessions.set(id, {});
+          return { id } as BrowserSession;
+        },
+        async navigate(session: string, url: string) {
+          const s = self.browserSessions.get(session);
+          if (s) s.url = url;
+        },
+        async snapshot(_session: string): Promise<PageSnapshot> {
+          return self.browserSnapshot;
+        },
+        async click() {},
+        async type() {},
+        async screenshot() { return Buffer.from('fake-png'); },
+        async close(session: string) {
+          self.browserSessions.delete(session);
+        },
+      },
+
+      credentials: {
+        async get() { return null; },
+        async set() {},
+        async delete() {},
+        async list() { return []; },
+      },
+
+      skills: {
+        async list(): Promise<SkillMeta[]> {
+          return [...self.skillStore.keys()].map(name => ({
+            name, path: `skills/${name}.md`,
+          }));
+        },
+        async read(name: string) {
+          return self.skillStore.get(name) ?? '';
+        },
+        async propose(proposal: SkillProposal): Promise<ProposalResult> {
+          const result: ProposalResult = self.skillProposalVerdict ?? {
+            id: randomUUID(),
+            verdict: 'AUTO_APPROVE',
+            reason: 'Test auto-approve',
+          };
+          self.skillProposals.push({ proposal, result });
+          if (result.verdict === 'AUTO_APPROVE') {
+            self.skillStore.set(proposal.skill, proposal.content);
+          }
+          self.skillLog.push({
+            id: result.id,
+            skill: proposal.skill,
+            action: 'propose',
+            timestamp: new Date(),
+            reason: proposal.reason,
+          });
+          return result;
+        },
+        async approve(proposalId: string) {
+          const entry = self.skillProposals.find(p => p.result.id === proposalId);
+          if (entry) {
+            self.skillStore.set(entry.proposal.skill, entry.proposal.content);
+            self.skillLog.push({
+              id: proposalId, skill: entry.proposal.skill,
+              action: 'approve', timestamp: new Date(),
+            });
+          }
+        },
+        async reject(proposalId: string) {
+          self.skillLog.push({
+            id: proposalId, skill: 'unknown',
+            action: 'reject', timestamp: new Date(),
+          });
+        },
+        async revert(commitId: string) {
+          self.skillLog.push({
+            id: commitId, skill: 'unknown',
+            action: 'revert', timestamp: new Date(),
+          });
+        },
+        async log() { return self.skillLog; },
+      },
+
+      audit: {
+        async log(entry: Partial<AuditEntry>) { self.auditLog.push(entry); },
+        async query() { return self.auditLog as AuditEntry[]; },
+      },
+
+      sandbox: {
+        async spawn() { throw new Error('Sandbox disabled in E2E harness'); },
+        async kill() {},
+        async isAvailable() { return false; },
+      },
+
+      scheduler: {
+        async start() {},
+        async stop() {},
+        addCron(job: CronJobDef) { self.schedulerJobs.push(job); },
+        removeCron(jobId: string) {
+          const idx = self.schedulerJobs.findIndex(j => j.id === jobId);
+          if (idx >= 0) self.schedulerJobs.splice(idx, 1);
+        },
+        listJobs() { return self.schedulerJobs; },
+        scheduleOnce(job: CronJobDef, fireAt: Date) {
+          self.schedulerOnceJobs.push({ job, fireAt });
+          self.schedulerJobs.push(job);
+        },
+      },
+    } as ProviderRegistry;
+  }
+}

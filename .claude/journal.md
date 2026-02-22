@@ -81,3 +81,16 @@
 **Outcome:** Success — 1267/1268 tests pass (1 pre-existing skip)
 **Notes:** Key design decisions: (1) retry utility is generic and composable for future use, (2) circuit breaker is standalone for wrapping any provider, (3) agent crash retry is conservative (max 2 retries) to avoid infinite loops, (4) timeout-killed agents are NOT retried since they already spent their full time budget, (5) IPC client doesn't retry timeouts since the call may have been received server-side.
 
+## [2026-02-22 20:30] — E2E test framework with simulated providers
+
+**Task:** Build an end-to-end test framework that simulates all external dependencies (LLMs, web APIs, timers, Slack messages, etc.) to test common AX operations
+**What I did:** Created a comprehensive E2E test framework with three core components:
+1. **ScriptedLLM** (`tests/e2e/scripted-llm.ts`): A mock LLM provider that follows a pre-defined script of turns. Supports sequential turns, conditional matching (by message content or tool_result presence), and call recording. Convenience helpers for text, tool_use, and mixed turns.
+2. **TestHarness** (`tests/e2e/harness.ts`): Wires together mock providers, router, IPC handler, and MessageQueue. Drives events (sendMessage, fireCronJob, runAgentLoop) and provides assertion helpers (auditEntriesFor, memoryForScope, readIdentityFile, readWorkspaceFile). Sets AX_HOME to a temp dir for filesystem isolation.
+3. **8 scenario test files** covering: Slack message flow, scheduled tasks, skill creation, workspace operations, identity/soul updates, web search/fetch, multi-turn tool use loops, full pipeline integration.
+**Files touched:**
+- New: tests/e2e/scripted-llm.ts, tests/e2e/harness.ts
+- New: tests/e2e/scenarios/{slack-message,scheduled-task,skill-creation,workspace-ops,identity-update,web-search,multi-turn-tool-use,full-pipeline}.test.ts
+**Outcome:** Success — 64 new E2E tests, all passing. Full suite: 1277 pass + 64 new = 1341 pass (1 pre-existing flaky smoke test timeout unrelated)
+**Notes:** The provider contract pattern makes this approach very effective — every external dependency is behind an interface. The ScriptedLLM with sequential + conditional turns enables scripting complex multi-turn agent loops. Key gotchas: web_search handler returns SearchResult[] spread as array indices, web_fetch returns FetchResponse spread flat, skill_propose returns ProposalResult spread flat, scratchDir requires UUID or 3+ colon-separated session IDs.
+

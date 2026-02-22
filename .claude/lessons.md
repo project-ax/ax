@@ -54,3 +54,21 @@
 **Lesson:** Tests that regex-match source code break whenever the code is refactored (extract variable, reorder params, etc.). Prefer simpler checks: `toContain('agentDir')` + `toMatch(/sandbox\.spawn/)` is more resilient. Even better, test behavior rather than code structure.
 **Tags:** testing, regex, source-code-tests, refactoring
 
+### IPC handler response shapes vary by handler — check the actual handler code
+**Date:** 2026-02-22
+**Context:** Writing E2E tests, expected `result.results` for web_search but it was `result[0]`
+**Lesson:** IPC handlers return arbitrary objects/arrays that get spread into `{ ok: true, ...result }`. Some handlers return arrays (web_search → SearchResult[]), which become indexed keys (result[0], result[1]). Others return flat objects (web_fetch → { status, headers, body, taint }). Always read the handler source to know the response shape — don't assume wrapping like `result.response.status`.
+**Tags:** ipc, testing, web, handlers, response-shape
+
+### Set AX_HOME in tests that use workspace/identity/scratch paths
+**Date:** 2026-02-22
+**Context:** Workspace tests failed because paths.ts resolved to `~/.ax/` instead of the test temp dir
+**Lesson:** The workspace handler uses `agentWorkspaceDir()`, `userWorkspaceDir()`, `scratchDir()` from `src/paths.ts`, which all resolve relative to `process.env.AX_HOME || ~/.ax/`. Set `process.env.AX_HOME` to a temp dir in test setup and restore in teardown for filesystem isolation.
+**Tags:** testing, workspace, paths, AX_HOME, isolation
+
+### scratchDir requires valid session ID format
+**Date:** 2026-02-22
+**Context:** Workspace scratch test failed with "Invalid session ID for scratch dir"
+**Lesson:** `scratchDir()` validates session IDs: must be either a lowercase UUID (`/^[0-9a-f]{8}-[0-9a-f]{4}-...$/`) or 3+ colon-separated segments matching `SEGMENT_RE`. Simple strings like `test-session` are rejected. Use `randomUUID()` for test session IDs when touching scratch tier.
+**Tags:** testing, scratch, session-id, validation
+
