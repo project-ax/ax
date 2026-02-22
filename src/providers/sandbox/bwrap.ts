@@ -103,6 +103,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         '--', cmd, ...args,
       ];
 
+      // nosemgrep: javascript.lang.security.detect-child-process — sandbox provider: spawning is its purpose
       const child = spawn('bwrap', bwrapArgs, {
         stdio: ['pipe', 'pipe', 'pipe'],
       });

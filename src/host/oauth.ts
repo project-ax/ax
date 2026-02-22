@@ -252,13 +252,15 @@ export async function runOAuthFlow(): Promise<OAuthTokens> {
   console.log('\n  Open this URL in your browser to authorize AX:\n');
   console.log(`  ${authUrl.toString()}\n`);
 
-  // Try to open the browser (best-effort, will fail silently on headless)
+  // Try to open the browser (best-effort, will fail silently on headless).
+  // Uses spawn (not exec) to avoid shell injection via the URL string.
   if (!isHeadless) {
-    const { exec } = await import('node:child_process');
+    const { spawn } = await import('node:child_process');
     const openCmd = process.platform === 'darwin' ? 'open'
       : process.platform === 'win32' ? 'start'
       : 'xdg-open';
-    exec(`${openCmd} "${authUrl.toString()}"`);
+    // nosemgrep: javascript.lang.security.detect-child-process
+    spawn(openCmd, [authUrl.toString()], { stdio: 'ignore', detached: true }).unref();
   }
 
   let code: string;

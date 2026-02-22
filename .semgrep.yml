@@ -1,0 +1,72 @@
+rules:
+  # SC-SEC-002: Provider imports must go through the static allowlist.
+  - id: ax-no-dynamic-provider-import
+    patterns:
+      - pattern: import($ARG)
+      - pattern-not: import('...')
+      - metavariable-regex:
+          metavariable: $ARG
+          regex: ".*provider.*"
+    paths:
+      include:
+        - /src/host/
+        - /src/providers/
+      exclude:
+        - /src/host/provider-map.ts
+        - /src/host/registry.ts
+        - /src/providers/llm/router.ts
+        - /src/providers/credentials/keychain.ts
+        - /src/providers/credentials/encrypted.ts
+        - /src/providers/browser/container.ts
+    message: >
+      Dynamic import with a provider-related path detected outside of the
+      static allowlist (provider-map.ts). All provider loading MUST use
+      resolveProviderPath() from src/host/provider-map.ts (SC-SEC-002).
+    languages: [typescript]
+    severity: ERROR
+
+  # SC-SEC-004: File providers should use safePath() for user-supplied paths.
+  - id: ax-no-raw-path-join-in-providers
+    patterns:
+      - pattern: join($BASE, $INPUT)
+      - pattern-inside: |
+          async function $FUNC(...) {
+            ...
+          }
+      - metavariable-regex:
+          metavariable: $INPUT
+          regex: "^(entry|key|scope|id|name|filename)$"
+    paths:
+      include:
+        - /src/providers/memory/
+        - /src/providers/audit/
+        - /src/providers/skills/
+    message: >
+      Raw path.join() with user-supplied input detected in a provider.
+      Use safePath() from src/utils/safe-path.ts to prevent path traversal
+      attacks (SC-SEC-004).
+    languages: [typescript]
+    severity: WARNING
+
+  # No eval() anywhere in application code.
+  - id: ax-no-eval
+    pattern: eval(...)
+    message: >
+      eval() is never permitted in AX application code. Use safe
+      alternatives instead.
+    languages: [typescript]
+    severity: ERROR
+    paths:
+      include:
+        - /src/
+
+  # No Function() constructor (eval equivalent).
+  - id: ax-no-function-constructor
+    pattern: new Function(...)
+    message: >
+      new Function() is an eval equivalent and is never permitted in AX.
+    languages: [typescript]
+    severity: ERROR
+    paths:
+      include:
+        - /src/

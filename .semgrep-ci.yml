@@ -1,0 +1,31 @@
+rules:
+  # CI-only: flag console.log in host/provider code (should use logger).
+  - id: ax-no-console-in-host
+    pattern: console.log(...)
+    message: >
+      Use the structured logger (pino) instead of console.log() in host
+      and provider code. console.log() is acceptable in CLI code.
+    languages: [typescript]
+    severity: WARNING
+    paths:
+      include:
+        - /src/host/
+        - /src/providers/
+      exclude:
+        - /src/host/oauth.ts
+
+  # CI-only: catch __proto__ or constructor.prototype pollution vectors.
+  - id: ax-no-prototype-pollution
+    patterns:
+      - pattern-either:
+          - pattern: $OBJ["__proto__"]
+          - pattern: $OBJ.__proto__
+          - pattern: $OBJ["constructor"]["prototype"]
+    message: >
+      Potential prototype pollution vector detected. Ensure user-controlled
+      keys cannot modify Object.prototype.
+    languages: [typescript]
+    severity: ERROR
+    paths:
+      include:
+        - /src/

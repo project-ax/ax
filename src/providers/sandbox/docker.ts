@@ -116,6 +116,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
       // Image and command
       dockerArgs.push(image, cmd, ...args);
 
+      // nosemgrep: javascript.lang.security.detect-child-process — sandbox provider: spawning is its purpose
       const child = spawn('docker', dockerArgs, {
         stdio: ['pipe', 'pipe', 'pipe'],
       });

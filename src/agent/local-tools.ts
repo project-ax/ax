@@ -27,6 +27,7 @@ export function createLocalTools(workspace: string): AgentTool[] {
       }),
       async execute(_toolCallId, params: any) {
         try {
+          // nosemgrep: javascript.lang.security.detect-child-process — intentional: agent runs inside a sandbox
           const out = execSync(params.command, {
             cwd: workspace,
             encoding: 'utf-8',

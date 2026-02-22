@@ -17,6 +17,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
       const [cmd, ...args] = config.command;
 
       // sandbox-exec with -D parameter substitution for dynamic paths
+      // nosemgrep: javascript.lang.security.detect-child-process — sandbox provider: spawning is its purpose
       const child = spawn('sandbox-exec', [
         '-f', policyPath,
         '-D', `WORKSPACE=${config.workspace}`,
