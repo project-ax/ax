@@ -78,6 +78,12 @@
 **Lesson:** Always check the Zod schema in `src/ipc-schemas.ts` before writing IPC test assertions. Schema fields like `origin`, `decision`, `status`, and `file` use strict enums. Common gotcha: `IDENTITY_ORIGINS = ['user_request', 'agent_initiated']`, not `'agent'` or `'user'`. Similarly, `proposalId` and `memory_read.id` must be valid UUIDs.
 **Tags:** ipc, schemas, zod, testing, validation, governance
 
+### OS username ≠ channel user ID — admins file seed doesn't help channels
+**Date:** 2026-02-22
+**Context:** Bootstrap gate blocks all Slack users because admins file is seeded with `process.env.USER` (OS username) but Slack messages come with Slack user IDs
+**Lesson:** When seeding identity/access files, remember that the seeded value (OS username) only works for CLI/local access. Channel providers (Slack, Discord, etc.) use their own user ID formats. For channel access during bootstrap, use an auto-promotion mechanism (`.bootstrap-admin-claimed` atomic claim file) to let the first channel user become admin.
+**Tags:** bootstrap, admin, channels, slack, user-id, access-control
+
 ### Multiple TestHarness instances need careful dispose ordering
 **Date:** 2026-02-22
 **Context:** "database is not open" error when afterEach tried to dispose a harness that was already disposed
