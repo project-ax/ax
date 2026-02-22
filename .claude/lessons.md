@@ -108,3 +108,20 @@
 **Lesson:** If a test creates local TestHarness instances instead of using the module-level `harness`, either: (a) assign one to the module-level `harness` so afterEach handles it, or (b) dispose all local instances at the end of the test and ensure the module-level `harness` isn't stale from a prior test. The afterEach guard `harness?.dispose()` will re-dispose an already-disposed instance and crash on the closed SQLite db.
 **Tags:** testing, e2e, harness, dispose, isolation
 
+### Separate Kysely + openDatabase connections can't share :memory: databases
+**Date:** 2026-02-22
+**Context:** Migrating stores to use Kysely for migrations while keeping openDatabase() for queries
+**Lesson:** When using `createKyselyDb` (which opens its own better-sqlite3 connection) alongside `openDatabase()`, `:memory:` databases won't work because each connection gets an independent in-memory database. Tests must use temp file paths instead. This applies whenever you have two separate SQLite connections to the same logical database.
+**Tags:** sqlite, kysely, testing, memory-database, migrations
+
+### ALTER TABLE ADD COLUMN has no IF NOT EXISTS in SQLite
+**Date:** 2026-02-22
+**Context:** Writing Kysely migration for memory store's agent_id column
+**Lesson:** `ALTER TABLE ... ADD COLUMN` doesn't support `IF NOT EXISTS` in SQLite (or in Kysely's schema builder). For backwards-compatible migrations that add columns, wrap in try-catch to handle the "duplicate column" error. This is the correct pattern — Kysely's migration tracking prevents double-runs on fresh databases, and the try-catch handles pre-migration databases.
+**Tags:** sqlite, kysely, migrations, alter-table, backwards-compatibility
+
+### Always check runMigrations result.error in store factories
+**Date:** 2026-02-22
+**Context:** Code review caught that create() factories discarded the migration result
+**Lesson:** `runMigrations()` returns `{ error }` instead of throwing. Always check `result.error` and throw it explicitly. Also wrap the Kysely lifecycle in try/finally to ensure `kyselyDb.destroy()` runs even on failure — otherwise you leak the connection.
+**Tags:** kysely, migrations, error-handling, resource-cleanup

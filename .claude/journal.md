@@ -197,3 +197,23 @@
 **Outcome:** Success — 16 tests pass across 6 test files
 **Notes:** FTS5 virtual tables require raw SQL since Kysely's schema builder doesn't support VIRTUAL TABLE syntax. The memory store's second migration (memory_002_add_agent_id) uses ALTER TABLE ADD COLUMN which doesn't support ifNotExists in SQLite, but the migration runner tracks applied migrations so it won't run twice.
 
+## [2026-02-22 18:00] — Integrate Kysely migrations into all stores
+
+**Task:** Convert all 6 stores from inline SQL schema management to Kysely migrations
+**What I did:** Converted MessageQueue, SessionStore, ConversationStore, SqliteJobStore to private-constructor + static async create() factory pattern. Updated memory/sqlite.ts and audit/sqlite.ts providers (already async). Updated server.ts and ~15 test files. Added try/finally + error checking around migration lifecycle after code review caught silent error swallowing. Fixed stale JSDoc in harness.
+**Files touched:**
+- Modified: src/db.ts, src/session-store.ts, src/conversation-store.ts, src/job-store.ts
+- Modified: src/providers/memory/sqlite.ts, src/providers/audit/sqlite.ts
+- Modified: src/host/server.ts, tests/e2e/harness.ts, ~15 test files
+**Outcome:** Success — 143 test files, 1424 tests pass
+**Notes:** Tests using `:memory:` had to switch to temp files because createKyselyDb opens its own better-sqlite3 connection (separate from openDatabase), and two :memory: connections are independent databases.
+
+## [2026-02-22 18:13] — Add upgrade-path tests and guard memory migration
+
+**Task:** Verify backwards compatibility with existing databases and fix memory_002 migration
+**What I did:** Added try-catch to memory_002_add_agent_id for existing databases that already have the column. Created upgrade-path tests verifying: (1) messages DB from old inline SQL migrates cleanly, (2) memory DB with existing agent_id column works, (3) double-migration is idempotent for all 6 stores.
+**Files touched:**
+- Modified: src/migrations/memory.ts
+- New: tests/migrations/upgrade-path.test.ts
+**Outcome:** Success — 143 files, 1424 tests pass
+**Notes:** The ifNotExists() on createTable + createIndex handles most upgrade cases. ALTER TABLE ADD COLUMN has no IF NOT EXISTS equivalent in SQLite, so try-catch is the correct approach for that specific migration.
