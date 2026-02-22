@@ -123,6 +123,14 @@
 **Outcome:** Success — new bootstrap cleanup tests pass (4/5, 1 pre-existing failure). Admin-gate integration tests can't run in this environment due to missing `yaml` dependency (pre-existing).
 **Notes:** The atomic claim via `O_EXCL` is simple and race-safe for a single-server process. The claim file stores the userId for debugging. The OS username stays in the admins file (inert for channel access, useful for CLI).
 
+## [2026-02-22 17:53] — Add Kysely-based migration runner utility
+
+**Task:** Create a reusable migration runner utility wrapping Kysely's Migrator class
+**What I did:** Created `src/utils/migrator.ts` with `runMigrations()` function and `MigrationSet` / `MigrationResult` types. Created `tests/utils/migrator.test.ts` with 3 tests: runs migrations in order, skips already-applied, returns error on failure.
+**Files touched:** src/utils/migrator.ts (new), tests/utils/migrator.test.ts (new)
+**Outcome:** Success — all 3 tests pass
+**Notes:** This is the foundational migration runner for all stores. Uses Kysely's built-in Migrator with an in-memory provider (no filesystem scanning). MigrationSet is a simple Record<string, Migration> where keys determine execution order via alphanumeric sort.
+
 ## [2026-02-22 21:00] — E2E test framework: expanded coverage for missing scenarios
 
 **Task:** Address gaps in E2E test coverage — memory CRUD lifecycle, browser interactions (click/type/screenshot/close), governance proposals, agent delegation, agent registry, audit query, and error handling
