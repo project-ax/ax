@@ -342,7 +342,7 @@ export async function create(config: Config): Promise<ChannelProvider> {
             // Step 2: PUT the file data to the pre-signed URL
             const putResp = await fetch(urlResp.upload_url, {
               method: 'PUT',
-              body: att.content,
+              body: new Uint8Array(att.content),
               headers: { 'Content-Type': att.mimeType || 'application/octet-stream' },
             });
             if (!putResp.ok) {
