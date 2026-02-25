@@ -137,3 +137,9 @@
 **Context:** Adding memory-recall and tool-style modules changed the module count from 5 to 7 in the full prompt integration test
 **Lesson:** `tests/agent/prompt/integration.test.ts` has a hardcoded `moduleCount` assertion and per-module token breakdown check. When adding new modules: (1) update the count, (2) add the new module's token check, (3) verify ordering assertions include the new module.
 **Tags:** testing, prompt-modules, integration-test, builder
+
+### Explicit `permissions` in GitHub Actions replaces ALL defaults — always include `contents: read`
+**Date:** 2026-02-25
+**Context:** GitHub Pages workflow had `permissions: { pages: write, id-token: write }` but `actions/checkout` silently failed because `contents: read` was missing
+**Lesson:** When setting `permissions` at the workflow or job level in GitHub Actions, you override ALL default token permissions. Only the permissions you list are granted. `actions/checkout` needs `contents: read` to clone the repo. Always include it when using explicit permissions. The checkout step may fail silently or produce cryptic errors without it.
+**Tags:** github-actions, permissions, pages, checkout, ci

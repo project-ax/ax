@@ -5,10 +5,17 @@ on:
     branches: [main]
     paths:
       - 'docs/web/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
 
 permissions:
+  contents: read
   pages: write
   id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
 
 jobs:
   deploy:
