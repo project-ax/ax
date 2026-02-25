@@ -1,5 +1,11 @@
 # Lessons Learned
 
+### OpenClaw's security failures validate AX's zero-trust architecture
+**Date:** 2026-02-25
+**Context:** Researching OpenClaw's ClawHavoc supply chain attack for skills architecture comparison
+**Lesson:** The ClawHavoc attack (824+ malicious skills on ClawHub) succeeded because: 1) no sandbox (skills run on host with full privileges), 2) no screening at upload time, 3) skills can bundle binaries added to PATH with no integrity verification, 4) no capability narrowing. AX's existing sandbox + IPC proxy + capabilities.yaml already prevents all of these attack vectors. When designing executable skills for AX, the sandbox is the runtime — binaries run inside it, not on the host. Untrusted skills must never be allowed to execute.
+**Tags:** skills, security, openclaw, sandbox, supply-chain, architecture
+
 ### Node.js fetch body does not accept Buffer in strict TypeScript
 **Date:** 2026-02-25
 **Context:** Passing `att.content` (a Buffer) as `body` to `fetch()` in the Slack provider caused TS2769 — `Buffer` is not assignable to `BodyInit`.
