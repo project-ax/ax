@@ -234,3 +234,11 @@
 **Files touched:** 12 source files modified/created, 6 template files modified/created, 9 test files modified/created
 **Outcome:** Success — zero type errors, 312 tests pass (2 pre-existing timeout failures in unrelated tests)
 **Notes:** Biggest optimization is progressive skill disclosure: ~24 tokens per skill instead of potentially thousands. Module count went from 7 to 9.
+
+## [2026-02-25 00:00] — Fix GitHub Pages deployment workflow
+
+**Task:** GitHub Pages site in docs/web wasn't showing up — diagnose and fix
+**What I did:** Found three issues in `.github/workflows/pages.yml`: (1) Missing `contents: read` permission — when `permissions` is explicitly set at workflow level, it replaces ALL defaults, so `actions/checkout` couldn't clone the repo. (2) No `workflow_dispatch` trigger, preventing manual re-runs. (3) No `concurrency` group, risking overlapping deployments. Also added the workflow file itself to the paths trigger so workflow changes redeploy.
+**Files touched:** .github/workflows/pages.yml
+**Outcome:** Success — workflow now has correct permissions, manual trigger support, and concurrency control
+**Notes:** The `contents: read` omission is a common GitHub Actions gotcha. When you explicitly set `permissions`, you lose all defaults — including the `contents: read` that `actions/checkout` needs.
