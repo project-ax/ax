@@ -18,10 +18,15 @@ import type {
   SchedulerProviderName,
 } from './host/provider-map.js';
 
+/** Allowed image MIME types (matches Anthropic vision API). */
+export const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
+export type ImageMimeType = typeof IMAGE_MIME_TYPES[number];
+
 export type ContentBlock =
   | { type: 'text'; text: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
-  | { type: 'tool_result'; tool_use_id: string; content: string };
+  | { type: 'tool_result'; tool_use_id: string; content: string }
+  | { type: 'image'; fileId: string; mimeType: ImageMimeType };
 
 export interface Message {
   role: 'user' | 'assistant' | 'system';

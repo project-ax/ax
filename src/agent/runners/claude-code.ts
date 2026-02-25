@@ -26,7 +26,10 @@ const logger = getLogger().child({ component: 'claude-code' });
 // ── Main runner ─────────────────────────────────────────────────────
 
 export async function runClaudeCode(config: AgentConfig): Promise<void> {
-  const userMessage = config.userMessage ?? '';
+  const rawMsg = config.userMessage ?? '';
+  const userMessage = typeof rawMsg === 'string'
+    ? rawMsg
+    : rawMsg.filter(b => b.type === 'text').map(b => (b as { text: string }).text).join('\n');
   if (!userMessage.trim()) return;
 
   if (!config.proxySocket) {
@@ -69,7 +72,12 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
   let fullPrompt = '';
   if (config.history && config.history.length > 0) {
     const historyText = config.history
-      .map(t => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`)
+      .map(t => {
+        const text = typeof t.content === 'string'
+          ? t.content
+          : t.content.filter(b => b.type === 'text').map(b => (b as { text: string }).text).join('\n');
+        return `${t.role === 'user' ? 'User' : 'Assistant'}: ${text}`;
+      })
       .join('\n\n');
     fullPrompt = `[Previous conversation]\n${historyText}\n\n[Current message]\n${userMessage}`;
   } else {

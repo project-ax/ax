@@ -1,23 +1,54 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { LLMProvider, ChatRequest, ChatChunk } from './types.js';
+import type { LLMProvider, ChatRequest, ChatChunk, ResolveImageFile } from './types.js';
 import type { Config, ContentBlock } from '../../types.js';
 import { getLogger } from '../../logger.js';
 
 const logger = getLogger().child({ component: 'anthropic' });
 
-/** Convert a Message.content (string or ContentBlock[]) to Anthropic API format. */
-function toAnthropicContent(
+/**
+ * Convert a Message.content (string or ContentBlock[]) to Anthropic API format.
+ *
+ * Image blocks are resolved to base64 via the resolveFile callback.
+ * If resolveFile is not provided or resolution fails, image blocks become
+ * a text placeholder so the LLM still sees something useful.
+ */
+async function toAnthropicContent(
   content: string | ContentBlock[],
-): string | Anthropic.ContentBlockParam[] {
+  resolveFile?: ResolveImageFile,
+): Promise<string | Anthropic.ContentBlockParam[]> {
   if (typeof content === 'string') return content;
-  return content.map((block): Anthropic.ContentBlockParam => {
-    if (block.type === 'text') return { type: 'text', text: block.text };
-    if (block.type === 'tool_use') {
-      return { type: 'tool_use', id: block.id, name: block.name, input: block.input };
+  const result: Anthropic.ContentBlockParam[] = [];
+  for (const block of content) {
+    if (block.type === 'text') {
+      result.push({ type: 'text', text: block.text });
+    } else if (block.type === 'tool_use') {
+      result.push({ type: 'tool_use', id: block.id, name: block.name, input: block.input });
+    } else if (block.type === 'tool_result') {
+      result.push({ type: 'tool_result', tool_use_id: block.tool_use_id, content: block.content });
+    } else if (block.type === 'image') {
+      if (resolveFile) {
+        try {
+          const file = await resolveFile(block.fileId);
+          if (file) {
+            result.push({
+              type: 'image',
+              source: {
+                type: 'base64',
+                media_type: file.mimeType as 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp',
+                data: file.data.toString('base64'),
+              },
+            });
+            continue;
+          }
+        } catch (err) {
+          logger.warn('image_resolve_failed', { fileId: block.fileId, error: (err as Error).message });
+        }
+      }
+      // Fallback: tell the LLM an image was attached but couldn't be loaded
+      result.push({ type: 'text', text: `[Image: ${block.fileId} (could not be loaded)]` });
     }
-    // tool_result
-    return { type: 'tool_result', tool_use_id: block.tool_use_id, content: block.content };
-  });
+  }
+  return result;
 }
 
 export async function create(config: Config): Promise<LLMProvider> {
@@ -82,14 +113,19 @@ export async function create(config: Config): Promise<LLMProvider> {
         hasSystem: !!systemText,
       });
 
+      // Resolve image content blocks to base64 for the Anthropic API
+      const resolvedMessages = await Promise.all(
+        nonSystemMessages.map(async (m) => ({
+          role: m.role as 'user' | 'assistant',
+          content: await toAnthropicContent(m.content, req.resolveImageFile),
+        })),
+      );
+
       const stream = client.messages.stream({
         model: req.model || 'claude-sonnet-4-20250514',
         max_tokens: maxTokens,
         system: systemText || undefined,
-        messages: nonSystemMessages.map(m => ({
-          role: m.role as 'user' | 'assistant',
-          content: toAnthropicContent(m.content),
-        })),
+        messages: resolvedMessages,
         ...(tools?.length ? { tools } : {}),
       });
 

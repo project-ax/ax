@@ -14,6 +14,7 @@ import { createIPCTools } from './ipc-tools.js';
 import { createProxyStreamFn } from './proxy-stream.js';
 import { buildSystemPrompt, subscribeAgentEvents } from './agent-setup.js';
 import { getLogger, truncate } from '../logger.js';
+import type { ContentBlock } from '../types.js';
 
 const logger = getLogger().child({ component: 'runner' });
 
@@ -44,7 +45,7 @@ const KEEP_RECENT_TURNS = 6;      // Keep last 6 turns (3 user + 3 assistant)
 
 export interface ConversationTurn {
   role: 'user' | 'assistant';
-  content: string;
+  content: string | ContentBlock[];
   sender?: string;
 }
 
@@ -59,7 +60,7 @@ export interface AgentConfig {
   proxySocket?: string;
   maxTokens?: number;
   verbose?: boolean;
-  userMessage?: string;
+  userMessage?: string | ContentBlock[];
   history?: ConversationTurn[];
   agentDir?: string;
   userId?: string;
@@ -85,25 +86,36 @@ function sanitizeSender(sender: string): string {
  * Convert stored conversation history to pi-ai message format
  * for pre-populating the Agent's state.
  */
+/** Extract text content from a string or ContentBlock[]. */
+function extractText(content: string | ContentBlock[]): string {
+  if (typeof content === 'string') return content;
+  return content
+    .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+    .map(b => b.text)
+    .join('\n');
+}
+
 export function historyToPiMessages(history: ConversationTurn[]): AgentMessage[] {
   return history.map((turn): AgentMessage => {
     if (turn.role === 'user') {
-      let content = turn.content;
+      // Extract text for pi-agent-core (which only supports text messages).
+      // Image content blocks are handled at the IPC/LLM level, not the agent level.
+      let text = extractText(turn.content);
       if (turn.sender) {
         const safe = sanitizeSender(turn.sender);
         if (safe) {
-          content = `[${safe}]: ${content}`;
+          text = `[${safe}]: ${text}`;
         }
       }
       return {
         role: 'user',
-        content,
+        content: text,
         timestamp: Date.now(),
       } satisfies UserMessage;
     }
     return {
       role: 'assistant',
-      content: [{ type: 'text', text: turn.content }],
+      content: [{ type: 'text', text: extractText(turn.content) }],
       api: 'anthropic-messages',
       provider: 'anthropic',
       model: DEFAULT_MODEL_ID,
@@ -242,7 +254,10 @@ async function readStdin(): Promise<string> {
 
 export async function runPiCore(config: AgentConfig): Promise<void> {
   process.stderr.write(`[diag] runPiCore start\n`);
-  const userMessage = config.userMessage ?? '';
+  // Extract text for the agent prompt — pi-agent-core only supports text input.
+  // Image blocks are handled at the IPC/LLM level when the agent makes LLM calls.
+  const rawMessage = config.userMessage ?? '';
+  const userMessage = typeof rawMessage === 'string' ? rawMessage : extractText(rawMessage);
   if (!userMessage.trim()) {
     logger.debug('pi_core_skip_empty');
     return;
@@ -329,7 +344,8 @@ export async function runPiCore(config: AgentConfig): Promise<void> {
 }
 
 export interface StdinPayload {
-  message: string;
+  /** User message — may be plain text or structured content with image blocks. */
+  message: string | ContentBlock[];
   history: ConversationTurn[];
   taintRatio: number;
   taintThreshold: number;
@@ -361,12 +377,13 @@ export function parseStdinPayload(data: string): StdinPayload {
 
   try {
     const parsed = JSON.parse(data);
-    if (parsed && typeof parsed === 'object' && typeof parsed.message === 'string') {
+    if (parsed && typeof parsed === 'object' &&
+        (typeof parsed.message === 'string' || Array.isArray(parsed.message))) {
       return {
         message: parsed.message,
         history: Array.isArray(parsed.history) ? parsed.history.map((h: Record<string, unknown>) => ({
           role: h.role as 'user' | 'assistant',
-          content: h.content as string,
+          content: (typeof h.content === 'string' ? h.content : Array.isArray(h.content) ? h.content : String(h.content)) as string | ContentBlock[],
           ...(typeof h.sender === 'string' ? { sender: h.sender } : {}),
         })) : [],
         taintRatio: typeof parsed.taintRatio === 'number' ? parsed.taintRatio : 0,
@@ -420,12 +437,14 @@ if (isMain) {
   logger.debug('main_start', { agent: config.agent, workspace: config.workspace });
   readStdin().then((data) => {
     const payload = parseStdinPayload(data);
+    const msgText = typeof payload.message === 'string' ? payload.message : extractText(payload.message);
     logger.debug('stdin_parsed', {
-      messageLength: payload.message.length,
+      messageLength: msgText.length,
       historyTurns: payload.history.length,
-      messagePreview: truncate(payload.message, 200),
+      messagePreview: truncate(msgText, 200),
       taintRatio: payload.taintRatio,
       profile: payload.profile,
+      hasImageBlocks: typeof payload.message !== 'string',
     });
     config.userMessage = payload.message;
     config.history = payload.history;

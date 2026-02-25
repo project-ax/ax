@@ -186,7 +186,7 @@ describe('IPC MCP Server', () => {
       'skill_read',
       'skill_propose',
       // Enterprise tools
-      'workspace_write', 'workspace_read', 'workspace_list',
+      'workspace_write', 'workspace_read', 'workspace_list', 'workspace_write_file',
       'identity_propose', 'proposal_list', 'agent_registry_list',
     ];
 
@@ -194,7 +194,7 @@ describe('IPC MCP Server', () => {
     for (const name of expectedTools) {
       expect(registeredNames, `expected tool "${name}" to be registered`).toContain(name);
     }
-    expect(registeredNames.length).toBe(23);
+    expect(registeredNames.length).toBe(24);
   });
 
   test('includes scheduler_add_cron tool', () => {

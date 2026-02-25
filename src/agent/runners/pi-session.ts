@@ -264,7 +264,10 @@ function createIPCToolDefinitions(client: IPCClient, opts?: IPCToolDefsOptions):
 // ── Main runner ─────────────────────────────────────────────────────
 
 export async function runPiSession(config: AgentConfig): Promise<void> {
-  const userMessage = config.userMessage ?? '';
+  const rawMsg = config.userMessage ?? '';
+  const userMessage = typeof rawMsg === 'string'
+    ? rawMsg
+    : rawMsg.filter(b => b.type === 'text').map(b => (b as { text: string }).text).join('\n');
   if (!userMessage.trim()) {
     logger.debug('skip_empty');
     return;

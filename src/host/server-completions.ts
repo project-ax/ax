@@ -9,8 +9,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { isValidSessionId, workspaceDir, agentWorkspaceDir, userWorkspaceDir, scratchDir } from '../paths.js';
-import type { Config, ProviderRegistry } from '../types.js';
+import type { Config, ProviderRegistry, ContentBlock } from '../types.js';
 import type { InboundMessage } from '../providers/channel/types.js';
+import { deserializeContent } from '../conversation-store.js';
 import type { ConversationStore } from '../conversation-store.js';
 import type { MessageQueue } from '../db.js';
 import type { Router } from './router.js';
@@ -43,14 +44,41 @@ export interface CompletionDeps {
 
 export interface CompletionResult {
   responseContent: string;
+  /** Structured content blocks (present when response includes images). */
+  contentBlocks?: ContentBlock[];
   finishReason: 'stop' | 'content_filter';
+}
+
+/**
+ * Try to parse structured agent output.
+ * If stdout starts with {"__ax_response":, treat it as structured content
+ * containing text and image blocks. Otherwise, treat as plain text.
+ */
+function parseAgentResponse(raw: string): { text: string; blocks?: ContentBlock[] } {
+  const trimmed = raw.trimStart();
+  if (trimmed.startsWith('{"__ax_response":')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed.__ax_response?.content && Array.isArray(parsed.__ax_response.content)) {
+        const blocks = parsed.__ax_response.content as ContentBlock[];
+        const text = blocks
+          .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+          .map(b => b.text)
+          .join('');
+        return { text, blocks };
+      }
+    } catch {
+      // Not valid structured response — fall through to plain text
+    }
+  }
+  return { text: raw };
 }
 
 export async function processCompletion(
   deps: CompletionDeps,
-  content: string,
+  content: string | ContentBlock[],
   requestId: string,
-  clientMessages: { role: string; content: string }[] = [],
+  clientMessages: { role: string; content: string | ContentBlock[] }[] = [],
   persistentSessionId?: string,
   preProcessed?: { sessionId: string; messageId: string; canaryToken: string },
   userId?: string,
@@ -60,10 +88,15 @@ export async function processCompletion(
   const sessionId = preProcessed?.sessionId ?? randomUUID();
   const reqLogger = logger.child({ reqId: requestId.slice(-8) });
 
+  // Extract text for scanning/logging; structured content may contain image refs
+  const textContent = typeof content === 'string'
+    ? content
+    : content.filter(b => b.type === 'text').map(b => (b as { text: string }).text).join('\n');
+
   reqLogger.debug('completion_start', {
     sessionId,
-    contentLength: content.length,
-    contentPreview: truncate(content, 200),
+    contentLength: textContent.length,
+    contentPreview: truncate(textContent, 200),
     historyTurns: clientMessages.length,
   });
 
@@ -86,7 +119,7 @@ export async function processCompletion(
       id: sessionId,
       session: { provider: 'http', scope: 'dm', identifiers: { peer: 'client' } },
       sender: 'client',
-      content,
+      content: textContent,
       attachments: [],
       timestamp: new Date(),
     };
@@ -147,7 +180,7 @@ export async function processCompletion(
 
     // Build conversation history: prefer DB-persisted history for persistent sessions,
     // fall back to client-provided history for ephemeral sessions.
-    let history: { role: 'user' | 'assistant'; content: string; sender?: string }[] = [];
+    let history: { role: 'user' | 'assistant'; content: string | ContentBlock[]; sender?: string }[] = [];
     const maxTurns = config.history.max_turns;
 
     if (persistentSessionId && maxTurns > 0) {
@@ -181,17 +214,17 @@ export async function processCompletion(
           // Prepend parent context before thread history
           const parentHistory = parentTurns.map(t => ({
             role: t.role as 'user' | 'assistant',
-            content: t.content,
+            content: deserializeContent(t.content),
             ...(t.sender ? { sender: t.sender } : {}),
           }));
           history.push(...parentHistory);
         }
       }
 
-      // Add the session's own history
+      // Add the session's own history (deserialize to preserve image blocks)
       history.push(...storedTurns.map(t => ({
         role: t.role as 'user' | 'assistant',
-        content: t.content,
+        content: deserializeContent(t.content),
         ...(t.sender ? { sender: t.sender } : {}),
       })));
     } else {
@@ -397,20 +430,35 @@ export async function processCompletion(
       }
     }
 
-    // Process outbound
+    // Parse structured response (may contain image blocks)
+    const parsed = parseAgentResponse(response);
+
+    // Process outbound (scan the text portion)
     const canaryToken = sessionCanaries.get(queued.session_id) ?? '';
-    reqLogger.debug('outbound_start', { responseLength: response.length, hasCanary: canaryToken.length > 0 });
-    const outbound = await router.processOutbound(response, queued.session_id, canaryToken);
+    reqLogger.debug('outbound_start', { responseLength: parsed.text.length, hasCanary: canaryToken.length > 0, hasBlocks: !!parsed.blocks });
+    const outbound = await router.processOutbound(parsed.text, queued.session_id, canaryToken);
 
     if (outbound.canaryLeaked) {
       reqLogger.warn('canary_leaked', { sessionId: queued.session_id });
     }
 
-    // Memorize if provider supports it
+    // Build structured content blocks for the response (if agent included images)
+    let responseBlocks: ContentBlock[] | undefined;
+    if (parsed.blocks) {
+      responseBlocks = parsed.blocks.map(b => {
+        if (b.type === 'text') return { ...b, text: outbound.content };
+        return b;
+      });
+    }
+
+    // Memorize if provider supports it (text only for memory)
     if (providers.memory.memorize) {
       try {
         const fullHistory = [
-          ...clientMessages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+          ...clientMessages.map(m => ({
+            role: m.role as 'user' | 'assistant',
+            content: typeof m.content === 'string' ? m.content : m.content.filter(b => b.type === 'text').map(b => (b as { text: string }).text).join(''),
+          })),
           { role: 'assistant' as const, content: outbound.content },
         ];
         await providers.memory.memorize(fullHistory);
@@ -426,7 +474,9 @@ export async function processCompletion(
     if (persistentSessionId && maxTurns > 0) {
       try {
         conversationStore.append(persistentSessionId, 'user', content, userId);
-        conversationStore.append(persistentSessionId, 'assistant', outbound.content);
+        // Store structured blocks if present, plain text otherwise
+        const assistantContent = responseBlocks ?? outbound.content;
+        conversationStore.append(persistentSessionId, 'assistant', assistantContent);
         // Lazy prune: only when count exceeds limit
         if (conversationStore.count(persistentSessionId) > maxTurns) {
           conversationStore.prune(persistentSessionId, maxTurns);
@@ -441,8 +491,9 @@ export async function processCompletion(
       finishReason,
       responseLength: outbound.content.length,
       scanVerdict: outbound.scanResult.verdict,
+      hasContentBlocks: !!responseBlocks,
     });
-    return { responseContent: outbound.content, finishReason };
+    return { responseContent: outbound.content, contentBlocks: responseBlocks, finishReason };
 
   } catch (err) {
     reqLogger.error('completion_error', {

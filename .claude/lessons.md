@@ -137,3 +137,15 @@
 **Context:** Adding memory-recall and tool-style modules changed the module count from 5 to 7 in the full prompt integration test
 **Lesson:** `tests/agent/prompt/integration.test.ts` has a hardcoded `moduleCount` assertion and per-module token breakdown check. When adding new modules: (1) update the count, (2) add the new module's token check, (3) verify ordering assertions include the new module.
 **Tags:** testing, prompt-modules, integration-test, builder
+
+### Async toAnthropicContent requires Promise.all for message arrays
+**Date:** 2026-02-25
+**Context:** Making toAnthropicContent() async to resolve image file references
+**Lesson:** When converting a content mapping function from sync to async (e.g., to resolve file references), all callers that use `.map()` must be updated to `await Promise.all(messages.map(async ...))`. In the Anthropic provider, this means the `.chat()` method's message building loop needs Promise.all for both the message-level and content-block-level mapping.
+**Tags:** async, anthropic, llm, images, promise-all
+
+### Structured content serialization — use JSON detection on load
+**Date:** 2026-02-25
+**Context:** Storing ContentBlock[] in SQLite TEXT columns alongside plain string content
+**Lesson:** For backward-compatible structured content in SQLite TEXT columns: serialize arrays with JSON.stringify, leave strings as-is. On load, detect JSON arrays by checking if the string starts with `[` and parse accordingly. This avoids schema migrations and handles both old (plain text) and new (structured) data transparently.
+**Tags:** sqlite, content-blocks, serialization, conversation-store, backward-compatibility

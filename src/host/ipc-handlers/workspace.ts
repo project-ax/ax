@@ -94,6 +94,40 @@ export function createWorkspaceHandlers(providers: ProviderRegistry, opts: Works
       }
     },
 
+    workspace_write_file: async (req: any, ctx: IPCContext) => {
+      const tierDir = resolveTierDir(req.tier, ctx);
+      mkdirSync(tierDir, { recursive: true });
+      const filePath = safePathFromRelative(tierDir, req.path);
+
+      // Agent workspace writes require approval in paranoid mode
+      if (req.tier === 'agent' && profile === 'paranoid') {
+        await providers.audit.log({
+          action: 'workspace_write_file',
+          sessionId: ctx.sessionId,
+          args: { tier: req.tier, path: req.path, decision: 'queued_paranoid' },
+        });
+        return { queued: true, reason: 'Agent workspace writes require approval in paranoid mode' };
+      }
+
+      // Decode base64 data
+      const data = Buffer.from(req.data, 'base64');
+      if (data.length === 0) {
+        return { ok: false, error: 'Empty file data' };
+      }
+
+      // Ensure parent directory exists
+      mkdirSync(dirname(filePath), { recursive: true });
+      writeFileSync(filePath, data);
+
+      await providers.audit.log({
+        action: 'workspace_write_file',
+        sessionId: ctx.sessionId,
+        args: { tier: req.tier, path: req.path, bytes: data.length, mimeType: req.mimeType },
+      });
+
+      return { written: true, tier: req.tier, path: req.path, size: data.length };
+    },
+
     workspace_list: async (req: any, ctx: IPCContext) => {
       const tierDir = resolveTierDir(req.tier, ctx);
       const subDir = req.path ? safePathFromRelative(tierDir, req.path) : tierDir;

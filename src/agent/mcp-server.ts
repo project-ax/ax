@@ -206,6 +206,13 @@ export function createIPCMcpServer(client: IPCClient, opts?: MCPServerOptions): 
         path: z.string().optional().describe('Subdirectory to list (defaults to root)'),
       }, (args) => ipcCall('workspace_list', args)),
 
+      tool('workspace_write_file', 'Write a binary file (e.g. image) to a workspace tier. Data must be base64-encoded.', {
+        tier: z.string().describe('"agent", "user", or "scratch"'),
+        path: z.string().describe('Relative path (e.g. "files/image.png")'),
+        data: z.string().describe('Base64-encoded binary content'),
+        mimeType: z.string().describe('MIME type (e.g. "image/png")'),
+      }, (args) => ipcCall('workspace_write_file', args)),
+
       // ── Enterprise: Governance tools ──
 
       tool('identity_propose', 'Propose a change to a shared identity file for review.', {

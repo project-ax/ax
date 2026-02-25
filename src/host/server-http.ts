@@ -13,7 +13,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 
 export interface OpenAIChatRequest {
   model?: string;
-  messages: { role: string; content: string }[];
+  messages: { role: string; content: string | import('../types.js').ContentBlock[] }[];
   stream?: boolean;
   max_tokens?: number;
   session_id?: string;

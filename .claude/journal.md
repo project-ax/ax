@@ -234,3 +234,23 @@
 **Files touched:** 12 source files modified/created, 6 template files modified/created, 9 test files modified/created
 **Outcome:** Success — zero type errors, 312 tests pass (2 pre-existing timeout failures in unrelated tests)
 **Notes:** Biggest optimization is progressive skill disclosure: ~24 tokens per skill instead of potentially thousands. Module count went from 7 to 9.
+
+## [2026-02-25 05:00] — Add image support in chat (both directions)
+
+**Task:** Add image support in chat messages (inbound and outbound), using file references instead of embedded data, with file storage in workspace and HTTP API for web UI upload/download
+**What I did:** Full-stack implementation across 15+ files:
+1. **Content types**: Added `image` variant to `ContentBlock` union (`{ type: 'image', fileId, mimeType }`) in types.ts and Zod schema in ipc-schemas.ts
+2. **HTTP file API**: Created `server-files.ts` with `POST /v1/files` (upload, 10MB limit, UUID naming) and `GET /v1/files/*` (download with correct Content-Type). Wired in server.ts.
+3. **LLM integration**: Made `toAnthropicContent()` async with `resolveImageFile` callback that reads files from workspace and base64-encodes for Anthropic Vision API. Added `ResolveImageFile` type to LLM provider types. Wired image resolver through ipc-handlers/llm.ts using session workspace.
+4. **Conversation store**: Added `serializeContent()`/`deserializeContent()` for `string | ContentBlock[]` — JSON.stringify for arrays, auto-detect on load.
+5. **Server pipeline**: Updated server-completions.ts for structured content, added `parseAgentResponse()` for `__ax_response` structured response protocol, updated server-http.ts request types.
+6. **Slack integration**: Added `buildContentWithAttachments()` for inbound Slack image attachments (downloads, stores in workspace, returns ContentBlock[]). Added outbound image block → Slack file upload conversion.
+7. **Agent runner**: Updated `ConversationTurn`, `StdinPayload`, `AgentConfig` to support `string | ContentBlock[]`. Added `extractText()` helper. Updated claude-code.ts and pi-session.ts to handle structured content.
+8. **Binary file IPC**: Added `workspace_write_file` tool to catalog, MCP server, and workspace IPC handler for agent-side binary file writes (base64-encoded).
+9. **Tests**: 5 new test files (server-files, conversation-store-structured, workspace-file, runner-images, server-completions-images) + updated 4 test files for tool count 23→24.
+**Files touched:**
+- New: src/host/server-files.ts, tests/host/server-files.test.ts, tests/conversation-store-structured.test.ts, tests/host/ipc-handlers/workspace-file.test.ts, tests/agent/runner-images.test.ts, tests/host/server-completions-images.test.ts
+- Modified: src/types.ts, src/ipc-schemas.ts, src/providers/llm/types.ts, src/providers/llm/anthropic.ts, src/host/ipc-handlers/llm.ts, src/host/server.ts, src/host/server-http.ts, src/host/server-completions.ts, src/host/server-channels.ts, src/conversation-store.ts, src/agent/runner.ts, src/agent/runners/claude-code.ts, src/agent/runners/pi-session.ts, src/host/ipc-handlers/workspace.ts, src/agent/tool-catalog.ts, src/agent/mcp-server.ts
+- Modified tests: tests/sandbox-isolation.test.ts, tests/agent/tool-catalog.test.ts, tests/agent/ipc-tools.test.ts, tests/agent/mcp-server.test.ts
+**Outcome:** Success — 150 test files, 1491 tests pass (1 pre-existing skip)
+**Notes:** Key design decisions: (1) No base64 in chat messages — file references only, resolved at LLM call time. (2) Session-scoped file storage via existing workspaceDir(). (3) HTTP API uses raw binary body (not multipart) for simplicity. (4) Structured content backward-compatible — plain strings still work everywhere. (5) Agent-side binary writes use base64 encoding through IPC. (6) Slack integration reuses existing channel attachment infrastructure.

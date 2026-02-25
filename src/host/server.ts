@@ -35,6 +35,7 @@ import type { OpenAIChatRequest, OpenAIChatResponse, OpenAIStreamChunk } from '.
 import { processCompletion, type CompletionDeps } from './server-completions.js';
 import { cleanStaleWorkspaces } from './server-lifecycle.js';
 import { ChannelDeduplicator, registerChannelHandler, connectChannelWithRetry } from './server-channels.js';
+import { handleFileUpload, handleFileDownload } from './server-files.js';
 
 // =====================================================
 // Types
@@ -275,6 +276,28 @@ export async function createServer(
       return;
     }
 
+    // File upload: POST /v1/files?session_id=<id>
+    if (url.startsWith('/v1/files') && req.method === 'POST') {
+      try {
+        await handleFileUpload(req, res);
+      } catch (err) {
+        logger.error('file_upload_failed', { error: (err as Error).message });
+        if (!res.headersSent) sendError(res, 500, 'File upload failed');
+      }
+      return;
+    }
+
+    // File download: GET /v1/files/<fileId>?session_id=<id>
+    if (url.startsWith('/v1/files/') && req.method === 'GET') {
+      try {
+        await handleFileDownload(req, res);
+      } catch (err) {
+        logger.error('file_download_failed', { error: (err as Error).message });
+        if (!res.headersSent) sendError(res, 500, 'File download failed');
+      }
+      return;
+    }
+
     sendError(res, 404, 'Not found');
   }
 
@@ -321,11 +344,11 @@ export async function createServer(
 
     const requestModel = chatReq.model ?? modelId;
 
-    // Extract last user message content
+    // Extract last user message content (may be string or ContentBlock[])
     const lastMsg = chatReq.messages[chatReq.messages.length - 1];
     const content = lastMsg?.content ?? '';
 
-    // Process completion
+    // Process completion — pass structured content through
     const { responseContent, finishReason } = await processCompletion(
       completionDeps, content, requestId, chatReq.messages, chatReq.session_id,
     );

@@ -7,12 +7,17 @@ export interface ToolDef {
   parameters: Record<string, unknown>;
 }
 
+/** Callback to resolve an image file reference to its binary data. */
+export type ResolveImageFile = (fileId: string) => Promise<{ data: Buffer; mimeType: string } | null>;
+
 export interface ChatRequest {
   model: string;
   messages: Message[];
   tools?: ToolDef[];
   maxTokens?: number;
   stream?: boolean;
+  /** Resolves image fileId references to binary data for LLM vision. */
+  resolveImageFile?: ResolveImageFile;
 }
 
 export interface ChatChunk {

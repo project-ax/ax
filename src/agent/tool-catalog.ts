@@ -240,6 +240,21 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     }),
   },
 
+  {
+    name: 'workspace_write_file',
+    label: 'Write Binary File to Workspace',
+    description:
+      'Write a binary file (e.g. image) to a workspace tier. Data must be base64-encoded. ' +
+      'Tiers: "agent" (shared), "user" (per-user, persistent), "scratch" (ephemeral). ' +
+      'Agent tier writes may require approval in paranoid mode.',
+    parameters: Type.Object({
+      tier: Type.String({ description: '"agent", "user", or "scratch"' }),
+      path: Type.String({ description: 'Relative path within the tier (e.g. "files/image.png")' }),
+      data: Type.String({ description: 'Base64-encoded binary content' }),
+      mimeType: Type.String({ description: 'MIME type of the file (e.g. "image/png")' }),
+    }),
+  },
+
   // ── Enterprise: Governance tools ──
   {
     name: 'identity_propose',
