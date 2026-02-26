@@ -10,6 +10,7 @@ import { PromptBuilder } from './prompt/builder.js';
 import { loadIdentityFiles } from './identity-loader.js';
 import { loadSkills } from './stream-utils.js';
 import type { AgentConfig } from './runner.js';
+import type { ToolFilterContext } from './tool-catalog.js';
 
 const logger = getLogger().child({ component: 'agent-setup' });
 
@@ -18,11 +19,17 @@ const DEFAULT_CONTEXT_WINDOW = 200000;
 export interface PromptBuildResult {
   systemPrompt: string;
   metadata: { [key: string]: unknown };
+  /** Context for filtering tools to match prompt module inclusion. */
+  toolFilter: ToolFilterContext;
 }
 
 /**
  * Build the system prompt from skills, identity files, and configuration.
  * Used by both pi-agent-core and pi-coding-agent runners.
+ *
+ * Also returns a ToolFilterContext so callers can filter the tool catalog
+ * to match which prompt modules were included (e.g., no heartbeat content
+ * → no HeartbeatModule → no scheduler tools).
  */
 export function buildSystemPrompt(config: AgentConfig): PromptBuildResult {
   const skills = loadSkills(config.skills);
@@ -30,6 +37,9 @@ export function buildSystemPrompt(config: AgentConfig): PromptBuildResult {
     agentDir: config.agentDir,
     userId: config.userId,
   });
+
+  const hasWorkspaceTiers = !!(config.agentWorkspace || config.userWorkspace || config.scratchDir);
+  const hasGovernance = config.profile === 'paranoid' || config.profile === 'balanced';
 
   const promptBuilder = new PromptBuilder();
   const promptResult = promptBuilder.build({
@@ -46,15 +56,23 @@ export function buildSystemPrompt(config: AgentConfig): PromptBuildResult {
     replyOptional: config.replyOptional ?? false,
     // Enterprise fields
     agentId: config.agentId,
-    hasWorkspaceTiers: !!(config.agentWorkspace || config.userWorkspace || config.scratchDir),
-    hasGovernance: config.profile === 'paranoid' || config.profile === 'balanced',
+    hasWorkspaceTiers,
+    hasGovernance,
   });
 
-  logger.debug('prompt_built', { ...promptResult.metadata });
+  const toolFilter: ToolFilterContext = {
+    hasHeartbeat: !!identityFiles.heartbeat?.trim(),
+    hasSkills: skills.length > 0,
+    hasWorkspaceTiers,
+    hasGovernance,
+  };
+
+  logger.debug('prompt_built', { ...promptResult.metadata, toolFilter });
 
   return {
     systemPrompt: promptResult.content,
     metadata: { ...promptResult.metadata },
+    toolFilter,
   };
 }
 

@@ -229,9 +229,9 @@ describe('system prompt uses relative paths', () => {
     const runner = readFileSync(resolve('src/agent/runner.ts'), 'utf-8');
     expect(runner).toContain("from './agent-setup.js'");
 
-    // claude-code still imports PromptBuilder directly
+    // claude-code uses shared buildSystemPrompt from agent-setup
     const claudeCode = readFileSync(resolve('src/agent/runners/claude-code.ts'), 'utf-8');
-    expect(claudeCode).toContain("from '../prompt/builder.js'");
+    expect(claudeCode).toContain("from '../agent-setup.js'");
   });
 });
 

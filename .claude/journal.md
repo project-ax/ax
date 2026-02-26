@@ -7,6 +7,21 @@
 **Files touched:** Created: docs/plans/2026-02-26-plugin-framework-design.md
 **Outcome:** Success — design document ready for review
 **Notes:** The codebase has grown 4.5x past the original LOC target. The provider pattern is already a plugin framework — the gap is packaging, not architecture. Key tension: SC-SEC-002 prevents dynamic loading, but a static allowlist pointing to npm packages instead of relative paths preserves the invariant while enabling the split.
+## [2026-02-26 02:14] — Fix Slack image attachments not reaching the LLM
+
+**Task:** Users attaching images to Slack messages got "I don't see any image" — images were downloaded and stored but never sent to Claude.
+**What I did:** Traced the full image flow: Slack → server-channels → agent stdin → pi-agent-core → convertPiMessages → IPC → host LLM handler. Found that `runPiCore()` in runner.ts stripped image blocks via `extractText()` (line 260), and `convertPiMessages()` in stream-utils.ts only kept text blocks from user messages. Since pi-agent-core only supports text, image blocks were lost before reaching the IPC transport. Fixed by extracting image blocks in `runPiCore()`, passing them to `createIPCStreamFn()`, and injecting them into the last plain-text user message after `convertPiMessages()` runs. The host-side LLM handler's existing image resolver then picks them up.
+**Files touched:** src/agent/ipc-transport.ts, src/agent/runner.ts, tests/agent/ipc-transport.test.ts
+**Outcome:** Success — all 1601 tests pass, build clean, 4 new tests for image injection
+**Notes:** The proxy stream path (createProxyStreamFn) doesn't support images yet — it goes directly to the Anthropic SDK without file resolution. A separate enhancement could add that.
+
+## [2026-02-26 02:33] — Simplify image pipeline: inline image_data instead of disk round-trip
+
+**Task:** Eliminate unnecessary disk round-trip for inbound Slack image attachments.
+**What I did:** Changed `buildContentWithAttachments()` in server-channels.ts to create `image_data` blocks (inline base64) instead of `image` blocks (fileId disk refs). This skips the write-to-disk → reference-by-fileId → resolve-from-disk pipeline. The Anthropic provider already handles `image_data` natively. Updated runner.ts and ipc-transport.ts to handle `image_data` alongside `image` blocks. Removed unused imports from server-channels.ts.
+**Files touched:** src/host/server-channels.ts, src/agent/ipc-transport.ts, src/agent/runner.ts, tests/agent/ipc-transport.test.ts
+**Outcome:** Success — all 1602 tests pass, build clean
+**Notes:** The `image` block type + `createImageResolver` are still needed for outbound direction (agent-generated images read from workspace disk).
 
 ## [2026-02-26 01:02] — Implement AgentSkills import, screener, manifest generator, and ClawHub client
 
@@ -405,6 +420,23 @@
 **Outcome:** Partial — core pipeline is wired up. Still need: Anthropic provider image_data handling, conversation store persistence guard, tests.
 **Notes:** The `image_data` block type is transient — it should never be serialized into conversation history. The extraction step in server-completions replaces image_data blocks with persistent `image` (file ref) blocks before storing.
 
+## [2026-02-26 14:00] — LLM tool call optimization: context-aware filtering
+
+**Task:** Optimize LLM tool calls by adding context-aware filtering so only relevant tools are sent per session
+**What I did:**
+1. Added `ToolCategory` type and `category` field to `ToolSpec` — tagged all 25 tools across 9 categories (memory, web, audit, identity, scheduler, skills, delegation, workspace, governance)
+2. Added `ToolFilterContext` interface and `filterTools()` function — excludes tools by category based on session flags (hasHeartbeat, hasSkills, hasWorkspaceTiers, hasGovernance)
+3. Tightened verbose tool descriptions in TOOL_CATALOG and MCP server — reduced identity_write, user_write, skill_propose, agent_delegate, workspace/governance descriptions by 50-70%
+4. Refactored `buildSystemPrompt()` to return `toolFilter` alongside `systemPrompt` — single derivation point for filter context
+5. Wired filtering into all 3 tool consumers: ipc-tools.ts (pi-agent-core), pi-session.ts (pi-coding-agent), mcp-server.ts (claude-code)
+6. Refactored claude-code.ts to use shared `buildSystemPrompt()` instead of manual PromptBuilder usage
+7. Updated tests: fixed tool count assertions, added HEARTBEAT.md fixture to pi-session test, added filterTools test suite (12 tests), added filter tests to ipc-tools (3 tests) and mcp-server (2 tests), updated sandbox-isolation test
+**Files touched:**
+- Modified: src/agent/tool-catalog.ts, src/agent/ipc-tools.ts, src/agent/mcp-server.ts, src/agent/agent-setup.ts, src/agent/runner.ts, src/agent/runners/pi-session.ts, src/agent/runners/claude-code.ts
+- Modified tests: tests/agent/tool-catalog.test.ts, tests/agent/ipc-tools.test.ts, tests/agent/mcp-server.test.ts, tests/agent/runners/pi-session.test.ts, tests/sandbox-isolation.test.ts
+**Outcome:** Success — 151 test files, 1546 tests pass (1 skipped, pre-existing)
+**Notes:** Without heartbeat/skills/enterprise, tool count drops from 25 to 11 per LLM call. Filter context aligns with prompt module shouldInclude() logic — if HeartbeatModule is excluded, scheduler tools are too. All existing sync tests still pass since they test against the unfiltered catalog.
+
 ## [2026-02-26 00:00] — Unified image generation: config simplification + image provider category
 
 **Task:** Simplify YAML config (model+model_fallbacks → models array, add image_models array) and implement full image generation provider category
@@ -449,3 +481,24 @@
 **Files touched:** .claude/journal.md (this entry)
 **Outcome:** Success — comprehensive summary produced covering all 7 requested research areas
 **Notes:** Key finding for AX: Claude Code's skill system is purely prompt-based (no code execution in the skill itself — scripts are run via Bash tool), while OpenClaw's ClawHub had catastrophic supply chain issues (341-1,184 malicious skills, 12-20% of registry). The Agent Skills open standard (agentskills.io) is cross-platform and worth tracking for AX compatibility. Claude Code's plugin system (.claude-plugin/plugin.json) handles distribution — something AX doesn't have yet.
+
+## [2026-02-26 02:15] — Organize models by task type
+
+**Task:** Restructure the flat `models` array and separate `image_models` array into a task-type-keyed model map: `models: { default, fast, thinking, coding, image }`. All non-default task types are optional and fall back to `default`.
+**What I did:**
+- Added `ModelTaskType`, `LLMTaskType`, `ModelMap` types to `src/types.ts`, removed `image_models` field
+- Updated `src/config.ts` Zod schema: `models` is now a `strictObject` with required `default` and optional `fast`/`thinking`/`coding`/`image`
+- Rewrote `src/providers/llm/router.ts` to build per-task-type candidate chains, resolve `taskType` from `ChatRequest`, fall back to `default`
+- Added `taskType` field to `ChatRequest` in LLM types and to `LlmCallSchema` in IPC schemas
+- Updated IPC handler (`src/host/ipc-handlers/llm.ts`) to pass `taskType` through
+- Updated image router to read from `config.models.image` instead of `config.image_models`
+- Updated `src/host/registry.ts` to check `config.models?.image?.length`
+- Updated `src/host/server.ts` delegation config and `configModel` references
+- Updated `src/agent/runner.ts` compaction call to use `taskType: 'fast'` instead of hardcoded `DEFAULT_MODEL_ID`
+- Updated onboarding wizard to generate `models: { default: [...] }` format
+- Updated `ax.yaml`, `README.md`, all 6 test YAML fixtures
+- Updated all test files: `config.test.ts`, `router.test.ts` (LLM + image), `wizard.test.ts`, `phase1.test.ts`
+- Added 3 new router tests for task-type routing behavior
+**Files touched:** src/types.ts, src/config.ts, src/providers/llm/types.ts, src/providers/llm/router.ts, src/ipc-schemas.ts, src/host/ipc-handlers/llm.ts, src/host/ipc-handlers/image.ts, src/providers/image/router.ts, src/host/registry.ts, src/host/server.ts, src/agent/runner.ts, src/onboarding/wizard.ts, ax.yaml, README.md, tests/integration/ax-test*.yaml (6 files), tests/config.test.ts, tests/providers/llm/router.test.ts, tests/providers/image/router.test.ts, tests/onboarding/wizard.test.ts, tests/integration/phase1.test.ts
+**Outcome:** Success — build clean, all 1600 tests pass
+**Notes:** The `DEFAULT_MODEL_ID` in runner.ts is still used as a fallback for the pi-session Model object constructor — that's separate from the config-driven routing. The mock LLM provider doesn't echo back model names, so the task-type routing test verifies by setting default to a failing provider and fast to mock — if routing is wrong, the test fails.

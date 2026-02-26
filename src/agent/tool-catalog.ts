@@ -8,11 +8,17 @@
 
 import { Type, type TSchema } from '@sinclair/typebox';
 
+export type ToolCategory =
+  | 'memory' | 'web' | 'audit' | 'identity'
+  | 'scheduler' | 'skills' | 'delegation'
+  | 'workspace' | 'governance';
+
 export interface ToolSpec {
   name: string;
   label: string;
   description: string;
   parameters: TSchema;
+  category: ToolCategory;
   /** When true, execute() must inject userId into IPC call params. */
   injectUserId?: boolean;
 }
@@ -29,6 +35,7 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
       content: Type.String(),
       tags: Type.Optional(Type.Array(Type.String())),
     }),
+    category: 'memory',
   },
   {
     name: 'memory_query',
@@ -40,6 +47,7 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
       limit: Type.Optional(Type.Number()),
       tags: Type.Optional(Type.Array(Type.String())),
     }),
+    category: 'memory',
   },
   {
     name: 'memory_read',
@@ -48,6 +56,7 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     parameters: Type.Object({
       id: Type.String(),
     }),
+    category: 'memory',
   },
   {
     name: 'memory_delete',
@@ -56,6 +65,7 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     parameters: Type.Object({
       id: Type.String(),
     }),
+    category: 'memory',
   },
   {
     name: 'memory_list',
@@ -65,6 +75,7 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
       scope: Type.String(),
       limit: Type.Optional(Type.Number()),
     }),
+    category: 'memory',
   },
 
   // ── Web tools ──
@@ -78,6 +89,7 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
       headers: Type.Optional(Type.Record(Type.String(), Type.String())),
       timeoutMs: Type.Optional(Type.Number()),
     }),
+    category: 'web',
   },
   {
     name: 'web_search',
@@ -87,6 +99,7 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
       query: Type.String(),
       maxResults: Type.Optional(Type.Number()),
     }),
+    category: 'web',
   },
 
   // ── Audit tool ──
@@ -99,6 +112,7 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
       sessionId: Type.Optional(Type.String()),
       limit: Type.Optional(Type.Number()),
     }),
+    category: 'audit',
   },
 
   // ── Identity tools ──
@@ -107,30 +121,27 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     label: 'Write Identity',
     description:
       'Write or update a shared identity file (SOUL.md or IDENTITY.md). ' +
-      'Use when you want to evolve your personality or update your self-description. ' +
-      'For recording user preferences, use user_write instead. ' +
-      'Auto-applied in clean sessions; queued for review when ' +
-      'external content is present. All changes are audited.',
+      'For user preferences, use user_write instead.',
     parameters: Type.Object({
       file: Type.String({ description: 'File name: "SOUL.md" or "IDENTITY.md"' }),
       content: Type.String(),
       reason: Type.String(),
       origin: Type.String({ description: 'Either "user_request" or "agent_initiated"' }),
     }),
+    category: 'identity',
   },
   {
     name: 'user_write',
     label: 'Write User Preferences',
     description:
       'Write or update what you have learned about the current user (USER.md). ' +
-      'Records preferences, workflows, communication style. Per-user scoped — ' +
-      'each user gets their own file. Auto-applied in clean sessions; queued when tainted. ' +
-      'All changes are audited.',
+      'Per-user scoped. All changes are audited.',
     parameters: Type.Object({
       content: Type.String(),
       reason: Type.String(),
       origin: Type.String({ description: 'Either "user_request" or "agent_initiated"' }),
     }),
+    category: 'identity',
     injectUserId: true,
   },
 
@@ -139,23 +150,25 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     name: 'scheduler_add_cron',
     label: 'Add Cron Job',
     description:
-      'Schedule a recurring task using a 5-field cron expression (minute hour day month weekday). The prompt will be sent to you at each matching time.',
+      'Schedule a recurring task using a 5-field cron expression (minute hour day month weekday).',
     parameters: Type.Object({
       schedule: Type.String({ description: 'Cron expression, e.g. "0 9 * * 1" for 9am every Monday' }),
       prompt: Type.String({ description: 'The instruction/prompt to execute on each trigger' }),
       maxTokenBudget: Type.Optional(Type.Number({ description: 'Optional max token budget per execution' })),
     }),
+    category: 'scheduler',
   },
   {
     name: 'scheduler_run_at',
     label: 'Run Once At',
     description:
-      'Schedule a one-shot task at a specific date/time. The prompt executes once and the job is automatically removed.',
+      'Schedule a one-shot task at a specific date/time. Executes once, then auto-removed.',
     parameters: Type.Object({
       datetime: Type.String({ description: 'ISO 8601 datetime in local time (no Z suffix), e.g. "2026-02-21T19:30:00". Use the current time from your system prompt to compute relative times.' }),
       prompt: Type.String({ description: 'The instruction/prompt to execute' }),
       maxTokenBudget: Type.Optional(Type.Number({ description: 'Optional max token budget for execution' })),
     }),
+    category: 'scheduler',
   },
   {
     name: 'scheduler_remove_cron',
@@ -164,12 +177,14 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     parameters: Type.Object({
       jobId: Type.String({ description: 'The job ID returned by scheduler_add_cron' }),
     }),
+    category: 'scheduler',
   },
   {
     name: 'scheduler_list_jobs',
     label: 'List Cron Jobs',
     description: 'List all currently scheduled cron jobs.',
     parameters: Type.Object({}),
+    category: 'scheduler',
   },
 
   // ── Skill tools ──
@@ -179,6 +194,7 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     description:
       'List all available skills. Returns skill names and descriptions.',
     parameters: Type.Object({}),
+    category: 'skills',
   },
   {
     name: 'skill_read',
@@ -188,21 +204,19 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     parameters: Type.Object({
       name: Type.String(),
     }),
+    category: 'skills',
   },
   {
     name: 'skill_propose',
     label: 'Propose Skill',
     description:
-      'Propose a new skill or update an existing one. The skill content is markdown — ' +
-      'prompt-level instructions that guide your behavior (like a checklist or workflow). ' +
-      'Content is screened for safety: dangerous patterns (exec, eval, fetch) are hard-rejected, ' +
-      'capability patterns (fs-write, env-access) require human review, clean content is auto-approved. ' +
-      'Auto-approved skills are available on your next turn in this session.',
+      'Propose a new skill or update an existing one. Content is markdown, screened for safety.',
     parameters: Type.Object({
       skill: Type.String({ description: 'Skill name (alphanumeric, hyphens, underscores)' }),
       content: Type.String({ description: 'Skill content as markdown' }),
       reason: Type.Optional(Type.String({ description: 'Why this skill is needed' })),
     }),
+    category: 'skills',
   },
 
   {
@@ -217,6 +231,7 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
       source: Type.String({ description: 'Skill source: "clawhub:<name>" or raw SKILL.md content' }),
       autoApprove: Type.Optional(Type.Boolean({ description: 'Auto-approve if screener passes (default: false)' })),
     }),
+    category: 'skills',
   },
   {
     name: 'skill_search',
@@ -228,6 +243,7 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
       query: Type.String({ description: 'Search query' }),
       limit: Type.Optional(Type.Number({ description: 'Max results (1-50, default 20)' })),
     }),
+    category: 'skills',
   },
 
   // ── Delegation tools ──
@@ -235,10 +251,8 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     name: 'agent_delegate',
     label: 'Delegate Task',
     description:
-      'Delegate a task to a sub-agent. The sub-agent runs in its own sandbox ' +
-      'and returns a text response. Optionally specify a runner (pi-agent-core, ' +
-      'pi-coding-agent, claude-code) and/or model to use for the sub-agent. ' +
-      'Subject to depth and concurrency limits enforced by the host.',
+      'Delegate a task to a sub-agent running in its own sandbox. ' +
+      'Subject to depth and concurrency limits.',
     parameters: Type.Object({
       task: Type.String({ description: 'The task description for the sub-agent' }),
       context: Type.Optional(Type.String({ description: 'Background context the sub-agent should know' })),
@@ -247,6 +261,7 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
       maxTokens: Type.Optional(Type.Number({ description: 'Max tokens for the sub-agent response' })),
       timeoutSec: Type.Optional(Type.Number({ description: 'Timeout in seconds (5-600)' })),
     }),
+    category: 'delegation',
   },
 
   // ── Enterprise: Workspace tools ──
@@ -254,14 +269,13 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     name: 'workspace_write',
     label: 'Write to Workspace',
     description:
-      'Write a file to a workspace tier. Tiers: "agent" (shared, read-only to sandbox), ' +
-      '"user" (per-user, persistent), "scratch" (ephemeral, per-session). ' +
-      'Agent tier writes may require approval in paranoid mode.',
+      'Write a file to a workspace tier (agent, user, or scratch).',
     parameters: Type.Object({
       tier: Type.String({ description: '"agent", "user", or "scratch"' }),
       path: Type.String({ description: 'Relative path within the tier (e.g. "docs/notes.md")' }),
       content: Type.String({ description: 'File content to write' }),
     }),
+    category: 'workspace',
   },
   {
     name: 'workspace_read',
@@ -272,6 +286,7 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
       tier: Type.String({ description: '"agent", "user", or "scratch"' }),
       path: Type.String({ description: 'Relative path within the tier' }),
     }),
+    category: 'workspace',
   },
   {
     name: 'workspace_list',
@@ -282,21 +297,21 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
       tier: Type.String({ description: '"agent", "user", or "scratch"' }),
       path: Type.Optional(Type.String({ description: 'Subdirectory to list (defaults to root)' })),
     }),
+    category: 'workspace',
   },
 
   {
     name: 'workspace_write_file',
     label: 'Write Binary File to Workspace',
     description:
-      'Write a binary file (e.g. image) to a workspace tier. Data must be base64-encoded. ' +
-      'Tiers: "agent" (shared), "user" (per-user, persistent), "scratch" (ephemeral). ' +
-      'Agent tier writes may require approval in paranoid mode.',
+      'Write a base64-encoded binary file to a workspace tier.',
     parameters: Type.Object({
       tier: Type.String({ description: '"agent", "user", or "scratch"' }),
       path: Type.String({ description: 'Relative path within the tier (e.g. "files/image.png")' }),
       data: Type.String({ description: 'Base64-encoded binary content' }),
       mimeType: Type.String({ description: 'MIME type of the file (e.g. "image/png")' }),
     }),
+    category: 'workspace',
   },
 
   // ── Enterprise: Governance tools ──
@@ -304,15 +319,14 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     name: 'identity_propose',
     label: 'Propose Identity Change',
     description:
-      'Propose a change to a shared identity file (SOUL.md or IDENTITY.md) for review. ' +
-      'Unlike identity_write which may auto-apply, proposals always go through governance. ' +
-      'Use when you want to suggest a change that requires human approval.',
+      'Propose a change to a shared identity file for governance review.',
     parameters: Type.Object({
       file: Type.String({ description: 'File name: "SOUL.md" or "IDENTITY.md"' }),
       content: Type.String(),
       reason: Type.String(),
       origin: Type.String({ description: 'Either "user_request" or "agent_initiated"' }),
     }),
+    category: 'governance',
   },
   {
     name: 'proposal_list',
@@ -322,6 +336,7 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     parameters: Type.Object({
       status: Type.Optional(Type.String({ description: '"pending", "approved", or "rejected"' })),
     }),
+    category: 'governance',
   },
   {
     name: 'agent_registry_list',
@@ -331,6 +346,7 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     parameters: Type.Object({
       status: Type.Optional(Type.String({ description: 'Filter by status: "active", "suspended", or "archived"' })),
     }),
+    category: 'governance',
   },
 ] as const;
 
@@ -343,6 +359,40 @@ export function getToolParamKeys(name: string): string[] {
   if (!spec) throw new Error(`Unknown tool: ${name}`);
   const schema = spec.parameters as { properties?: Record<string, unknown> };
   return Object.keys(schema.properties ?? {});
+}
+
+// ── Context-aware tool filtering ──────────────────────────────────────
+//
+// Runners pass a ToolFilterContext derived from the same data the prompt
+// builder uses. Categories excluded here match prompt modules excluded by
+// their shouldInclude() — e.g., no heartbeat content → no scheduler tools
+// AND no HeartbeatModule in the system prompt.
+
+export interface ToolFilterContext {
+  /** identityFiles.heartbeat is non-empty */
+  hasHeartbeat: boolean;
+  /** skills.length > 0 */
+  hasSkills: boolean;
+  /** Enterprise workspace tiers enabled */
+  hasWorkspaceTiers: boolean;
+  /** Enterprise governance enabled */
+  hasGovernance: boolean;
+}
+
+/**
+ * Filter the catalog to tools relevant to the current session.
+ * Without a context, returns the full catalog (backward compat).
+ */
+export function filterTools(ctx: ToolFilterContext): readonly ToolSpec[] {
+  return TOOL_CATALOG.filter(spec => {
+    switch (spec.category) {
+      case 'scheduler':  return ctx.hasHeartbeat;
+      case 'skills':     return ctx.hasSkills;
+      case 'workspace':  return ctx.hasWorkspaceTiers;
+      case 'governance': return ctx.hasGovernance;
+      default:           return true;
+    }
+  });
 }
 
 // ── Parameter normalization for weaker models ────────────────────────

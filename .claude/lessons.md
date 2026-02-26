@@ -11,6 +11,11 @@
 **Context:** Designing how provider-map.ts would work after a monorepo split
 **Lesson:** `resolveProviderPath()` currently resolves relative paths via `new URL(relativePath, import.meta.url)`. For npm packages, it can use `import('@ax/provider-llm-anthropic')` instead — this is still a static allowlist (hardcoded package names, not config-derived), so SC-SEC-002 is preserved. The key invariant is "no dynamic path construction from config values," not "paths must be relative."
 **Tags:** security, SC-SEC-002, provider-map, npm-packages, static-allowlist
+### pi-agent-core only supports text — image blocks must bypass it
+**Date:** 2026-02-26
+**Context:** Debugging why Slack image attachments weren't visible to the LLM despite being downloaded and stored correctly.
+**Lesson:** pi-agent-core (`@mariozechner/pi-agent-core`) only handles text user messages. When the user message includes non-text content blocks (images), they must be extracted before entering pi-agent-core and injected into the IPC/LLM call messages separately. The injection point is in `createIPCStreamFn()` after `convertPiMessages()` runs — find the last user message with string content (the prompt, not tool results) and convert it to structured content with text + image blocks.
+**Tags:** pi-agent-core, images, ipc-transport, slack, vision
 
 ### Popular OpenClaw skills use clawdbot alias, not openclaw
 **Date:** 2026-02-26
@@ -209,6 +214,18 @@
 **Lesson:** For backward-compatible structured content in SQLite TEXT columns: serialize arrays with JSON.stringify, leave strings as-is. On load, detect JSON arrays by checking if the string starts with `[` and parse accordingly. This avoids schema migrations and handles both old (plain text) and new (structured) data transparently.
 **Tags:** sqlite, content-blocks, serialization, conversation-store, backward-compatibility
 
+### Tool filtering must align with prompt module shouldInclude()
+**Date:** 2026-02-26
+**Context:** Added context-aware tool filtering — scheduler tools excluded when no heartbeat. Pi-session test broke because it expected scheduler tools without providing a HEARTBEAT.md file.
+**Lesson:** When adding tool filtering by category, ensure the filter flags derive from the same data that prompt modules use in `shouldInclude()`. If HeartbeatModule checks `identityFiles.heartbeat?.trim()`, the scheduler filter must check the same thing. Test fixtures must provide the relevant identity files (e.g., HEARTBEAT.md in agentDir) when expecting those tools to be present.
+**Tags:** tools, filtering, prompt-modules, testing, heartbeat
+
+### claude-code.ts should use shared buildSystemPrompt() like other runners
+**Date:** 2026-02-26
+**Context:** claude-code.ts manually duplicated prompt building logic (importing PromptBuilder, loadIdentityFiles, loadSkills directly). Refactoring it to use shared buildSystemPrompt() from agent-setup.ts simplified the code and gave it the toolFilter for free.
+**Lesson:** When all runners need the same derived data (system prompt + filter context), use the shared `buildSystemPrompt()` from agent-setup.ts. Don't duplicate the prompt-building logic in individual runners. If a runner needs custom prompt context fields, extend AgentConfig rather than reimplementing.
+**Tags:** runners, claude-code, prompt, agent-setup, refactoring
+
 ### onDelegate callback signature changes require updating all test files + harness
 **Date:** 2026-02-25
 **Context:** Changed onDelegate from `(task, context, ctx)` to `(req: DelegateRequest, ctx)` — tests broke in 4 locations
@@ -226,3 +243,9 @@
 **Context:** When renaming `Config.model` to `Config.models`, initially thought ALL `config.model` references needed updating. But `AgentConfig` in runner.ts has its own `model` field (agent-side model from CLI args) that is a completely different type.
 **Lesson:** Before bulk-renaming a field across the codebase, verify which TYPE each `config.model` reference belongs to. `Config` (from ax.yaml, host-side) and `AgentConfig` (from CLI args, agent-side) are different types with different `model` fields. Use TypeScript's type system or grep for the import to disambiguate.
 **Tags:** config, types, rename, agent-config, disambiguation
+
+### Mock LLM provider doesn't echo model names — use provider failures to verify routing
+**Date:** 2026-02-26
+**Context:** Writing tests for task-type model routing in the LLM router. Tried to verify which model chain was used by checking the mock provider's response text, but it returns static "Hello from mock LLM." regardless of model name.
+**Lesson:** To test that the router selects the correct model chain for a task type, set the "wrong" chain to a provider that will fail (e.g., `openai/gpt-4` without API key) and the "right" chain to mock. If routing is correct, the call succeeds; if wrong, it throws. This is more robust than trying to inspect response content.
+**Tags:** testing, llm-router, mock-provider, task-type-routing

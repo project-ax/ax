@@ -210,7 +210,8 @@ function makeErrorMessage(errorText: string, api = 'ax-ipc'): AssistantMessage {
 
 // ── IPC tools as pi-coding-agent ToolDefinitions ────────────────────
 
-import { TOOL_CATALOG, normalizeOrigin, normalizeIdentityFile } from '../tool-catalog.js';
+import { TOOL_CATALOG, filterTools, normalizeOrigin, normalizeIdentityFile } from '../tool-catalog.js';
+import type { ToolFilterContext } from '../tool-catalog.js';
 
 function text(t: string) {
   return { content: [{ type: 'text' as const, text: t }], details: undefined };
@@ -219,6 +220,8 @@ function text(t: string) {
 interface IPCToolDefsOptions {
   /** Current user ID — included in user_write calls for per-user scoping. */
   userId?: string;
+  /** Tool filter context — excludes tools irrelevant to the current session. */
+  filter?: ToolFilterContext;
 }
 
 function createIPCToolDefinitions(client: IPCClient, opts?: IPCToolDefsOptions): ToolDefinition[] {
@@ -238,8 +241,9 @@ function createIPCToolDefinitions(client: IPCClient, opts?: IPCToolDefsOptions):
   const p = (v: unknown) => v as Record<string, unknown>;
 
   const TOOLS_WITH_ORIGIN = new Set(['identity_write', 'user_write']);
+  const catalog = opts?.filter ? filterTools(opts.filter) : TOOL_CATALOG;
 
-  return TOOL_CATALOG.map(spec => ({
+  return catalog.map(spec => ({
     name: spec.name,
     label: spec.label,
     description: spec.description,
@@ -314,7 +318,7 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
   logger.debug('provider_registered', { api: apiName });
 
   // Build system prompt via shared prompt builder
-  const { systemPrompt } = buildSystemPrompt(config);
+  const { systemPrompt, toolFilter } = buildSystemPrompt(config);
 
   // Create coding tools bound to the workspace directory.
   // IMPORTANT: codingTools (the pre-instantiated export) captures process.cwd()
@@ -323,7 +327,7 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
   const tools = createCodingTools(config.workspace);
 
   // Create IPC tool definitions for pi-coding-agent
-  const ipcToolDefs = createIPCToolDefinitions(client, { userId: config.userId });
+  const ipcToolDefs = createIPCToolDefinitions(client, { userId: config.userId, filter: toolFilter });
 
   logger.debug('session_config', {
     systemPromptLength: systemPrompt.length,

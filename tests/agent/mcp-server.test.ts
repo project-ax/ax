@@ -167,7 +167,7 @@ describe('IPC MCP Server', () => {
     expect(result.content[0].text).toContain('"ok":true');
   });
 
-  test('all 27 IPC tools are registered', () => {
+  test('all 27 IPC tools are registered without filter', () => {
     const client = createMockClient();
     const server = createIPCMcpServer(client);
     const tools = getTools(server);
@@ -198,6 +198,46 @@ describe('IPC MCP Server', () => {
       expect(registeredNames, `expected tool "${name}" to be registered`).toContain(name);
     }
     expect(registeredNames.length).toBe(27);
+  });
+
+  test('filter excludes scheduler and skills tools when flags are false', () => {
+    const client = createMockClient();
+    const server = createIPCMcpServer(client, {
+      filter: { hasHeartbeat: false, hasSkills: false, hasWorkspaceTiers: true, hasGovernance: true },
+    });
+    const tools = getTools(server);
+    const names = Object.keys(tools);
+
+    expect(names).not.toContain('scheduler_add_cron');
+    expect(names).not.toContain('scheduler_run_at');
+    expect(names).not.toContain('skill_list');
+    expect(names).not.toContain('skill_read');
+    // Core tools present
+    expect(names).toContain('memory_write');
+    expect(names).toContain('web_fetch');
+    expect(names).toContain('identity_write');
+    // Enterprise workspace still present
+    expect(names).toContain('workspace_write');
+  });
+
+  test('filter with all flags false returns only core tools', () => {
+    const client = createMockClient();
+    const server = createIPCMcpServer(client, {
+      filter: { hasHeartbeat: false, hasSkills: false, hasWorkspaceTiers: false, hasGovernance: false },
+    });
+    const tools = getTools(server);
+    const names = Object.keys(tools);
+
+    // Core: memory(5) + web(2) + audit(1) + identity(2) + delegation(1) = 11
+    expect(names).toContain('memory_write');
+    expect(names).toContain('web_fetch');
+    expect(names).toContain('audit_query');
+    expect(names).toContain('identity_write');
+    expect(names).toContain('agent_delegate');
+    expect(names).not.toContain('scheduler_add_cron');
+    expect(names).not.toContain('skill_list');
+    expect(names).not.toContain('workspace_write');
+    expect(names).not.toContain('identity_propose');
   });
 
   test('includes scheduler_add_cron tool', () => {

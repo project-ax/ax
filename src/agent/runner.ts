@@ -169,10 +169,11 @@ export async function compactHistory(
     '---\n' + transcript + '\n---\n\n' +
     'Provide a clear, structured summary.';
 
-  // Use IPC to call the LLM for summarization
+  // Use IPC to call the LLM for summarization — request the 'fast' task type
+  // so the host-side router picks a cheap/fast model if one is configured.
   const response = await client.call({
     action: 'llm_call',
-    model: DEFAULT_MODEL_ID,
+    taskType: 'fast',
     messages: [
       { role: 'system', content: 'You are a conversation summarizer. Be concise and preserve important details.' },
       { role: 'user', content: summaryPrompt },
@@ -255,13 +256,20 @@ async function readStdin(): Promise<string> {
 export async function runPiCore(config: AgentConfig): Promise<void> {
   process.stderr.write(`[diag] runPiCore start\n`);
   // Extract text for the agent prompt — pi-agent-core only supports text input.
-  // Image blocks are handled at the IPC/LLM level when the agent makes LLM calls.
+  // Image blocks (image or image_data) are preserved separately and injected
+  // into IPC LLM calls so the host-side Anthropic provider can send them to Claude.
   const rawMessage = config.userMessage ?? '';
   const userMessage = typeof rawMessage === 'string' ? rawMessage : extractText(rawMessage);
-  if (!userMessage.trim()) {
+  const imageBlocks: ContentBlock[] = Array.isArray(rawMessage)
+    ? rawMessage.filter((b): b is ContentBlock => b.type === 'image' || b.type === 'image_data')
+    : [];
+  if (!userMessage.trim() && imageBlocks.length === 0) {
     logger.debug('pi_core_skip_empty');
     return;
   }
+  // If images are attached but no text, provide a minimal prompt so
+  // pi-agent-core has something to work with.
+  const promptText = userMessage.trim() || (imageBlocks.length > 0 ? '[image attached]' : '.');
 
   // Decide LLM transport: proxy (direct Anthropic SDK) or IPC fallback
   const useProxy = !!config.proxySocket;
@@ -281,11 +289,11 @@ export async function runPiCore(config: AgentConfig): Promise<void> {
   const client = new IPCClient({ socketPath: config.ipcSocket });
   await client.connect();
 
-  const { systemPrompt } = buildSystemPrompt(config);
+  const { systemPrompt, toolFilter } = buildSystemPrompt(config);
 
   // Build tools: local (execute in sandbox) + IPC (route to host)
   const localTools = createLocalTools(config.workspace);
-  const ipcTools = createIPCTools(client, { userId: config.userId });
+  const ipcTools = createIPCTools(client, { userId: config.userId, filter: toolFilter });
   const allTools = [...localTools, ...ipcTools];
 
   logger.debug('pi_core_tools', {
@@ -305,10 +313,11 @@ export async function runPiCore(config: AgentConfig): Promise<void> {
 
   const model = createDefaultModel(config.maxTokens, config.model);
 
-  // Select stream function: proxy (Anthropic SDK via Unix socket) or IPC
+  // Select stream function: proxy (Anthropic SDK via Unix socket) or IPC.
+  // Image blocks are passed to IPC transport for host-side resolution.
   const streamFn = useProxy
     ? createProxyStreamFn(config.proxySocket!)
-    : createIPCStreamFn(client);
+    : createIPCStreamFn(client, imageBlocks.length > 0 ? imageBlocks : undefined);
 
   logger.debug('pi_core_agent_create', {
     historyMessages: historyMessages.length,
@@ -333,8 +342,8 @@ export async function runPiCore(config: AgentConfig): Promise<void> {
 
   // Send the user message and wait for the agent to finish
   process.stderr.write(`[diag] pi_core_prompt\n`);
-  logger.debug('pi_core_prompt', { messagePreview: truncate(userMessage, 200) });
-  await agent.prompt(userMessage);
+  logger.debug('pi_core_prompt', { messagePreview: truncate(promptText, 200), imageCount: imageBlocks.length });
+  await agent.prompt(promptText);
   process.stderr.write(`[diag] pi_core_prompt_returned events=${eventState.eventCount()} hasOutput=${eventState.hasOutput()}\n`);
   await agent.waitForIdle();
   process.stderr.write(`[diag] pi_core_idle events=${eventState.eventCount()} hasOutput=${eventState.hasOutput()}\n`);
