@@ -1,5 +1,21 @@
 # Journal
 
+## [2026-02-26 15:00] — AI SDK format for image content blocks
+
+**Task:** Map internal image content blocks to AI SDK UI message stream schema.
+**What I did:** In `handleCompletions`, internal `{type: 'image', fileId, mimeType}` blocks are now mapped to `{type: 'file', url: '/v1/files/<fileId>', mediaType}` before returning. Text blocks pass through unchanged. Updated 2 integration tests to assert the new format.
+**Files touched:** src/host/server.ts, tests/host/server-multimodal.test.ts
+**Outcome:** Success — 1650 tests pass, TypeScript clean
+**Notes:** The URL in the file block is a relative path to AX's file endpoint. The Next.js BFF can rewrite this to its own proxy URL before passing to the browser.
+
+## [2026-02-26 14:47] — FileStore: fileId-only file lookups via SQLite
+
+**Task:** Enable `/v1/files/:fileId` downloads without requiring `?agent=...&user=...` query params. Files are globally unique UUIDs — the server should resolve the workspace path from the fileId alone.
+**What I did:** Created `FileStore` class (SQLite-backed, same pattern as ConversationStore) with `register(fileId, agent, user, mimeType)` and `lookup(fileId)` methods. Created `files` migration. Updated `handleFileDownload` to fall back to FileStore lookup when agent/user params are missing. Wired FileStore into server composition root, handleFileUpload, and both file-write points in processCompletion (extractImageDataBlocks + generated image persistence).
+**Files touched:** Created: src/file-store.ts, src/migrations/files.ts, tests/host/file-store.test.ts. Modified: src/host/server-files.ts, src/host/server.ts, src/host/server-completions.ts, tests/host/server-files.test.ts
+**Outcome:** Success — 1650 tests pass, TypeScript clean
+**Notes:** The Next.js proxy can now call `GET /v1/files/:fileId` without knowing agent/user. Old callers with query params still work (params take priority over lookup).
+
 ## [2026-02-26 12:00] — Plugin framework design analysis
 
 **Task:** Evaluate whether AX should adopt an npm-based plugin framework for extensibility

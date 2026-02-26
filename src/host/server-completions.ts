@@ -24,6 +24,7 @@ import { diagnoseError } from '../errors.js';
 import { ensureOAuthTokenFresh, refreshOAuthTokenFromEnv } from '../dotenv.js';
 import { tsxBin as resolveTsxBin, runnerPath as resolveRunnerPath } from '../utils/assets.js';
 import type { OpenAIChatRequest } from './server-http.js';
+import type { FileStore } from '../file-store.js';
 
 // ── Agent spawn retry ──
 const MAX_AGENT_RETRIES = 2;
@@ -42,6 +43,7 @@ export interface CompletionDeps {
   agentDir: string;
   logger: Logger;
   verbose?: boolean;
+  fileStore?: FileStore;
 }
 
 export interface ExtractedFile {
@@ -531,6 +533,12 @@ export async function processCompletion(
       responseBlocks = extracted.blocks;
       if (extracted.extractedFiles.length > 0) {
         extractedFiles = extracted.extractedFiles;
+        // Register extracted files in the file store for fileId-only lookups
+        if (deps.fileStore) {
+          for (const ef of extracted.extractedFiles) {
+            deps.fileStore.register(ef.fileId, agentName, currentUserId, ef.mimeType);
+          }
+        }
       }
     }
 
@@ -554,6 +562,7 @@ export async function processCompletion(
           const filePath = safePath(enterpriseUserWs, ...img.fileId.split('/').filter(Boolean));
           mkdirSync(join(filePath, '..'), { recursive: true });
           writeFileSync(filePath, img.data);
+          deps.fileStore?.register(img.fileId, agentName, currentUserId, img.mimeType);
           reqLogger.info('image_persisted', { fileId: img.fileId, path: filePath, bytes: img.data.length });
         } catch (err) {
           reqLogger.warn('image_persist_failed', { fileId: img.fileId, workspace: enterpriseUserWs, error: (err as Error).message });

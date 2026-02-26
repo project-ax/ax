@@ -90,7 +90,7 @@ describe('Server multimodal responses', () => {
     rmSync(testAxHome, { recursive: true, force: true });
   });
 
-  it('rewrites image URLs in response content when contentBlocks include images', async () => {
+  it('returns AI SDK format content blocks when response includes images', async () => {
     const config = loadConfig('tests/integration/ax-test.yaml');
     server = await createServer(config, { socketPath });
     await server.start();
@@ -106,13 +106,17 @@ describe('Server multimodal responses', () => {
     expect(res.status).toBe(200);
     const data = JSON.parse(res.body);
 
-    // Content should be a string with rewritten image URLs using agent+user params
+    // Content should be an array of AI SDK content parts
     const content = data.choices[0].message.content;
-    expect(typeof content).toBe('string');
-    expect(content).toContain('/v1/files/generated-abc123.png?agent=main&user=default');
-    // Should have the ! prefix for image markdown
-    expect(content).toContain('![A cow sailing]');
-    expect(content).not.toContain('(generated-abc123.png)');
+    expect(Array.isArray(content)).toBe(true);
+    // Text block stays as { type: 'text', text: '...' }
+    const textBlock = content.find((b: any) => b.type === 'text');
+    expect(textBlock).toBeDefined();
+    // Image block uses AI SDK file format: { type: 'file', url, mediaType }
+    const fileBlock = content.find((b: any) => b.type === 'file');
+    expect(fileBlock).toBeDefined();
+    expect(fileBlock.url).toBe('/ax/generated-abc123.png');
+    expect(fileBlock.mediaType).toBe('image/png');
   });
 
   it('returns plain string content when no image blocks are present', async () => {
@@ -141,16 +145,16 @@ describe('Server multimodal responses', () => {
     expect(data.choices[0].message.content).toBe('Just a text reply.');
   });
 
-  it('derives user from user field for image URLs', async () => {
-    // Override mock to return the userId extracted from the user field
+  it('returns multiple file blocks in AI SDK format', async () => {
     mockedProcessCompletion.mockResolvedValueOnce({
-      responseContent: 'Here is the image:\n\n![A cow sailing](generated-abc123.png)\n\nEnjoy!',
+      responseContent: 'Two images:',
       contentBlocks: [
-        { type: 'text', text: 'Here is the image:\n\n![A cow sailing](generated-abc123.png)\n\nEnjoy!' },
-        { type: 'image', fileId: 'generated-abc123.png', mimeType: 'image/png' },
+        { type: 'text', text: 'Two images:' },
+        { type: 'image', fileId: 'first.png', mimeType: 'image/png' },
+        { type: 'image', fileId: 'second.jpg', mimeType: 'image/jpeg' },
       ],
       agentName: 'main',
-      userId: 'vinay@canopyworks.com',
+      userId: 'default',
       finishReason: 'stop',
     });
 
@@ -159,38 +163,18 @@ describe('Server multimodal responses', () => {
     await server.start();
 
     const res = await sendRequest(socketPath, '/v1/chat/completions', {
-      body: {
-        messages: [{ role: 'user', content: 'generate an image' }],
-        user: 'vinay@canopyworks.com/conv-001',
-      },
+      body: { messages: [{ role: 'user', content: 'generate images' }] },
     });
 
     expect(res.status).toBe(200);
     const data = JSON.parse(res.body);
     const content = data.choices[0].message.content;
-    expect(typeof content).toBe('string');
-    // URL should use agent+user params with @ percent-encoded
-    expect(content).toContain('agent=main&user=vinay%40canopyworks.com');
-    expect(content).toContain('generated-abc123.png');
-  });
-
-  it('uses default user fallback when no user field provided', async () => {
-    const config = loadConfig('tests/integration/ax-test.yaml');
-    server = await createServer(config, { socketPath });
-    await server.start();
-
-    const res = await sendRequest(socketPath, '/v1/chat/completions', {
-      body: {
-        messages: [{ role: 'user', content: 'generate an image' }],
-      },
-    });
-
-    expect(res.status).toBe(200);
-    const data = JSON.parse(res.body);
-    const content = data.choices[0].message.content;
-    expect(typeof content).toBe('string');
-    // URL should use agent=main and user=default (or $USER env var)
-    expect(content).toContain('agent=main&user=');
-    expect(content).not.toContain('session_id=');
+    expect(Array.isArray(content)).toBe(true);
+    const fileBlocks = content.filter((b: any) => b.type === 'file');
+    expect(fileBlocks).toHaveLength(2);
+    expect(fileBlocks[0].url).toBe('/ax/first.png');
+    expect(fileBlocks[0].mediaType).toBe('image/png');
+    expect(fileBlocks[1].url).toBe('/ax/second.jpg');
+    expect(fileBlocks[1].mediaType).toBe('image/jpeg');
   });
 });

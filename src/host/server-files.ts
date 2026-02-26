@@ -20,8 +20,13 @@ import { sendError } from './server-http.js';
 import type { ImageMimeType } from '../types.js';
 import { IMAGE_MIME_TYPES } from '../types.js';
 import { getLogger } from '../logger.js';
+import type { FileStore } from '../file-store.js';
 
 const logger = getLogger().child({ component: 'files' });
+
+export interface FileDeps {
+  fileStore?: FileStore;
+}
 
 /** Max upload size: 10 MB. */
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -75,6 +80,7 @@ function getQueryParam(url: string, name: string): string | undefined {
 export async function handleFileUpload(
   req: IncomingMessage,
   res: ServerResponse,
+  deps?: FileDeps,
 ): Promise<void> {
   const url = req.url ?? '';
   const agent = getQueryParam(url, 'agent');
@@ -116,6 +122,7 @@ export async function handleFileUpload(
   writeFileSync(filePath, body);
 
   const fileId = `files/${filename}`;
+  deps?.fileStore?.register(fileId, agent, user, contentType);
   const responseBody = JSON.stringify({ fileId, mimeType: contentType, size: body.length });
   res.writeHead(200, {
     'Content-Type': 'application/json',
@@ -132,15 +139,9 @@ export async function handleFileUpload(
 export async function handleFileDownload(
   req: IncomingMessage,
   res: ServerResponse,
+  deps?: FileDeps,
 ): Promise<void> {
   const url = req.url ?? '';
-  const agent = getQueryParam(url, 'agent');
-  const user = getQueryParam(url, 'user');
-
-  if (!agent || !SAFE_NAME_RE.test(agent) || !user || !SAFE_NAME_RE.test(user)) {
-    sendError(res, 400, 'Missing or invalid agent/user query parameters');
-    return;
-  }
 
   // Extract fileId from URL path: /v1/files/<fileId>
   const pathPart = url.split('?')[0];
@@ -152,6 +153,23 @@ export async function handleFileDownload(
   const fileId = decodeURIComponent(pathPart.slice(prefix.length));
   if (!fileId) {
     sendError(res, 400, 'Missing file ID');
+    return;
+  }
+
+  // Resolve agent/user: prefer query params, fall back to FileStore lookup
+  let agent = getQueryParam(url, 'agent');
+  let user = getQueryParam(url, 'user');
+
+  if ((!agent || !user) && deps?.fileStore) {
+    const entry = deps.fileStore.lookup(fileId);
+    if (entry) {
+      agent = entry.agentName;
+      user = entry.userId;
+    }
+  }
+
+  if (!agent || !SAFE_NAME_RE.test(agent) || !user || !SAFE_NAME_RE.test(user)) {
+    sendError(res, 404, 'File not found');
     return;
   }
 

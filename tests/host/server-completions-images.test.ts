@@ -3,7 +3,6 @@ import { mkdirSync, mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { extractImageDataBlocks } from '../../src/host/server-completions.js';
-import { rewriteImageUrls } from '../../src/host/server-http.js';
 import { safePath } from '../../src/utils/safe-path.js';
 import { userWorkspaceDir } from '../../src/paths.js';
 import type { ContentBlock } from '../../src/types.js';
@@ -85,80 +84,6 @@ describe('extractImageDataBlocks', () => {
   });
 });
 
-describe('rewriteImageUrls', () => {
-  test('rewrites ![alt](filename) to ![alt](/v1/files/...)', () => {
-    const text = 'Here is the image:\n\n![A cow sailing](generated-9ae8a563.png)\n\nEnjoy!';
-    const blocks: ContentBlock[] = [
-      { type: 'text', text: 'Here is the image:' },
-      { type: 'image', fileId: 'generated-9ae8a563.png', mimeType: 'image/png' },
-    ];
-    const result = rewriteImageUrls(text, blocks, 'main', 'testuser');
-    expect(result).toBe(
-      'Here is the image:\n\n![A cow sailing](/v1/files/generated-9ae8a563.png?agent=main&user=testuser)\n\nEnjoy!',
-    );
-  });
-
-  test('normalises [alt](filename) to ![alt](/v1/files/...) (missing ! prefix)', () => {
-    const text = '[A cow sailing](generated-9ae8a563.png)';
-    const blocks: ContentBlock[] = [
-      { type: 'image', fileId: 'generated-9ae8a563.png', mimeType: 'image/png' },
-    ];
-    const result = rewriteImageUrls(text, blocks, 'main', 'testuser');
-    expect(result).toBe('![A cow sailing](/v1/files/generated-9ae8a563.png?agent=main&user=testuser)');
-  });
-
-  test('handles fileId with subdirectory prefix (files/xxx.png)', () => {
-    const text = '![chart](chart-001.png)';
-    const blocks: ContentBlock[] = [
-      { type: 'image', fileId: 'files/chart-001.png', mimeType: 'image/png' },
-    ];
-    const result = rewriteImageUrls(text, blocks, 'main', 'user1');
-    expect(result).toBe('![chart](/v1/files/files%2Fchart-001.png?agent=main&user=user1)');
-  });
-
-  test('rewrites multiple image references', () => {
-    const text = '![first](a.png)\n\n![second](b.jpg)';
-    const blocks: ContentBlock[] = [
-      { type: 'image', fileId: 'a.png', mimeType: 'image/png' },
-      { type: 'image', fileId: 'b.jpg', mimeType: 'image/jpeg' },
-    ];
-    const result = rewriteImageUrls(text, blocks, 'main', 'user1');
-    expect(result).toContain('![first](/v1/files/a.png?agent=main&user=user1)');
-    expect(result).toContain('![second](/v1/files/b.jpg?agent=main&user=user1)');
-  });
-
-  test('leaves text unchanged when no image blocks', () => {
-    const text = 'No images here. [a link](https://example.com)';
-    const blocks: ContentBlock[] = [
-      { type: 'text', text: 'No images here.' },
-    ];
-    const result = rewriteImageUrls(text, blocks, 'main', 'user1');
-    expect(result).toBe(text);
-  });
-
-  test('does not double-prefix ! on already-correct syntax', () => {
-    const text = '![cow](generated-abc.png)';
-    const blocks: ContentBlock[] = [
-      { type: 'image', fileId: 'generated-abc.png', mimeType: 'image/png' },
-    ];
-    const result = rewriteImageUrls(text, blocks, 'main', 'user1');
-    // Should have exactly one !
-    expect(result).toBe('![cow](/v1/files/generated-abc.png?agent=main&user=user1)');
-    expect(result).not.toContain('!![');
-  });
-
-  test('encodes @ in userId for URL safety', () => {
-    const text = '![ocean](generated-xyz.png)';
-    const blocks: ContentBlock[] = [
-      { type: 'image', fileId: 'generated-xyz.png', mimeType: 'image/png' },
-    ];
-    const result = rewriteImageUrls(text, blocks, 'main', 'vinay@canopyworks.com');
-    // @ should be percent-encoded in the user query param
-    expect(result).toBe(
-      '![ocean](/v1/files/generated-xyz.png?agent=main&user=vinay%40canopyworks.com)',
-    );
-  });
-});
 
 // Test parseAgentResponse directly — we import the non-exported function
 // by testing its behavior through the module's exports.

@@ -30,13 +30,14 @@ import { resolveDelivery } from './delivery.js';
 import { templatesDir as resolveTemplatesDir, seedSkillsDir as resolveSeedSkillsDir } from '../utils/assets.js';
 
 // Extracted modules
-import { sendError, sendSSEChunk, readBody, rewriteImageUrls } from './server-http.js';
+import { sendError, sendSSEChunk, readBody } from './server-http.js';
 import type { OpenAIChatRequest, OpenAIChatResponse, OpenAIStreamChunk } from './server-http.js';
 import { processCompletion, type CompletionDeps } from './server-completions.js';
 import { cleanStaleWorkspaces } from './server-lifecycle.js';
 import { ChannelDeduplicator, registerChannelHandler, connectChannelWithRetry } from './server-channels.js';
 import { initTracing, shutdownTracing } from '../utils/tracing.js';
 import { handleFileUpload, handleFileDownload } from './server-files.js';
+import { FileStore } from '../file-store.js';
 
 // =====================================================
 // Types
@@ -142,6 +143,7 @@ export async function createServer(
   const db = await MessageQueue.create(dataFile('messages.db'));
   const conversationStore = await ConversationStore.create();
   const sessionStore = await SessionStore.create();
+  const fileStore = await FileStore.create();
   const taintBudget = new TaintBudget({
     threshold: thresholdForProfile(config.profile),
   });
@@ -224,6 +226,7 @@ export async function createServer(
     agentDir: agentDirVal,
     logger,
     verbose: opts.verbose,
+    fileStore,
   };
 
   // Delegation callback: spawn a child agent via processCompletion with
@@ -363,7 +366,7 @@ export async function createServer(
     // File upload: POST /v1/files?agent=<name>&user=<id>
     if (url.startsWith('/v1/files') && req.method === 'POST') {
       try {
-        await handleFileUpload(req, res);
+        await handleFileUpload(req, res, { fileStore });
       } catch (err) {
         logger.error('file_upload_failed', { error: (err as Error).message });
         if (!res.headersSent) sendError(res, 500, 'File upload failed');
@@ -374,7 +377,7 @@ export async function createServer(
     // File download: GET /v1/files/<fileId>?agent=<name>&user=<id>
     if (url.startsWith('/v1/files/') && req.method === 'GET') {
       try {
-        await handleFileDownload(req, res);
+        await handleFileDownload(req, res, { fileStore });
       } catch (err) {
         logger.error('file_download_failed', { error: (err as Error).message });
         if (!res.headersSent) sendError(res, 500, 'File download failed');
@@ -457,15 +460,26 @@ export async function createServer(
     const userId = chatReq.user?.split('/')[0] || undefined;
 
     // Process completion — pass structured content through
-    let { responseContent, contentBlocks, agentName: resultAgent, userId: resultUser, finishReason } = await processCompletion(
+    const { responseContent, contentBlocks, finishReason } = await processCompletion(
       completionDeps, content, requestId, chatReq.messages, sessionId,
       undefined, userId,
     );
-    if (contentBlocks?.some(b => b.type === 'image')) {
-      const agent = resultAgent ?? config.agent_name ?? 'main';
-      const user = resultUser ?? userId ?? process.env.USER ?? 'default';
-      responseContent = rewriteImageUrls(responseContent, contentBlocks, agent, user);
-    }
+
+    // When response includes images, return AI SDK UI message parts so
+    // clients can render images via their own proxy endpoint.
+    // Text-only responses stay as plain strings for backward compatibility.
+    const hasImages = contentBlocks?.some(b => b.type === 'image');
+    const messageContent: string | object[] = hasImages
+      ? contentBlocks!.map(b => {
+          if (b.type === 'image') {
+            return { type: 'file', url: `/ax/${b.fileId}`, mediaType: b.mimeType };
+          }
+          if (b.type === 'text') {
+            return { type: 'text', text: b.text };
+          }
+          return b;
+        })
+      : responseContent;
 
     if (chatReq.stream) {
       // Streaming mode -- SSE
@@ -485,7 +499,7 @@ export async function createServer(
       // Content chunk
       sendSSEChunk(res, {
         id: requestId, object: 'chat.completion.chunk', created, model: requestModel,
-        choices: [{ index: 0, delta: { content: responseContent }, finish_reason: null }],
+        choices: [{ index: 0, delta: { content: typeof messageContent === 'string' ? messageContent : JSON.stringify(messageContent) }, finish_reason: null }],
       });
 
       // Finish chunk
@@ -502,7 +516,7 @@ export async function createServer(
         id: requestId, object: 'chat.completion', created, model: requestModel,
         choices: [{
           index: 0,
-          message: { role: 'assistant', content: responseContent },
+          message: { role: 'assistant', content: messageContent as string },
           finish_reason: finishReason,
         }],
         usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
@@ -689,6 +703,9 @@ export async function createServer(
     }
     try { sessionStore.close(); } catch {
       logger.debug('session_store_close_failed');
+    }
+    try { fileStore.close(); } catch {
+      logger.debug('file_store_close_failed');
     }
 
     // Flush and shut down OTel tracing

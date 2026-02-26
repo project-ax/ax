@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { handleFileUpload, handleFileDownload } from '../../src/host/server-files.js';
+import { FileStore } from '../../src/file-store.js';
 
 // Stub paths.ts to use temp directory for workspace
 let tmpDir: string;
@@ -155,15 +156,6 @@ describe('File upload/download API', () => {
       expect(res.writeHead).toHaveBeenCalledWith(404, expect.any(Object));
     });
 
-    test('rejects missing agent/user params', async () => {
-      const req = mockRequest('GET', '/v1/files/files/test.png', {});
-      const res = mockResponse();
-
-      await handleFileDownload(req, res);
-
-      expect(res.writeHead).toHaveBeenCalledWith(400, expect.any(Object));
-    });
-
     test('rejects missing file ID', async () => {
       const req = mockRequest('GET', '/v1/files/?agent=main&user=testuser', {});
       const res = mockResponse();
@@ -171,6 +163,49 @@ describe('File upload/download API', () => {
       await handleFileDownload(req, res);
 
       expect(res.writeHead).toHaveBeenCalledWith(400, expect.any(Object));
+    });
+
+    test('downloads by fileId alone using FileStore lookup', async () => {
+      // Upload a file with explicit agent/user
+      const imageData = Buffer.from('lookup-test-image');
+      const uploadReq = mockRequest('POST', '/v1/files?agent=main&user=testuser', {
+        'content-type': 'image/png',
+      }, imageData);
+      const uploadRes = mockResponse();
+      await handleFileUpload(uploadReq, uploadRes);
+
+      const { fileId } = JSON.parse(uploadRes.end.mock.calls[0][0]);
+
+      // Register in FileStore
+      const fileStore = await FileStore.create(join(tmpDir, 'files.db'));
+      try {
+        fileStore.register(fileId, 'main', 'testuser', 'image/png');
+
+        // Download WITHOUT agent/user params — should resolve via FileStore
+        const downloadReq = mockRequest('GET', `/v1/files/${fileId}`, {});
+        const downloadRes = mockResponse();
+        await handleFileDownload(downloadReq, downloadRes, { fileStore });
+
+        expect(downloadRes.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({
+          'Content-Type': 'image/png',
+        }));
+        expect(downloadRes.end.mock.calls[0][0]).toEqual(imageData);
+      } finally {
+        fileStore.close();
+      }
+    });
+
+    test('returns 404 when fileId not in FileStore and no agent/user params', async () => {
+      const fileStore = await FileStore.create(join(tmpDir, 'files.db'));
+      try {
+        const req = mockRequest('GET', '/v1/files/nonexistent.png', {});
+        const res = mockResponse();
+        await handleFileDownload(req, res, { fileStore });
+
+        expect(res.writeHead).toHaveBeenCalledWith(404, expect.any(Object));
+      } finally {
+        fileStore.close();
+      }
     });
   });
 });
