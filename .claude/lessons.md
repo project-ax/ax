@@ -11,6 +11,12 @@
 **Context:** Designing how provider-map.ts would work after a monorepo split
 **Lesson:** `resolveProviderPath()` currently resolves relative paths via `new URL(relativePath, import.meta.url)`. For npm packages, it can use `import('@ax/provider-llm-anthropic')` instead — this is still a static allowlist (hardcoded package names, not config-derived), so SC-SEC-002 is preserved. The key invariant is "no dynamic path construction from config values," not "paths must be relative."
 **Tags:** security, SC-SEC-002, provider-map, npm-packages, static-allowlist
+
+### Slack url_private URLs require Authorization header — plain fetch fails silently
+**Date:** 2026-02-25
+**Context:** Debugging why Slack image attachments resulted in "I don't see any image" from the LLM
+**Lesson:** Slack's `url_private` URLs (returned in file attachment objects) require `Authorization: Bearer <bot_token>` to download. A plain `fetch(url)` returns 401/302, and if the download failure is caught+continued (like in buildContentWithAttachments), the image is silently dropped. Any channel provider that has authenticated URLs needs a `downloadAttachment` method to handle auth — don't put auth knowledge in the generic download pipeline.
+**Tags:** slack, url_private, authentication, image-attachments, silent-failure
 ### pi-agent-core only supports text — image blocks must bypass it
 **Date:** 2026-02-26
 **Context:** Debugging why Slack image attachments weren't visible to the LLM despite being downloaded and stored correctly.
@@ -243,6 +249,12 @@
 **Context:** When renaming `Config.model` to `Config.models`, initially thought ALL `config.model` references needed updating. But `AgentConfig` in runner.ts has its own `model` field (agent-side model from CLI args) that is a completely different type.
 **Lesson:** Before bulk-renaming a field across the codebase, verify which TYPE each `config.model` reference belongs to. `Config` (from ax.yaml, host-side) and `AgentConfig` (from CLI args, agent-side) are different types with different `model` fields. Use TypeScript's type system or grep for the import to disambiguate.
 **Tags:** config, types, rename, agent-config, disambiguation
+
+### claude-code runner discards non-text content blocks — must extract and forward via SDKUserMessage
+**Date:** 2026-02-26
+**Context:** Images from Slack were downloaded correctly and passed to the agent as `image_data` ContentBlocks, but the claude-code runner stripped them to text-only
+**Lesson:** The `runClaudeCode()` runner filters `config.userMessage` to text-only (`b.type === 'text'`), then passes a plain string to the Agent SDK `query()`. To forward images, extract `image_data` blocks separately, build an `SDKUserMessage` with `MessageParam.content` containing both `TextBlockParam` and `ImageBlockParam` entries, and pass as `AsyncIterable<SDKUserMessage>` to `query()`. The `ImageBlockParam.source` uses `{ type: 'base64', media_type, data }` matching Anthropic's `Base64ImageSource`. Note: the `media_type` field must be a literal union type, not `string` — cast `ImageMimeType as AnthropicMediaType`.
+**Tags:** claude-code, agent-sdk, images, SDKUserMessage, ImageBlockParam, vision
 
 ### Mock LLM provider doesn't echo model names — use provider failures to verify routing
 **Date:** 2026-02-26

@@ -7,6 +7,14 @@
 **Files touched:** Created: docs/plans/2026-02-26-plugin-framework-design.md
 **Outcome:** Success — design document ready for review
 **Notes:** The codebase has grown 4.5x past the original LOC target. The provider pattern is already a plugin framework — the gap is packaging, not architecture. Key tension: SC-SEC-002 prevents dynamic loading, but a static allowlist pointing to npm packages instead of relative paths preserves the invariant while enabling the split.
+
+## [2026-02-25 21:53] — Fix Slack image download missing auth header
+
+**Task:** Users sending images via Slack got "I don't see any image" — images silently failed to download
+**What I did:** Traced the image flow from Slack → buildContentWithAttachments → fetch. Found that `fetch(att.url)` at server-channels.ts:55 was fetching Slack's `url_private` URLs without the required `Authorization: Bearer <bot_token>` header. Slack returned non-OK (401), images were silently skipped, and plain text was sent to the agent. Fixed by adding `downloadAttachment` method to `ChannelProvider` interface (with Slack implementation that includes auth headers), and passing it as a download function to `buildContentWithAttachments`. Also exported `buildContentWithAttachments` for direct testing.
+**Files touched:** src/providers/channel/types.ts, src/providers/channel/slack.ts, src/host/server-channels.ts, tests/providers/channel/slack.test.ts, tests/host/server-channels.test.ts (new)
+**Outcome:** Success — 1614 tests pass (43 existing + 3 new slack + 5 new server-channels), build clean
+**Notes:** The `downloadAttachment` method is optional on ChannelProvider so other providers aren't forced to implement it. The fallback to plain `fetch` remains for providers that don't need auth (or have public URLs).
 ## [2026-02-26 02:14] — Fix Slack image attachments not reaching the LLM
 
 **Task:** Users attaching images to Slack messages got "I don't see any image" — images were downloaded and stored but never sent to Claude.
@@ -481,6 +489,14 @@
 **Files touched:** .claude/journal.md (this entry)
 **Outcome:** Success — comprehensive summary produced covering all 7 requested research areas
 **Notes:** Key finding for AX: Claude Code's skill system is purely prompt-based (no code execution in the skill itself — scripts are run via Bash tool), while OpenClaw's ClawHub had catastrophic supply chain issues (341-1,184 malicious skills, 12-20% of registry). The Agent Skills open standard (agentskills.io) is cross-platform and worth tracking for AX compatibility. Claude Code's plugin system (.claude-plugin/plugin.json) handles distribution — something AX doesn't have yet.
+
+## [2026-02-26 02:45] — Fix claude-code runner dropping image blocks
+
+**Task:** Images sent via Slack to the claude-code agent were silently discarded — the agent responded "I don't see any image"
+**What I did:** Root cause: `runClaudeCode()` in claude-code.ts extracted only text from `config.userMessage`, discarding all `image_data` blocks. The Agent SDK's `query()` accepts `AsyncIterable<SDKUserMessage>` with structured `MessageParam` content including `ImageBlockParam`. Fixed by: (1) extracting `image_data` blocks from `rawMsg`, (2) building `SDKUserMessage` with `ImageBlockParam` entries (base64 source), (3) passing as `AsyncIterable` to `query()` when images are present, (4) falling back to plain string when no images. Extracted the logic into a testable `buildSDKPrompt()` helper.
+**Files touched:** src/agent/runners/claude-code.ts (modified), tests/agent/runners/claude-code.test.ts (modified)
+**Outcome:** Success — all 1618 tests pass, TypeScript build clean, 4 new tests for buildSDKPrompt
+**Notes:** This was the second bug in the image pipeline (first was missing Slack auth header for url_private downloads). Both fixes together complete the Slack → claude-code image flow.
 
 ## [2026-02-26 02:15] — Organize models by task type
 

@@ -696,6 +696,90 @@ describe('Slack channel provider', () => {
     });
   });
 
+  describe('downloadAttachment', () => {
+    test('includes Authorization header when fetching url_private', async () => {
+      process.env.SLACK_BOT_TOKEN = 'xoxb-test-token';
+      process.env.SLACK_APP_TOKEN = 'xapp-test';
+      const origFetch = globalThis.fetch;
+      const mockFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        arrayBuffer: () => Promise.resolve(new Uint8Array([0x89, 0x50, 0x4e, 0x47]).buffer),
+      });
+      globalThis.fetch = mockFetch as any;
+
+      try {
+        const { create } = await import('../../../src/providers/channel/slack.js');
+        const provider = await create(testConfig());
+
+        const result = await provider.downloadAttachment!({
+          filename: 'image.png',
+          mimeType: 'image/png',
+          size: 4,
+          url: 'https://files.slack.com/files-pri/T01-F01/image.png',
+        });
+
+        expect(mockFetch).toHaveBeenCalledWith(
+          'https://files.slack.com/files-pri/T01-F01/image.png',
+          { headers: { Authorization: 'Bearer xoxb-test-token' } },
+        );
+        expect(result).toBeInstanceOf(Buffer);
+        expect(result!.length).toBe(4);
+      } finally {
+        globalThis.fetch = origFetch;
+      }
+    });
+
+    test('returns inline content without fetching', async () => {
+      process.env.SLACK_BOT_TOKEN = 'xoxb-test';
+      process.env.SLACK_APP_TOKEN = 'xapp-test';
+      const origFetch = globalThis.fetch;
+      const mockFetch = vi.fn();
+      globalThis.fetch = mockFetch as any;
+
+      try {
+        const { create } = await import('../../../src/providers/channel/slack.js');
+        const provider = await create(testConfig());
+        const inlineData = Buffer.from('already-downloaded');
+
+        const result = await provider.downloadAttachment!({
+          filename: 'image.png',
+          mimeType: 'image/png',
+          size: inlineData.length,
+          content: inlineData,
+          url: 'https://files.slack.com/should-not-be-called',
+        });
+
+        expect(mockFetch).not.toHaveBeenCalled();
+        expect(result).toBe(inlineData);
+      } finally {
+        globalThis.fetch = origFetch;
+      }
+    });
+
+    test('returns undefined on fetch failure', async () => {
+      process.env.SLACK_BOT_TOKEN = 'xoxb-test';
+      process.env.SLACK_APP_TOKEN = 'xapp-test';
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 401 }) as any;
+
+      try {
+        const { create } = await import('../../../src/providers/channel/slack.js');
+        const provider = await create(testConfig());
+
+        const result = await provider.downloadAttachment!({
+          filename: 'image.png',
+          mimeType: 'image/png',
+          size: 100,
+          url: 'https://files.slack.com/files-pri/T01-F01/image.png',
+        });
+
+        expect(result).toBeUndefined();
+      } finally {
+        globalThis.fetch = origFetch;
+      }
+    });
+  });
+
   describe('socket resilience', () => {
     test('disables built-in auto-reconnect on socket-mode client', async () => {
       process.env.SLACK_BOT_TOKEN = 'xoxb-test';

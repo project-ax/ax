@@ -86,4 +86,6 @@ export interface ChannelProvider {
   addReaction?(session: SessionAddress, messageId: string, emoji: string): Promise<void>;
   removeReaction?(session: SessionAddress, messageId: string, emoji: string): Promise<void>;
   fetchThreadHistory?(channel: string, threadTs: string, limit?: number): Promise<{sender: string; content: string; ts: string}[]>;
+  /** Download attachment content (with provider-specific auth). */
+  downloadAttachment?(attachment: Attachment): Promise<Buffer | undefined>;
 }

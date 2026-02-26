@@ -411,6 +411,24 @@ export async function create(config: Config): Promise<ChannelProvider> {
       await app.client.reactions.remove({ token: botToken, channel, name: emoji, timestamp: messageId }).catch(() => {});
     },
 
+    async downloadAttachment(attachment: Attachment): Promise<Buffer | undefined> {
+      if (attachment.content) return attachment.content;
+      if (!attachment.url) return undefined;
+      try {
+        const resp = await fetch(attachment.url, {
+          headers: { Authorization: `Bearer ${botToken}` },
+        });
+        if (!resp.ok) {
+          slackLogger.warn('slack_attachment_download_failed', { url: attachment.url, status: resp.status });
+          return undefined;
+        }
+        return Buffer.from(await resp.arrayBuffer());
+      } catch (err) {
+        slackLogger.warn('slack_attachment_download_error', { url: attachment.url, error: (err as Error).message });
+        return undefined;
+      }
+    },
+
     async disconnect(): Promise<void> {
       intentionalDisconnect = true;
       if (healthCheckInterval) {

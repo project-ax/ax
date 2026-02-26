@@ -6,6 +6,8 @@ import { createServer as createHttpServer, type Server as HttpServer } from 'nod
 import { PromptBuilder } from '../../../src/agent/prompt/builder.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { startAnthropicProxy } from '../../../src/host/proxy.js';
+import { buildSDKPrompt } from '../../../src/agent/runners/claude-code.js';
+import type { ContentBlock } from '../../../src/types.js';
 
 /**
  * Create a mock Anthropic API server that returns canned responses.
@@ -195,5 +197,75 @@ describe('claude-code identity file loading', () => {
     // Falls back to default identity
     expect(result.content).toContain('You are AX');
     expect(result.content).not.toContain('Connie');
+  });
+});
+
+describe('buildSDKPrompt', () => {
+  test('returns plain string when no image blocks', () => {
+    const result = buildSDKPrompt('hello world', []);
+    expect(result).toBe('hello world');
+  });
+
+  test('returns AsyncIterable with text and image blocks when images present', async () => {
+    const imageBlocks: ContentBlock[] = [
+      { type: 'image_data', data: 'aGVsbG8=', mimeType: 'image/png' },
+    ];
+
+    const result = buildSDKPrompt('describe this image', imageBlocks);
+
+    // Should be an AsyncIterable, not a string
+    expect(typeof result).not.toBe('string');
+    const iter = result as AsyncIterable<{ type: string; message: { role: string; content: unknown[] } }>;
+    const messages: Array<{ type: string; message: { role: string; content: unknown[] } }> = [];
+    for await (const msg of iter) messages.push(msg);
+
+    expect(messages).toHaveLength(1);
+    const msg = messages[0];
+    expect(msg.type).toBe('user');
+    expect(msg.message.role).toBe('user');
+
+    const content = msg.message.content as Array<Record<string, unknown>>;
+    expect(content).toHaveLength(2);
+    expect(content[0]).toEqual({ type: 'text', text: 'describe this image' });
+    expect(content[1]).toEqual({
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/png', data: 'aGVsbG8=' },
+    });
+  });
+
+  test('handles multiple image blocks', async () => {
+    const imageBlocks: ContentBlock[] = [
+      { type: 'image_data', data: 'cG5n', mimeType: 'image/png' },
+      { type: 'image_data', data: 'anBn', mimeType: 'image/jpeg' },
+    ];
+
+    const result = buildSDKPrompt('compare', imageBlocks);
+    const iter = result as AsyncIterable<{ message: { content: unknown[] } }>;
+    const messages = [];
+    for await (const msg of iter) messages.push(msg);
+
+    const content = messages[0].message.content as Array<Record<string, unknown>>;
+    expect(content).toHaveLength(3); // 1 text + 2 images
+    expect(content[0]).toEqual({ type: 'text', text: 'compare' });
+    expect((content[1] as any).source.media_type).toBe('image/png');
+    expect((content[2] as any).source.media_type).toBe('image/jpeg');
+  });
+
+  test('omits text block when text prompt is empty', async () => {
+    const imageBlocks: ContentBlock[] = [
+      { type: 'image_data', data: 'aGVsbG8=', mimeType: 'image/png' },
+    ];
+
+    const result = buildSDKPrompt('', imageBlocks);
+    const iter = result as AsyncIterable<{ message: { content: unknown[] } }>;
+    const messages = [];
+    for await (const msg of iter) messages.push(msg);
+
+    const content = messages[0].message.content as Array<Record<string, unknown>>;
+    expect(content).toHaveLength(1); // only image, no text
+    expect(content[0]).toEqual({
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/png', data: 'aGVsbG8=' },
+    });
   });
 });

@@ -32,10 +32,11 @@ const CHANNEL_RECONNECT_MAX_DELAY_MS = 60_000;
  * Non-image attachments are ignored (for now).
  * If all downloads fail, returns the text content as-is.
  */
-async function buildContentWithAttachments(
+export async function buildContentWithAttachments(
   textContent: string,
   attachments: Attachment[],
   logger: Logger,
+  downloadFn?: (att: Attachment) => Promise<Buffer | undefined>,
 ): Promise<string | ContentBlock[]> {
   const imageAttachments = attachments.filter(
     a => IMAGE_MIME_TYPES.includes(a.mimeType as ImageMimeType),
@@ -49,8 +50,11 @@ async function buildContentWithAttachments(
 
   for (const att of imageAttachments) {
     try {
+      // Use provider-specific download function (handles auth), fall back to plain fetch
       let data: Buffer | undefined = att.content;
-      // Download from URL if no inline content
+      if (!data && downloadFn) {
+        data = await downloadFn(att);
+      }
       if (!data && att.url) {
         const resp = await fetch(att.url);
         if (!resp.ok) {
@@ -226,8 +230,9 @@ export function registerChannelHandler(
       sessionCanaries.set(result.sessionId, result.canaryToken);
 
       // Download attachments (images) and embed as inline image_data blocks
+      const downloadFn = channel.downloadAttachment?.bind(channel);
       const messageContent = msg.attachments.length > 0
-        ? await buildContentWithAttachments(msg.content, msg.attachments, logger)
+        ? await buildContentWithAttachments(msg.content, msg.attachments, logger, downloadFn)
         : msg.content;
 
       // Determine if reply is optional (LLM can choose not to respond)

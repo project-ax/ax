@@ -12,14 +12,59 @@
  */
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
+import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 import { IPCClient } from '../ipc-client.js';
 import { startTCPBridge } from '../tcp-bridge.js';
 import { createIPCMcpServer } from '../mcp-server.js';
 import type { AgentConfig } from '../runner.js';
+import type { ContentBlock } from '../../types.js';
 import { buildSystemPrompt } from '../agent-setup.js';
 import { getLogger } from '../../logger.js';
 
 const logger = getLogger().child({ component: 'claude-code' });
+
+// ── Prompt builder helpers ──────────────────────────────────────────
+
+type AnthropicMediaType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+
+/**
+ * Build a prompt suitable for the Agent SDK query().
+ * When image blocks are present, returns an AsyncIterable<SDKUserMessage> with
+ * structured content (text + image blocks). Otherwise returns a plain string.
+ */
+export function buildSDKPrompt(
+  textPrompt: string,
+  imageBlocks: ContentBlock[],
+): string | AsyncIterable<SDKUserMessage> {
+  if (imageBlocks.length === 0) return textPrompt;
+
+  const contentParts: Array<
+    | { type: 'text'; text: string }
+    | { type: 'image'; source: { type: 'base64'; media_type: AnthropicMediaType; data: string } }
+  > = [];
+  if (textPrompt.trim()) {
+    contentParts.push({ type: 'text', text: textPrompt });
+  }
+  for (const img of imageBlocks) {
+    if (img.type === 'image_data') {
+      contentParts.push({
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: img.mimeType as AnthropicMediaType,
+          data: img.data,
+        },
+      });
+    }
+  }
+  const userMsg: SDKUserMessage = {
+    type: 'user',
+    message: { role: 'user', content: contentParts },
+    parent_tool_use_id: null,
+    session_id: '',
+  };
+  return (async function* () { yield userMsg; })();
+}
 
 // ── Main runner ─────────────────────────────────────────────────────
 
@@ -29,6 +74,11 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
     ? rawMsg
     : rawMsg.filter(b => b.type === 'text').map(b => (b as { text: string }).text).join('\n');
   if (!userMessage.trim()) return;
+
+  // Extract inline image blocks so they can be forwarded to the Agent SDK
+  const imageBlocks: ContentBlock[] = Array.isArray(rawMsg)
+    ? rawMsg.filter(b => b.type === 'image_data')
+    : [];
 
   if (!config.proxySocket) {
     logger.error('missing_proxy_socket', { message: 'claude-code agent requires --proxy-socket' });
@@ -65,9 +115,12 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
   }
 
   try {
-    // 5. Call Agent SDK query()
+    // 5. Build prompt — structured with images, or plain string
+    const prompt = buildSDKPrompt(fullPrompt, imageBlocks);
+
+    // 6. Call Agent SDK query()
     const result = query({
-      prompt: fullPrompt,
+      prompt,
       options: {
         model: 'claude-sonnet-4-5-20250929',
         cwd: config.workspace,
@@ -88,7 +141,7 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
       },
     });
 
-    // 6. Stream output
+    // 7. Stream output
     let hasOutput = false;
     for await (const msg of result) {
       if (msg.type === 'assistant') {
@@ -113,7 +166,7 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
     process.stderr.write(`Claude Code agent failed: ${message}\n`);
     process.exitCode = 1;
   } finally {
-    // 7. Cleanup
+    // 8. Cleanup
     bridge.stop();
     client.disconnect();
   }
