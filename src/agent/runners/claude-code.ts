@@ -16,9 +16,7 @@ import { IPCClient } from '../ipc-client.js';
 import { startTCPBridge } from '../tcp-bridge.js';
 import { createIPCMcpServer } from '../mcp-server.js';
 import type { AgentConfig } from '../runner.js';
-import { PromptBuilder } from '../prompt/builder.js';
-import { loadIdentityFiles } from '../identity-loader.js';
-import { loadSkills } from '../stream-utils.js';
+import { buildSystemPrompt } from '../agent-setup.js';
 import { getLogger } from '../../logger.js';
 
 const logger = getLogger().child({ component: 'claude-code' });
@@ -44,29 +42,11 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
   const client = new IPCClient({ socketPath: config.ipcSocket });
   await client.connect();
 
-  // 3. Create IPC MCP server
-  const ipcMcpServer = createIPCMcpServer(client, { userId: config.userId });
+  // 3. Build system prompt (also returns toolFilter for MCP tool filtering)
+  const { systemPrompt, toolFilter } = buildSystemPrompt(config);
 
-  // 4. Build system prompt via modular PromptBuilder
-  const skills = loadSkills(config.skills);
-
-  const promptBuilder = new PromptBuilder();
-  const promptResult = promptBuilder.build({
-    agentType: config.agent ?? 'claude-code',
-    workspace: config.workspace,
-    skills,
-    profile: config.profile ?? 'balanced',
-    sandboxType: config.sandboxType ?? 'subprocess',
-    taintRatio: config.taintRatio ?? 0,
-    taintThreshold: config.taintThreshold ?? 1,
-    identityFiles: loadIdentityFiles({
-      agentDir: config.agentDir,
-      userId: config.userId,
-    }),
-    contextWindow: 200000,
-    historyTokens: config.history?.length ? JSON.stringify(config.history).length / 4 : 0,
-  });
-  const systemPrompt = promptResult.content;
+  // 4. Create IPC MCP server with context-aware tool filtering
+  const ipcMcpServer = createIPCMcpServer(client, { userId: config.userId, filter: toolFilter });
 
   // Include conversation history in the prompt if available
   let fullPrompt = '';

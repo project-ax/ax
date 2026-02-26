@@ -118,13 +118,12 @@ describe('ipc-tools', () => {
     });
   });
 
-  test('identity_write has updated description mentioning taint-aware behavior', () => {
+  test('identity_write has description mentioning identity files', () => {
     const client = createMockClient();
     const tools = createIPCTools(client as any);
     const tool = findTool(tools, 'identity_write');
-    expect(tool.description).toContain('Auto-applied');
-    expect(tool.description).toContain('queued');
-    expect(tool.description).toContain('audited');
+    expect(tool.description).toContain('SOUL.md');
+    expect(tool.description).toContain('IDENTITY.md');
   });
 
   test('exports user_write tool', () => {
@@ -172,9 +171,55 @@ describe('ipc-tools', () => {
     expect(tools.find((t) => t.name === 'scheduler_list_jobs')).toBeDefined();
   });
 
-  test('total tool count is 25', () => {
+  test('total tool count is 25 without filter', () => {
     const client = createMockClient();
     const tools = createIPCTools(client as any);
     expect(tools.length).toBe(25);
+  });
+
+  test('filter excludes scheduler tools when hasHeartbeat is false', () => {
+    const client = createMockClient();
+    const tools = createIPCTools(client as any, {
+      filter: { hasHeartbeat: false, hasSkills: true, hasWorkspaceTiers: true, hasGovernance: true },
+    });
+    const names = tools.map((t) => t.name);
+    expect(names).not.toContain('scheduler_add_cron');
+    expect(names).not.toContain('scheduler_run_at');
+    expect(names).not.toContain('scheduler_remove_cron');
+    expect(names).not.toContain('scheduler_list_jobs');
+    // Core tools still present
+    expect(names).toContain('memory_write');
+    expect(names).toContain('web_fetch');
+  });
+
+  test('filter excludes enterprise tools when flags are false', () => {
+    const client = createMockClient();
+    const tools = createIPCTools(client as any, {
+      filter: { hasHeartbeat: true, hasSkills: true, hasWorkspaceTiers: false, hasGovernance: false },
+    });
+    const names = tools.map((t) => t.name);
+    expect(names).not.toContain('workspace_write');
+    expect(names).not.toContain('workspace_read');
+    expect(names).not.toContain('identity_propose');
+    expect(names).not.toContain('proposal_list');
+    expect(names).not.toContain('agent_registry_list');
+    // Core tools still present
+    expect(names).toContain('memory_write');
+    expect(names).toContain('identity_write');
+  });
+
+  test('filter with all flags false returns only core tools', () => {
+    const client = createMockClient();
+    const tools = createIPCTools(client as any, {
+      filter: { hasHeartbeat: false, hasSkills: false, hasWorkspaceTiers: false, hasGovernance: false },
+    });
+    const names = tools.map((t) => t.name);
+    // Memory(5) + web(2) + audit(1) + identity(2) + delegation(1) = 11 tools
+    expect(names).toContain('memory_write');
+    expect(names).toContain('web_fetch');
+    expect(names).toContain('audit_query');
+    expect(names).toContain('identity_write');
+    expect(names).toContain('agent_delegate');
+    expect(tools.length).toBe(11);
   });
 });

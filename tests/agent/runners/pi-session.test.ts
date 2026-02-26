@@ -10,7 +10,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { createServer, type Server, type Socket } from 'node:net';
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { mkdtempSync, rmSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { startAnthropicProxy } from '../../../src/host/proxy.js';
@@ -522,6 +522,11 @@ describe('pi-session (proxy mode — LLM via Anthropic SDK)', () => {
   test('LLM request includes scheduler, identity, and user_write tools', async () => {
     const port = nextPort++;
 
+    // Create agentDir with a HEARTBEAT.md so scheduler tools are included
+    const agentDir = join(tempDir, 'agent-dir');
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(join(agentDir, 'HEARTBEAT.md'), '# Checks\n- check stuff');
+
     const receivedRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
 
     mockApi = await createMockAnthropicApi(port, (req, body, res) => {
@@ -546,6 +551,7 @@ describe('pi-session (proxy mode — LLM via Anthropic SDK)', () => {
         proxySocket: proxySocketPath,
         workspace,
         skills: skillsDir,
+        agentDir,
         userMessage: 'hello',
       });
     } finally {
@@ -557,7 +563,7 @@ describe('pi-session (proxy mode — LLM via Anthropic SDK)', () => {
     const tools = receivedRequests[0].body.tools as Array<{ name: string }>;
     const toolNames = tools.map(t => t.name);
 
-    // Scheduler tools must be present
+    // Scheduler tools must be present (HEARTBEAT.md exists)
     expect(toolNames).toContain('scheduler_add_cron');
     expect(toolNames).toContain('scheduler_remove_cron');
     expect(toolNames).toContain('scheduler_list_jobs');

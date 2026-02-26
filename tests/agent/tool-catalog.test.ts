@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'vitest';
-import { TOOL_CATALOG, TOOL_NAMES, getToolParamKeys, normalizeOrigin, normalizeIdentityFile } from '../../src/agent/tool-catalog.js';
+import { TOOL_CATALOG, TOOL_NAMES, getToolParamKeys, normalizeOrigin, normalizeIdentityFile, filterTools } from '../../src/agent/tool-catalog.js';
+import type { ToolFilterContext, ToolCategory } from '../../src/agent/tool-catalog.js';
 
 describe('tool-catalog', () => {
   test('exports exactly 25 tools', () => {
@@ -105,6 +106,29 @@ describe('tool-catalog', () => {
     const fileSchema = (spec.parameters as any).properties.file;
     expect(fileSchema.type, 'identity_write.file should be "string" type').toBe('string');
   });
+
+  test('every tool has a valid category', () => {
+    const validCategories: ToolCategory[] = [
+      'memory', 'web', 'audit', 'identity',
+      'scheduler', 'skills', 'delegation',
+      'workspace', 'governance',
+    ];
+    for (const spec of TOOL_CATALOG) {
+      expect(validCategories, `"${spec.name}" has invalid category "${spec.category}"`).toContain(spec.category);
+    }
+  });
+
+  test('every category has at least one tool', () => {
+    const categories: ToolCategory[] = [
+      'memory', 'web', 'audit', 'identity',
+      'scheduler', 'skills', 'delegation',
+      'workspace', 'governance',
+    ];
+    for (const cat of categories) {
+      const tools = TOOL_CATALOG.filter(s => s.category === cat);
+      expect(tools.length, `category "${cat}" has no tools`).toBeGreaterThan(0);
+    }
+  });
 });
 
 describe('normalizeOrigin', () => {
@@ -157,5 +181,130 @@ describe('normalizeIdentityFile', () => {
   test('returns raw value for unrecognized names', () => {
     expect(normalizeIdentityFile('USER.md')).toBe('USER.md');
     expect(normalizeIdentityFile('random')).toBe('random');
+  });
+});
+
+// ── filterTools ────────────────────────────────────────────────────────
+
+describe('filterTools', () => {
+  const ALL_FLAGS: ToolFilterContext = {
+    hasHeartbeat: true,
+    hasSkills: true,
+    hasWorkspaceTiers: true,
+    hasGovernance: true,
+  };
+
+  const NO_FLAGS: ToolFilterContext = {
+    hasHeartbeat: false,
+    hasSkills: false,
+    hasWorkspaceTiers: false,
+    hasGovernance: false,
+  };
+
+  test('all flags true returns full catalog', () => {
+    const result = filterTools(ALL_FLAGS);
+    expect(result.length).toBe(TOOL_CATALOG.length);
+  });
+
+  test('all flags false returns only always-on categories', () => {
+    const result = filterTools(NO_FLAGS);
+    const names = result.map(s => s.name);
+    // memory(5) + web(2) + audit(1) + identity(2) + delegation(1) = 11
+    const alwaysOn = TOOL_CATALOG.filter(s =>
+      !['scheduler', 'skills', 'workspace', 'governance'].includes(s.category)
+    );
+    expect(result.length).toBe(alwaysOn.length);
+
+    // Verify excluded categories
+    for (const spec of result) {
+      expect(['scheduler', 'skills', 'workspace', 'governance']).not.toContain(spec.category);
+    }
+  });
+
+  test('hasHeartbeat includes scheduler tools', () => {
+    const result = filterTools({ ...NO_FLAGS, hasHeartbeat: true });
+    const names = result.map(s => s.name);
+    expect(names).toContain('scheduler_add_cron');
+    expect(names).toContain('scheduler_run_at');
+    expect(names).toContain('scheduler_remove_cron');
+    expect(names).toContain('scheduler_list_jobs');
+  });
+
+  test('hasHeartbeat=false excludes scheduler tools', () => {
+    const result = filterTools({ ...ALL_FLAGS, hasHeartbeat: false });
+    const names = result.map(s => s.name);
+    expect(names).not.toContain('scheduler_add_cron');
+    expect(names).not.toContain('scheduler_run_at');
+  });
+
+  test('hasSkills includes skill tools', () => {
+    const result = filterTools({ ...NO_FLAGS, hasSkills: true });
+    const names = result.map(s => s.name);
+    expect(names).toContain('skill_list');
+    expect(names).toContain('skill_read');
+    expect(names).toContain('skill_propose');
+  });
+
+  test('hasSkills=false excludes skill tools', () => {
+    const result = filterTools({ ...ALL_FLAGS, hasSkills: false });
+    const names = result.map(s => s.name);
+    expect(names).not.toContain('skill_list');
+    expect(names).not.toContain('skill_read');
+    expect(names).not.toContain('skill_propose');
+  });
+
+  test('hasWorkspaceTiers includes workspace tools', () => {
+    const result = filterTools({ ...NO_FLAGS, hasWorkspaceTiers: true });
+    const names = result.map(s => s.name);
+    expect(names).toContain('workspace_write');
+    expect(names).toContain('workspace_read');
+    expect(names).toContain('workspace_list');
+    expect(names).toContain('workspace_write_file');
+  });
+
+  test('hasWorkspaceTiers=false excludes workspace tools', () => {
+    const result = filterTools({ ...ALL_FLAGS, hasWorkspaceTiers: false });
+    const names = result.map(s => s.name);
+    expect(names).not.toContain('workspace_write');
+    expect(names).not.toContain('workspace_read');
+    expect(names).not.toContain('workspace_list');
+    expect(names).not.toContain('workspace_write_file');
+  });
+
+  test('hasGovernance includes governance tools', () => {
+    const result = filterTools({ ...NO_FLAGS, hasGovernance: true });
+    const names = result.map(s => s.name);
+    expect(names).toContain('identity_propose');
+    expect(names).toContain('proposal_list');
+    expect(names).toContain('agent_registry_list');
+  });
+
+  test('hasGovernance=false excludes governance tools', () => {
+    const result = filterTools({ ...ALL_FLAGS, hasGovernance: false });
+    const names = result.map(s => s.name);
+    expect(names).not.toContain('identity_propose');
+    expect(names).not.toContain('proposal_list');
+    expect(names).not.toContain('agent_registry_list');
+  });
+
+  test('core tools are always present regardless of flags', () => {
+    const result = filterTools(NO_FLAGS);
+    const names = result.map(s => s.name);
+    // Memory
+    expect(names).toContain('memory_write');
+    expect(names).toContain('memory_query');
+    expect(names).toContain('memory_read');
+    expect(names).toContain('memory_delete');
+    expect(names).toContain('memory_list');
+    // Web
+    expect(names).toContain('web_fetch');
+    expect(names).toContain('web_search');
+    // Audit
+    expect(names).toContain('audit_query');
+    // Identity
+    expect(names).toContain('identity_write');
+    expect(names).toContain('user_write');
+    // Delegation
+    expect(names).toContain('agent_delegate');
   });
 });
