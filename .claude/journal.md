@@ -413,6 +413,23 @@
 **Outcome:** Partial — core pipeline is wired up. Still need: Anthropic provider image_data handling, conversation store persistence guard, tests.
 **Notes:** The `image_data` block type is transient — it should never be serialized into conversation history. The extraction step in server-completions replaces image_data blocks with persistent `image` (file ref) blocks before storing.
 
+## [2026-02-26 14:00] — LLM tool call optimization: context-aware filtering
+
+**Task:** Optimize LLM tool calls by adding context-aware filtering so only relevant tools are sent per session
+**What I did:**
+1. Added `ToolCategory` type and `category` field to `ToolSpec` — tagged all 25 tools across 9 categories (memory, web, audit, identity, scheduler, skills, delegation, workspace, governance)
+2. Added `ToolFilterContext` interface and `filterTools()` function — excludes tools by category based on session flags (hasHeartbeat, hasSkills, hasWorkspaceTiers, hasGovernance)
+3. Tightened verbose tool descriptions in TOOL_CATALOG and MCP server — reduced identity_write, user_write, skill_propose, agent_delegate, workspace/governance descriptions by 50-70%
+4. Refactored `buildSystemPrompt()` to return `toolFilter` alongside `systemPrompt` — single derivation point for filter context
+5. Wired filtering into all 3 tool consumers: ipc-tools.ts (pi-agent-core), pi-session.ts (pi-coding-agent), mcp-server.ts (claude-code)
+6. Refactored claude-code.ts to use shared `buildSystemPrompt()` instead of manual PromptBuilder usage
+7. Updated tests: fixed tool count assertions, added HEARTBEAT.md fixture to pi-session test, added filterTools test suite (12 tests), added filter tests to ipc-tools (3 tests) and mcp-server (2 tests), updated sandbox-isolation test
+**Files touched:**
+- Modified: src/agent/tool-catalog.ts, src/agent/ipc-tools.ts, src/agent/mcp-server.ts, src/agent/agent-setup.ts, src/agent/runner.ts, src/agent/runners/pi-session.ts, src/agent/runners/claude-code.ts
+- Modified tests: tests/agent/tool-catalog.test.ts, tests/agent/ipc-tools.test.ts, tests/agent/mcp-server.test.ts, tests/agent/runners/pi-session.test.ts, tests/sandbox-isolation.test.ts
+**Outcome:** Success — 151 test files, 1546 tests pass (1 skipped, pre-existing)
+**Notes:** Without heartbeat/skills/enterprise, tool count drops from 25 to 11 per LLM call. Filter context aligns with prompt module shouldInclude() logic — if HeartbeatModule is excluded, scheduler tools are too. All existing sync tests still pass since they test against the unfiltered catalog.
+
 ## [2026-02-26 00:00] — Unified image generation: config simplification + image provider category
 
 **Task:** Simplify YAML config (model+model_fallbacks → models array, add image_models array) and implement full image generation provider category

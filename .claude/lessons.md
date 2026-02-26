@@ -203,6 +203,18 @@
 **Lesson:** For backward-compatible structured content in SQLite TEXT columns: serialize arrays with JSON.stringify, leave strings as-is. On load, detect JSON arrays by checking if the string starts with `[` and parse accordingly. This avoids schema migrations and handles both old (plain text) and new (structured) data transparently.
 **Tags:** sqlite, content-blocks, serialization, conversation-store, backward-compatibility
 
+### Tool filtering must align with prompt module shouldInclude()
+**Date:** 2026-02-26
+**Context:** Added context-aware tool filtering — scheduler tools excluded when no heartbeat. Pi-session test broke because it expected scheduler tools without providing a HEARTBEAT.md file.
+**Lesson:** When adding tool filtering by category, ensure the filter flags derive from the same data that prompt modules use in `shouldInclude()`. If HeartbeatModule checks `identityFiles.heartbeat?.trim()`, the scheduler filter must check the same thing. Test fixtures must provide the relevant identity files (e.g., HEARTBEAT.md in agentDir) when expecting those tools to be present.
+**Tags:** tools, filtering, prompt-modules, testing, heartbeat
+
+### claude-code.ts should use shared buildSystemPrompt() like other runners
+**Date:** 2026-02-26
+**Context:** claude-code.ts manually duplicated prompt building logic (importing PromptBuilder, loadIdentityFiles, loadSkills directly). Refactoring it to use shared buildSystemPrompt() from agent-setup.ts simplified the code and gave it the toolFilter for free.
+**Lesson:** When all runners need the same derived data (system prompt + filter context), use the shared `buildSystemPrompt()` from agent-setup.ts. Don't duplicate the prompt-building logic in individual runners. If a runner needs custom prompt context fields, extend AgentConfig rather than reimplementing.
+**Tags:** runners, claude-code, prompt, agent-setup, refactoring
+
 ### onDelegate callback signature changes require updating all test files + harness
 **Date:** 2026-02-25
 **Context:** Changed onDelegate from `(task, context, ctx)` to `(req: DelegateRequest, ctx)` — tests broke in 4 locations
