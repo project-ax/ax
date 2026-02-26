@@ -3,8 +3,8 @@ import { TOOL_CATALOG, TOOL_NAMES, getToolParamKeys, normalizeOrigin, normalizeI
 import type { ToolFilterContext, ToolCategory } from '../../src/agent/tool-catalog.js';
 
 describe('tool-catalog', () => {
-  test('exports exactly 27 tools', () => {
-    expect(TOOL_CATALOG.length).toBe(27);
+  test('exports exactly 28 tools', () => {
+    expect(TOOL_CATALOG.length).toBe(28);
   });
 
   test('TOOL_NAMES matches TOOL_CATALOG names', () => {
@@ -59,6 +59,7 @@ describe('tool-catalog', () => {
       'scheduler_add_cron', 'scheduler_run_at', 'scheduler_remove_cron', 'scheduler_list_jobs',
       'skill_list', 'skill_read', 'skill_propose', 'skill_import', 'skill_search',
       'agent_delegate',
+      'image_generate',
       // Enterprise tools
       'workspace_write', 'workspace_read', 'workspace_list', 'workspace_write_file',
       'identity_propose', 'proposal_list', 'agent_registry_list',

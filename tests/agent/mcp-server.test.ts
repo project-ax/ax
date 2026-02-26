@@ -197,7 +197,7 @@ describe('IPC MCP Server', () => {
     for (const name of expectedTools) {
       expect(registeredNames, `expected tool "${name}" to be registered`).toContain(name);
     }
-    expect(registeredNames.length).toBe(27);
+    expect(registeredNames.length).toBe(28);
   });
 
   test('filter excludes scheduler and skills tools when flags are false', () => {

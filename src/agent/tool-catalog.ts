@@ -10,7 +10,7 @@ import { Type, type TSchema } from '@sinclair/typebox';
 
 export type ToolCategory =
   | 'memory' | 'web' | 'audit' | 'identity'
-  | 'scheduler' | 'skills' | 'delegation'
+  | 'scheduler' | 'skills' | 'delegation' | 'image'
   | 'workspace' | 'governance';
 
 export interface ToolSpec {
@@ -262,6 +262,23 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
       timeoutSec: Type.Optional(Type.Number({ description: 'Timeout in seconds (5-600)' })),
     }),
     category: 'delegation',
+  },
+
+  // ── Image generation ──
+  {
+    name: 'image_generate',
+    label: 'Generate Image',
+    description:
+      'Generate an image from a text prompt using a configured image model. ' +
+      'Returns a JSON object with a `url` field. Display the image in your response ' +
+      'using markdown: ![description](url)',
+    parameters: Type.Object({
+      prompt: Type.String({ description: 'Text description of the image to generate' }),
+      model: Type.Optional(Type.String({ description: 'Model ID override (defaults to first configured image model)' })),
+      size: Type.Optional(Type.String({ description: 'Image size, e.g. "1024x1024"' })),
+      quality: Type.Optional(Type.String({ description: 'Quality level, e.g. "standard" or "hd"' })),
+    }),
+    category: 'image',
   },
 
   // ── Enterprise: Workspace tools ──

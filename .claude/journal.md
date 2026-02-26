@@ -490,6 +490,14 @@
 **Outcome:** Success — comprehensive summary produced covering all 7 requested research areas
 **Notes:** Key finding for AX: Claude Code's skill system is purely prompt-based (no code execution in the skill itself — scripts are run via Bash tool), while OpenClaw's ClawHub had catastrophic supply chain issues (341-1,184 malicious skills, 12-20% of registry). The Agent Skills open standard (agentskills.io) is cross-platform and worth tracking for AX compatibility. Claude Code's plugin system (.claude-plugin/plugin.json) handles distribution — something AX doesn't have yet.
 
+## [2026-02-26 03:20] — Expose image_generate tool to agents
+
+**Task:** Agents couldn't generate images — the IPC handler existed but the tool wasn't exposed to any agent runner
+**What I did:** Added `image_generate` to both the tool catalog (TypeBox, for pi-agent-core/pi-coding-agent) and the MCP server (Zod, for claude-code). Updated tool count from 27→28 in 4 test files, added `image_generate` to expected tool name lists in 2 test files, removed `image_generate` from `knownInternalActions` in sync test.
+**Files touched:** src/agent/tool-catalog.ts, src/agent/mcp-server.ts, tests/agent/tool-catalog.test.ts, tests/agent/ipc-tools.test.ts, tests/agent/mcp-server.test.ts, tests/sandbox-isolation.test.ts, tests/agent/tool-catalog-sync.test.ts
+**Outcome:** Success — all 1618 tests pass, TypeScript build clean
+**Notes:** The IPC handler, schema, and image providers were already fully implemented. This was purely a wiring gap — the tool was never added to the agent-facing catalog or MCP server.
+
 ## [2026-02-26 02:45] — Fix claude-code runner dropping image blocks
 
 **Task:** Images sent via Slack to the claude-code agent were silently discarded — the agent responded "I don't see any image"
