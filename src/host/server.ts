@@ -465,24 +465,17 @@ export async function createServer(
       undefined, userId,
     );
 
-    // When response includes images, return AI SDK UI message parts so
-    // clients can render images via their own proxy endpoint.
-    // Text-only responses stay as plain strings for backward compatibility.
-    const hasImages = contentBlocks?.some(b => b.type === 'image');
-    const messageContent: string | object[] = hasImages
-      ? contentBlocks!.map(b => {
-          if (b.type === 'image') {
-            return { type: 'file', url: `/ax/${b.fileId}`, mediaType: b.mimeType };
-          }
-          if (b.type === 'text') {
-            return { type: 'text', text: b.text };
-          }
-          return b;
-        })
-      : responseContent;
+    // Extract file metadata from image content blocks.
+    // Content stays as the text string for OpenAI compatibility; files
+    // are returned as a separate array so the frontend can render them
+    // via its own proxy endpoint without parsing markdown.
+    const files = contentBlocks
+      ?.filter((b): b is Extract<typeof b, { type: 'image' }> => b.type === 'image')
+      .map(b => ({ type: 'file' as const, url: `/ax/${b.fileId}`, mediaType: b.mimeType }));
+    const hasFiles = files && files.length > 0;
 
     if (chatReq.stream) {
-      // Streaming mode -- SSE
+      // Streaming mode -- OpenAI SSE format
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
@@ -496,27 +489,35 @@ export async function createServer(
         choices: [{ index: 0, delta: { role: 'assistant' }, finish_reason: null }],
       });
 
-      // Content chunk
+      // Content chunk — always plain text string
       sendSSEChunk(res, {
         id: requestId, object: 'chat.completion.chunk', created, model: requestModel,
-        choices: [{ index: 0, delta: { content: typeof messageContent === 'string' ? messageContent : JSON.stringify(messageContent) }, finish_reason: null }],
+        choices: [{ index: 0, delta: { content: responseContent }, finish_reason: null }],
       });
 
-      // Finish chunk
-      sendSSEChunk(res, {
+      // Finish chunk — includes files when images are present
+      const finishChunk: OpenAIStreamChunk & { files?: typeof files } = {
         id: requestId, object: 'chat.completion.chunk', created, model: requestModel,
         choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
-      });
+      };
+      if (hasFiles) finishChunk.files = files;
+      sendSSEChunk(res, finishChunk);
 
       res.write('data: [DONE]\n\n');
       res.end();
     } else {
       // Non-streaming mode
+      const message: OpenAIChatResponse['choices'][0]['message'] = {
+        role: 'assistant',
+        content: responseContent,
+      };
+      if (hasFiles) message.files = files;
+
       const response: OpenAIChatResponse = {
         id: requestId, object: 'chat.completion', created, model: requestModel,
         choices: [{
           index: 0,
-          message: { role: 'assistant', content: messageContent as string },
+          message,
           finish_reason: finishReason,
         }],
         usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },

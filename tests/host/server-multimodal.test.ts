@@ -90,91 +90,143 @@ describe('Server multimodal responses', () => {
     rmSync(testAxHome, { recursive: true, force: true });
   });
 
-  it('returns AI SDK format content blocks when response includes images', async () => {
-    const config = loadConfig('tests/integration/ax-test.yaml');
-    server = await createServer(config, { socketPath });
-    await server.start();
+  describe('non-streaming', () => {
+    it('returns text content with files array when response includes images', async () => {
+      const config = loadConfig('tests/integration/ax-test.yaml');
+      server = await createServer(config, { socketPath });
+      await server.start();
 
-    const sessionId = randomUUID();
-    const res = await sendRequest(socketPath, '/v1/chat/completions', {
-      body: {
-        messages: [{ role: 'user', content: 'generate an image of a cow' }],
-        session_id: sessionId,
-      },
+      const res = await sendRequest(socketPath, '/v1/chat/completions', {
+        body: {
+          messages: [{ role: 'user', content: 'generate an image of a cow' }],
+          session_id: randomUUID(),
+        },
+      });
+
+      expect(res.status).toBe(200);
+      const data = JSON.parse(res.body);
+
+      // Content stays as the text string
+      expect(typeof data.choices[0].message.content).toBe('string');
+      expect(data.choices[0].message.content).toContain('A cow sailing');
+
+      // Files returned as a separate array on the message
+      const { files } = data.choices[0].message;
+      expect(files).toHaveLength(1);
+      expect(files[0]).toEqual({ type: 'file', url: '/ax/generated-abc123.png', mediaType: 'image/png' });
     });
 
-    expect(res.status).toBe(200);
-    const data = JSON.parse(res.body);
+    it('returns plain string content with no files when text-only', async () => {
+      mockedProcessCompletion.mockResolvedValueOnce({
+        responseContent: 'Just a text reply.',
+        contentBlocks: [
+          { type: 'text', text: 'Just a text reply.' },
+        ],
+        finishReason: 'stop',
+      });
 
-    // Content should be an array of AI SDK content parts
-    const content = data.choices[0].message.content;
-    expect(Array.isArray(content)).toBe(true);
-    // Text block stays as { type: 'text', text: '...' }
-    const textBlock = content.find((b: any) => b.type === 'text');
-    expect(textBlock).toBeDefined();
-    // Image block uses AI SDK file format: { type: 'file', url, mediaType }
-    const fileBlock = content.find((b: any) => b.type === 'file');
-    expect(fileBlock).toBeDefined();
-    expect(fileBlock.url).toBe('/ax/generated-abc123.png');
-    expect(fileBlock.mediaType).toBe('image/png');
+      const config = loadConfig('tests/integration/ax-test.yaml');
+      server = await createServer(config, { socketPath });
+      await server.start();
+
+      const res = await sendRequest(socketPath, '/v1/chat/completions', {
+        body: { messages: [{ role: 'user', content: 'hello' }] },
+      });
+
+      expect(res.status).toBe(200);
+      const data = JSON.parse(res.body);
+
+      expect(typeof data.choices[0].message.content).toBe('string');
+      expect(data.choices[0].message.content).toBe('Just a text reply.');
+      expect(data.choices[0].message.files).toBeUndefined();
+    });
+
+    it('returns multiple files in files array', async () => {
+      mockedProcessCompletion.mockResolvedValueOnce({
+        responseContent: 'Two images:',
+        contentBlocks: [
+          { type: 'text', text: 'Two images:' },
+          { type: 'image', fileId: 'first.png', mimeType: 'image/png' },
+          { type: 'image', fileId: 'second.jpg', mimeType: 'image/jpeg' },
+        ],
+        agentName: 'main',
+        userId: 'default',
+        finishReason: 'stop',
+      });
+
+      const config = loadConfig('tests/integration/ax-test.yaml');
+      server = await createServer(config, { socketPath });
+      await server.start();
+
+      const res = await sendRequest(socketPath, '/v1/chat/completions', {
+        body: { messages: [{ role: 'user', content: 'generate images' }] },
+      });
+
+      expect(res.status).toBe(200);
+      const data = JSON.parse(res.body);
+
+      expect(typeof data.choices[0].message.content).toBe('string');
+      const { files } = data.choices[0].message;
+      expect(files).toHaveLength(2);
+      expect(files[0]).toEqual({ type: 'file', url: '/ax/first.png', mediaType: 'image/png' });
+      expect(files[1]).toEqual({ type: 'file', url: '/ax/second.jpg', mediaType: 'image/jpeg' });
+    });
   });
 
-  it('returns plain string content when no image blocks are present', async () => {
-    // Override mock for this test — text-only response
-    mockedProcessCompletion.mockResolvedValueOnce({
-      responseContent: 'Just a text reply.',
-      contentBlocks: [
-        { type: 'text', text: 'Just a text reply.' },
-      ],
-      finishReason: 'stop',
+  describe('streaming', () => {
+    it('streams text content and includes files on finish chunk', async () => {
+      const config = loadConfig('tests/integration/ax-test.yaml');
+      server = await createServer(config, { socketPath });
+      await server.start();
+
+      const res = await sendRequest(socketPath, '/v1/chat/completions', {
+        body: {
+          messages: [{ role: 'user', content: 'generate an image of a cow' }],
+          session_id: randomUUID(),
+          stream: true,
+        },
+      });
+
+      expect(res.status).toBe(200);
+      const lines = res.body.split('\n').filter((l: string) => l.startsWith('data: '));
+      expect(lines.length).toBeGreaterThanOrEqual(4);
+
+      // Content chunk is plain text, not a stringified array
+      const contentChunk = JSON.parse(lines[1].replace('data: ', ''));
+      expect(typeof contentChunk.choices[0].delta.content).toBe('string');
+      expect(contentChunk.choices[0].delta.content).toContain('A cow sailing');
+      expect(contentChunk.choices[0].delta.content).not.toContain('"type":"file"');
+
+      // Finish chunk carries files
+      const finishChunk = JSON.parse(lines[2].replace('data: ', ''));
+      expect(finishChunk.choices[0].finish_reason).toBe('stop');
+      expect(finishChunk.files).toHaveLength(1);
+      expect(finishChunk.files[0]).toEqual({ type: 'file', url: '/ax/generated-abc123.png', mediaType: 'image/png' });
     });
 
-    const config = loadConfig('tests/integration/ax-test.yaml');
-    server = await createServer(config, { socketPath });
-    await server.start();
+    it('no files field on finish chunk for text-only responses', async () => {
+      mockedProcessCompletion.mockResolvedValueOnce({
+        responseContent: 'Just text.',
+        contentBlocks: [{ type: 'text', text: 'Just text.' }],
+        finishReason: 'stop',
+      });
 
-    const res = await sendRequest(socketPath, '/v1/chat/completions', {
-      body: { messages: [{ role: 'user', content: 'hello' }] },
+      const config = loadConfig('tests/integration/ax-test.yaml');
+      server = await createServer(config, { socketPath });
+      await server.start();
+
+      const res = await sendRequest(socketPath, '/v1/chat/completions', {
+        body: { messages: [{ role: 'user', content: 'hello' }], stream: true },
+      });
+
+      expect(res.status).toBe(200);
+      const lines = res.body.split('\n').filter((l: string) => l.startsWith('data: '));
+
+      const contentChunk = JSON.parse(lines[1].replace('data: ', ''));
+      expect(contentChunk.choices[0].delta.content).toBe('Just text.');
+
+      const finishChunk = JSON.parse(lines[2].replace('data: ', ''));
+      expect(finishChunk.files).toBeUndefined();
     });
-
-    expect(res.status).toBe(200);
-    const data = JSON.parse(res.body);
-
-    // Content should remain a plain string when no images are present
-    expect(typeof data.choices[0].message.content).toBe('string');
-    expect(data.choices[0].message.content).toBe('Just a text reply.');
-  });
-
-  it('returns multiple file blocks in AI SDK format', async () => {
-    mockedProcessCompletion.mockResolvedValueOnce({
-      responseContent: 'Two images:',
-      contentBlocks: [
-        { type: 'text', text: 'Two images:' },
-        { type: 'image', fileId: 'first.png', mimeType: 'image/png' },
-        { type: 'image', fileId: 'second.jpg', mimeType: 'image/jpeg' },
-      ],
-      agentName: 'main',
-      userId: 'default',
-      finishReason: 'stop',
-    });
-
-    const config = loadConfig('tests/integration/ax-test.yaml');
-    server = await createServer(config, { socketPath });
-    await server.start();
-
-    const res = await sendRequest(socketPath, '/v1/chat/completions', {
-      body: { messages: [{ role: 'user', content: 'generate images' }] },
-    });
-
-    expect(res.status).toBe(200);
-    const data = JSON.parse(res.body);
-    const content = data.choices[0].message.content;
-    expect(Array.isArray(content)).toBe(true);
-    const fileBlocks = content.filter((b: any) => b.type === 'file');
-    expect(fileBlocks).toHaveLength(2);
-    expect(fileBlocks[0].url).toBe('/ax/first.png');
-    expect(fileBlocks[0].mediaType).toBe('image/png');
-    expect(fileBlocks[1].url).toBe('/ax/second.jpg');
-    expect(fileBlocks[1].mediaType).toBe('image/jpeg');
   });
 });
