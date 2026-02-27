@@ -35,7 +35,10 @@ export function createDelegationHandlers(providers: ProviderRegistry, opts?: IPC
         };
       }
 
-      // Increment BEFORE any await to prevent race with concurrent calls
+      // Increment BEFORE any await to prevent race with concurrent calls.
+      // The try/finally ensures the counter is always decremented, even if
+      // the handler throws — preventing the "zombie counter" bug where
+      // activeDelegations stays inflated and blocks all future delegations.
       activeDelegations++;
       try {
         await providers.audit.log({
@@ -63,6 +66,16 @@ export function createDelegationHandlers(providers: ProviderRegistry, opts?: IPC
         };
         const response = await opts.onDelegate(delegateReq, childCtx);
         return { response };
+      } catch (err) {
+        // Return a structured error instead of letting the exception propagate
+        // to the IPC handler's generic catch. This ensures:
+        // 1. The error response shape matches limit/depth rejections ({ok, error})
+        // 2. The activeDelegations counter is decremented (via finally)
+        // 3. The error message is specific to the delegation failure
+        return {
+          ok: false,
+          error: `Delegation failed: ${err instanceof Error ? err.message : String(err)}`,
+        };
       } finally {
         activeDelegations--;
       }
