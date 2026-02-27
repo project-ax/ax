@@ -741,3 +741,11 @@ Tests: 53 new tests across 6 test files, all passing. Zero regressions on 383 ex
 **Files touched:** None (research-only task)
 **Outcome:** Success — identified that pi-session.ts adopted the pi-coding-agent API from the initial commit (Stage 2+ shape) but uses Stage 0-1 feature levels (inMemory sessions, no compaction, dummy auth). Latest MR (#39) adds plugin framework (extension system concept from the plan). Prior MRs #15 (decompose) and #37 (tool filtering) were the most structurally relevant to the plan.
 **Notes:** The plan was never executed as discrete Stage 0 → Stage 2 PRs. Instead, the codebase was born at Stage 2+ API level with the initial commit, and features are being incrementally wired up through unrelated PRs.
+
+## [2026-02-27 12:30] — Remove pi-agent-core as a user-facing agent type
+
+**Task:** Collapse pi-agent-core and pi-coding-agent into a single agent type, retire runPiCore(), make pi-coding-agent the default
+**What I did:** Removed pi-agent-core from all AgentType unions (types.ts, config.ts, runner.ts, onboarding/prompts.ts, ipc-schemas.ts, mcp-server.ts). Deleted runPiCore() (~100 lines) from runner.ts. Updated dispatch to only have pi-coding-agent and claude-code. Changed all profile defaults from pi-agent-core to pi-coding-agent. Updated delegation prompt module. Fixed agent-registry default. Updated ~50 test files. Left @mariozechner/pi-agent-core npm dep intact (still used for type imports: AgentMessage, AgentTool, StreamFn).
+**Files touched:** src/types.ts, src/config.ts, src/ipc-schemas.ts, src/agent/runner.ts, src/agent/agent-setup.ts, src/agent/proxy-stream.ts, src/agent/ipc-transport.ts, src/agent/tool-catalog.ts, src/agent/mcp-server.ts, src/agent/prompt/modules/delegation.ts, src/onboarding/prompts.ts, src/host/server-completions.ts, src/host/agent-registry.ts, 20+ test files
+**Outcome:** Success — clean TypeScript build, 167/167 test files pass, 1721/1722 tests (1 skipped macOS seatbelt)
+**Notes:** The npm package @mariozechner/pi-agent-core is still a direct dependency for type imports (AgentMessage, AgentTool, StreamFn). These types are not re-exported by pi-coding-agent. A follow-up could re-export them from a local barrel file and drop the direct dep.

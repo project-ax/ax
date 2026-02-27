@@ -4,17 +4,15 @@
 
 export type AgentType = (typeof AGENT_TYPES)[number];
 
-export const AGENT_TYPES = ['pi-agent-core', 'pi-coding-agent', 'claude-code'] as const;
+export const AGENT_TYPES = ['pi-coding-agent', 'claude-code'] as const;
 
 export const AGENT_DISPLAY_NAMES: Record<AgentType, string> = {
-  'pi-agent-core': 'Pi Agent Core',
   'pi-coding-agent': 'Pi Coding Agent',
   'claude-code': 'Claude Code',
 };
 
 export const AGENT_DESCRIPTIONS: Record<AgentType, string> = {
-  'pi-agent-core': 'Lightweight agent with basic tool use',
-  'pi-coding-agent': 'Full coding agent with session management and compaction',
+  'pi-coding-agent': 'Full coding agent with session management, tool use, and compaction',
   'claude-code': 'Anthropic Claude Code agentic loop via SDK',
 };
 
@@ -38,7 +36,7 @@ const defaultSandbox = process.platform === 'darwin' ? 'seatbelt' : 'bwrap';
 
 export const PROFILE_DEFAULTS: Record<string, ProfileDefaults> = {
   paranoid: {
-    agent: 'pi-agent-core',
+    agent: 'pi-coding-agent',
     memory: 'file',
     scanner: 'patterns',
     web: 'none',
@@ -52,7 +50,7 @@ export const PROFILE_DEFAULTS: Record<string, ProfileDefaults> = {
     memoryMb: 256,
   },
   balanced: {
-    agent: 'pi-agent-core',
+    agent: 'pi-coding-agent',
     memory: 'sqlite',
     scanner: 'patterns',
     web: 'fetch',
@@ -67,7 +65,7 @@ export const PROFILE_DEFAULTS: Record<string, ProfileDefaults> = {
     memoryMb: 512,
   },
   yolo: {
-    agent: 'pi-agent-core',
+    agent: 'pi-coding-agent',
     memory: 'sqlite',
     scanner: 'patterns',
     web: 'fetch',

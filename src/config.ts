@@ -7,7 +7,7 @@ import { configPath as defaultConfigPath } from './paths.js';
 import { PROFILE_NAMES } from './onboarding/prompts.js';
 import { PROVIDER_MAP } from './host/provider-map.js';
 
-const AGENT_TYPES = ['pi-agent-core', 'pi-coding-agent', 'claude-code'] as const;
+const AGENT_TYPES = ['pi-coding-agent', 'claude-code'] as const;
 
 // Derive Zod enums from PROVIDER_MAP keys for compile-time + runtime validation.
 const providerEnum = (kind: string) => {
@@ -31,7 +31,7 @@ const ChannelAccessConfigSchema = z.object({
 });
 
 const ConfigSchema = z.strictObject({
-  agent: z.enum(AGENT_TYPES).optional().default('pi-agent-core'),
+  agent: z.enum(AGENT_TYPES).optional().default('pi-coding-agent'),
   models: z.strictObject({
     default: z.array(z.string().min(1)).min(1).optional(),
     fast: z.array(z.string().min(1)).min(1).optional(),

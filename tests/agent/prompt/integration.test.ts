@@ -10,7 +10,7 @@ function makeSkill(name: string, description: string): SkillSummary {
 describe('PromptBuilder integration', () => {
   test('full prompt with all sections', () => {
     const ctx: PromptContext = {
-      agentType: 'pi-agent-core',
+      agentType: 'pi-coding-agent',
       workspace: '/home/user/project',
       skills: [
         makeSkill('Safety Skill', 'Always follow safety rules'),
@@ -80,7 +80,7 @@ describe('PromptBuilder integration', () => {
 
   test('budget-constrained prompt drops optional modules', () => {
     const ctx: PromptContext = {
-      agentType: 'pi-agent-core',
+      agentType: 'pi-coding-agent',
       workspace: '/tmp',
       skills: [makeSkill('Big Skill', 'A very large skill')],
       profile: 'paranoid',

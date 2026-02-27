@@ -218,16 +218,13 @@ describe('system prompt uses relative paths', () => {
   test('all runners use PromptBuilder for system prompt', async () => {
     const { readFileSync } = await import('node:fs');
 
-    // pi-session and runner now use buildSystemPrompt from agent-setup.ts,
+    // Both runners use buildSystemPrompt from agent-setup.ts,
     // which in turn uses PromptBuilder. Verify the chain.
     const agentSetup = readFileSync(resolve('src/agent/agent-setup.ts'), 'utf-8');
     expect(agentSetup).toContain("from './prompt/builder.js'");
 
     const piSession = readFileSync(resolve('src/agent/runners/pi-session.ts'), 'utf-8');
     expect(piSession).toContain("from '../agent-setup.js'");
-
-    const runner = readFileSync(resolve('src/agent/runner.ts'), 'utf-8');
-    expect(runner).toContain("from './agent-setup.js'");
 
     // claude-code uses shared buildSystemPrompt from agent-setup
     const claudeCode = readFileSync(resolve('src/agent/runners/claude-code.ts'), 'utf-8');
@@ -499,9 +496,9 @@ describe('MCP server tool registry security', () => {
   });
 });
 
-// ── IPC Tools (pi-agent-core) ────────────────────────────────────────
+// ── IPC Tools ────────────────────────────────────────────────────────
 
-describe('IPC tools for pi-agent-core do not expose paths', () => {
+describe('IPC tools do not expose paths', () => {
   test('ipc-tools exports memory, web, audit, and skill tools', async () => {
     const { createIPCTools } = await import('../src/agent/ipc-tools.js');
     const client = createMockClient();

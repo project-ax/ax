@@ -41,7 +41,7 @@ export interface TaintTag {
   timestamp: Date;
 }
 
-export type AgentType = 'pi-agent-core' | 'pi-coding-agent' | 'claude-code';
+export type AgentType = 'pi-coding-agent' | 'claude-code';
 
 /** Task types for model routing. All except 'default' are optional and fall back to 'default'. */
 export const MODEL_TASK_TYPES = ['default', 'fast', 'thinking', 'coding', 'image'] as const;

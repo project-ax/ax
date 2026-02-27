@@ -33,7 +33,7 @@ export interface AgentRegistryEntry {
   status: AgentStatus;
   /** Parent agent ID (for delegation hierarchy). Null for root agents. */
   parentId: string | null;
-  /** Agent type (pi-agent-core, pi-coding-agent, claude-code). */
+  /** Agent type (pi-coding-agent, claude-code). */
   agentType: string;
   /** Capability tags for routing and discovery. */
   capabilities: string[];
@@ -182,7 +182,7 @@ export class AgentRegistry {
       description: 'Default primary agent',
       status: 'active',
       parentId: null,
-      agentType: 'pi-agent-core',
+      agentType: 'pi-coding-agent',
       capabilities: ['general', 'memory', 'web', 'scheduling'],
       createdBy: 'system',
     });

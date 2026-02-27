@@ -721,7 +721,7 @@ describe('Skill Self-Authoring Flow (Git Provider)', async () => {
   });
 
   test('skill_propose AUTO_APPROVE writes file to skills dir', async () => {
-    const provider = await create({ providers: {}, agent: 'pi-agent-core' } as any);
+    const provider = await create({ providers: {}, agent: 'pi-coding-agent' } as any);
 
     // Propose a safe skill (no dangerous patterns)
     const result = await provider.propose({
@@ -745,7 +745,7 @@ describe('Skill Self-Authoring Flow (Git Provider)', async () => {
   });
 
   test('skill_propose REJECT on dangerous content', async () => {
-    const provider = await create({ providers: {}, agent: 'pi-agent-core' } as any);
+    const provider = await create({ providers: {}, agent: 'pi-coding-agent' } as any);
 
     // Propose a skill with eval() — hard reject pattern
     const result = await provider.propose({
@@ -763,7 +763,7 @@ describe('Skill Self-Authoring Flow (Git Provider)', async () => {
   });
 
   test('skill_propose NEEDS_REVIEW on capability content', async () => {
-    const provider = await create({ providers: {}, agent: 'pi-agent-core' } as any);
+    const provider = await create({ providers: {}, agent: 'pi-coding-agent' } as any);
 
     // Propose a skill referencing process.env — capability pattern
     const result = await provider.propose({
@@ -778,7 +778,7 @@ describe('Skill Self-Authoring Flow (Git Provider)', async () => {
   });
 
   test('skill_propose approve after NEEDS_REVIEW writes file', async () => {
-    const provider = await create({ providers: {}, agent: 'pi-agent-core' } as any);
+    const provider = await create({ providers: {}, agent: 'pi-coding-agent' } as any);
 
     // Propose capability content → NEEDS_REVIEW
     const result = await provider.propose({
@@ -806,7 +806,7 @@ describe('Skill Self-Authoring Flow (Git Provider)', async () => {
   });
 
   test('skill_propose revert removes skill', async () => {
-    const provider = await create({ providers: {}, agent: 'pi-agent-core' } as any);
+    const provider = await create({ providers: {}, agent: 'pi-coding-agent' } as any);
 
     // First, create a seed skill so the git repo has an initial commit with a parent
     const seedResult = await provider.propose({

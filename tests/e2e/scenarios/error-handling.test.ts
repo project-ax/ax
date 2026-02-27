@@ -250,7 +250,7 @@ describe('E2E Scenario: Error Handling & Edge Cases', () => {
           name: 'Preloaded',
           status: 'active',
           parentId: null,
-          agentType: 'pi-agent-core',
+          agentType: 'pi-coding-agent',
           capabilities: ['test'],
           createdBy: 'system',
         },

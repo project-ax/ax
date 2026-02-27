@@ -4,7 +4,7 @@ import type { PromptContext } from '../../../../src/agent/prompt/types.js';
 
 function makeCtx(overrides: Partial<PromptContext> = {}): PromptContext {
   return {
-    agentType: 'pi-agent-core',
+    agentType: 'pi-coding-agent',
     workspace: '/tmp/test',
     skills: [],
     profile: 'balanced',

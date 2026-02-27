@@ -1,9 +1,8 @@
 /**
  * Shared proxy-based LLM stream function.
  *
- * Both runner.ts (pi-agent-core) and pi-session.ts (pi-coding-agent) need
- * to route LLM calls through the credential-injecting Anthropic SDK proxy.
- * This module provides a single implementation.
+ * Routes LLM calls through the credential-injecting Anthropic SDK proxy.
+ * Used by the pi-coding-agent runner (pi-session.ts).
  */
 
 import { createAssistantMessageEventStream } from '@mariozechner/pi-ai';
@@ -47,7 +46,7 @@ export function makeProxyErrorMessage(errorText: string, api = 'anthropic-messag
  * container never sees them.
  *
  * Works as both sync (returns stream) and async (returns Promise<stream>)
- * StreamFn — pi-agent-core and pi-coding-agent both accept either.
+ * StreamFn — pi-coding-agent accepts either.
  */
 export function createProxyStreamFn(proxySocket: string) {
   const getClient = createLazyAnthropicClient(proxySocket);

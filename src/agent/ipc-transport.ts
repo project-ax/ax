@@ -55,9 +55,9 @@ function makeErrorMessage(errorText: string): AssistantMessage {
  * pi-ai's AssistantMessageEventStream that the Agent class expects.
  *
  * @param imageBlocks - Optional image content blocks from the current user
- *   message. pi-agent-core only supports text input, so image blocks must be
- *   injected into the converted IPC messages so the host-side LLM handler can
- *   resolve them (download from workspace, base64-encode, send to Claude).
+ *   message. Image blocks are injected into the converted IPC messages so
+ *   the host-side LLM handler can resolve them (download from workspace,
+ *   base64-encode, send to Claude).
  */
 export function createIPCStreamFn(client: IPCClient, imageBlocks?: ContentBlock[]): StreamFn {
   return async (model: Model<any>, context: Context, options?: SimpleStreamOptions): Promise<AssistantMessageEventStream> => {

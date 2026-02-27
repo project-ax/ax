@@ -68,7 +68,7 @@ describe('tool-catalog ↔ mcp-server sync', () => {
 
 function makePromptContext(overrides: Partial<PromptContext> = {}): PromptContext {
   return {
-    agentType: 'pi-agent-core',
+    agentType: 'pi-coding-agent',
     workspace: '/tmp',
     skills: [],
     profile: 'balanced',

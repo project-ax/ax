@@ -187,7 +187,7 @@ export const AuditQuerySchema = ipcAction('audit_query', {
 export const AgentDelegateSchema = ipcAction('agent_delegate', {
   task: safeString(50_000),
   context: safeString(100_000).optional(),
-  runner: z.enum(['pi-agent-core', 'pi-coding-agent', 'claude-code']).optional(),
+  runner: z.enum(['pi-coding-agent', 'claude-code']).optional(),
   model: safeString(128).optional(),
   maxTokens: z.number().int().min(1).max(200_000).optional(),
   timeoutSec: z.number().int().min(5).max(600).optional(),

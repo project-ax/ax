@@ -217,7 +217,7 @@ export function createIPCMcpServer(client: IPCClient, opts?: MCPServerOptions): 
       {
         task: z.string().describe('The task description for the sub-agent'),
         context: z.string().optional().describe('Background context the sub-agent should know'),
-        runner: z.enum(['pi-agent-core', 'pi-coding-agent', 'claude-code']).optional()
+        runner: z.enum(['pi-coding-agent', 'claude-code']).optional()
           .describe('Runner type for the sub-agent'),
         model: z.string().optional().describe('Model ID override for the sub-agent'),
         maxTokens: z.number().optional().describe('Max tokens for the sub-agent response'),

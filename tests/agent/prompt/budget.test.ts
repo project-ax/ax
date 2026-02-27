@@ -5,7 +5,7 @@ import type { PromptModule, PromptContext } from '../../../src/agent/prompt/type
 
 function makeContext(overrides: Partial<PromptContext> = {}): PromptContext {
   return {
-    agentType: 'pi-agent-core',
+    agentType: 'pi-coding-agent',
     workspace: '/tmp',
     skills: [],
     profile: 'paranoid',

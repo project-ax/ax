@@ -3,7 +3,7 @@ import type { AgentConfig, AgentType } from '../../../src/agent/runner.js';
 
 describe('agent-runner dispatch', () => {
   test('AgentConfig interface accepts all agent types', () => {
-    const types: AgentType[] = ['pi-agent-core', 'pi-coding-agent', 'claude-code'];
+    const types: AgentType[] = ['pi-coding-agent', 'claude-code'];
     for (const agent of types) {
       const config: AgentConfig = {
         agent,
@@ -15,7 +15,7 @@ describe('agent-runner dispatch', () => {
     }
   });
 
-  test('AgentConfig agent field is optional (defaults to pi-agent-core)', () => {
+  test('AgentConfig agent field is optional (defaults to pi-coding-agent)', () => {
     const config: AgentConfig = {
       ipcSocket: '/tmp/test.sock',
       workspace: '/tmp/workspace',
@@ -37,7 +37,7 @@ describe('agent-runner dispatch', () => {
 
   test('run() with empty message works for all agent types', async () => {
     const { run } = await import('../../../src/agent/runner.js');
-    const types: AgentType[] = ['pi-agent-core', 'pi-coding-agent', 'claude-code'];
+    const types: AgentType[] = ['pi-coding-agent', 'claude-code'];
     for (const agent of types) {
       // Should not throw — each agent type early-returns for empty messages
       await run({

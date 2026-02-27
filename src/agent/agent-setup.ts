@@ -1,8 +1,7 @@
 /**
  * Shared agent setup — identity loading, prompt building, event subscription.
  *
- * Deduplicates logic shared between runner.ts (pi-agent-core) and
- * pi-session.ts (pi-coding-agent).
+ * Deduplicates logic shared between pi-session.ts and claude-code.ts runners.
  */
 
 import { getLogger } from '../logger.js';
@@ -25,7 +24,7 @@ export interface PromptBuildResult {
 
 /**
  * Build the system prompt from skills, identity files, and configuration.
- * Used by both pi-agent-core and pi-coding-agent runners.
+ * Used by both pi-coding-agent and claude-code runners.
  *
  * Also returns a ToolFilterContext so callers can filter the tool catalog
  * to match which prompt modules were included (e.g., no heartbeat content
@@ -43,7 +42,7 @@ export function buildSystemPrompt(config: AgentConfig): PromptBuildResult {
 
   const promptBuilder = new PromptBuilder();
   const promptResult = promptBuilder.build({
-    agentType: config.agent ?? 'pi-agent-core',
+    agentType: config.agent ?? 'pi-coding-agent',
     workspace: config.workspace,
     skills,
     profile: config.profile ?? 'balanced',
@@ -80,8 +79,7 @@ export function buildSystemPrompt(config: AgentConfig): PromptBuildResult {
  * Subscribe to pi-ai agent events — streams text to stdout, logs tools
  * and errors to stderr. Returns a state object for tracking output.
  *
- * Works with both pi-agent-core Agent.subscribe() and
- * pi-coding-agent AgentSession.subscribe() — same event shape.
+ * Works with pi-coding-agent AgentSession.subscribe() event shape.
  */
 export function subscribeAgentEvents(
   subscribable: { subscribe(fn: (event: any) => void): void },

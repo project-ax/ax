@@ -6,7 +6,7 @@ import type { PromptContext, PromptModule } from '../../../src/agent/prompt/type
 describe('PromptContext', () => {
   test('can construct a valid PromptContext', () => {
     const ctx: PromptContext = {
-      agentType: 'pi-agent-core',
+      agentType: 'pi-coding-agent',
       workspace: '/tmp/test',
       skills: [],
       profile: 'paranoid',
@@ -26,7 +26,7 @@ describe('PromptContext', () => {
 describe('isBootstrapMode', () => {
   test('returns true when soul is empty and bootstrap is present', () => {
     const ctx: PromptContext = {
-      agentType: 'pi-agent-core',
+      agentType: 'pi-coding-agent',
       workspace: '/tmp',
       skills: [],
       profile: 'paranoid',
@@ -43,7 +43,7 @@ describe('isBootstrapMode', () => {
 
   test('returns false when soul is present', () => {
     const ctx: PromptContext = {
-      agentType: 'pi-agent-core',
+      agentType: 'pi-coding-agent',
       workspace: '/tmp',
       skills: [],
       profile: 'paranoid',
@@ -60,7 +60,7 @@ describe('isBootstrapMode', () => {
 
   test('returns false when both soul and bootstrap are empty', () => {
     const ctx: PromptContext = {
-      agentType: 'pi-agent-core',
+      agentType: 'pi-coding-agent',
       workspace: '/tmp',
       skills: [],
       profile: 'paranoid',

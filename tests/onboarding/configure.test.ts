@@ -139,7 +139,7 @@ describe('Configure UI Helpers', () => {
       outputDir: dir,
       answers: {
         profile: 'balanced',
-        agent: 'pi-agent-core',
+        agent: 'pi-coding-agent',
         model: 'openrouter/anthropic/claude-sonnet-4',
         llmProvider: 'openrouter',
         apiKey: 'or-key-test-value',

@@ -21,14 +21,14 @@ describe('Config parser', () => {
     expect(['paranoid', 'balanced', 'yolo']).toContain(config.profile);
   });
 
-  test('agent field defaults to pi-agent-core when omitted', () => {
+  test('agent field defaults to pi-coding-agent when omitted', () => {
     const config = loadConfig(resolve(import.meta.dirname, '../ax.yaml'));
-    expect(config.agent).toBe('pi-agent-core');
+    expect(config.agent).toBe('pi-coding-agent');
   });
 
   test('accepts valid agent types', async () => {
     const { writeFileSync, rmSync } = await import('node:fs');
-    const agents = ['pi-agent-core', 'pi-coding-agent', 'claude-code'] as const;
+    const agents = ['pi-coding-agent', 'claude-code'] as const;
     for (const agent of agents) {
       const tmpPath = resolve(import.meta.dirname, `../ax-test-agent-${agent}.yaml`);
       writeFileSync(tmpPath, `

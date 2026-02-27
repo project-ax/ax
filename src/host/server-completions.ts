@@ -314,7 +314,7 @@ export async function processCompletion(
 
     // Spawn sandbox
     const tsxBin = resolveTsxBin();
-    const agentType = config.agent ?? 'pi-agent-core';
+    const agentType = config.agent ?? 'pi-coding-agent';
 
     // Start credential-injecting proxy for claude-code agents only.
     // claude-code talks to Anthropic directly via the proxy; all other agents

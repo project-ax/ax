@@ -9,7 +9,7 @@ function makeSkill(name: string, description: string, path?: string): SkillSumma
 
 function makeContext(overrides: Partial<PromptContext> = {}): PromptContext {
   return {
-    agentType: 'pi-agent-core',
+    agentType: 'pi-coding-agent',
     workspace: '/tmp',
     skills: [],
     profile: 'paranoid',

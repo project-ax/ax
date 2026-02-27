@@ -256,7 +256,7 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     parameters: Type.Object({
       task: Type.String({ description: 'The task description for the sub-agent' }),
       context: Type.Optional(Type.String({ description: 'Background context the sub-agent should know' })),
-      runner: Type.Optional(Type.String({ description: '"pi-agent-core", "pi-coding-agent", or "claude-code"' })),
+      runner: Type.Optional(Type.String({ description: '"pi-coding-agent" or "claude-code"' })),
       model: Type.Optional(Type.String({ description: 'Model ID override for the sub-agent (e.g. "claude-sonnet-4-5-20250929")' })),
       maxTokens: Type.Optional(Type.Number({ description: 'Max tokens for the sub-agent response' })),
       timeoutSec: Type.Optional(Type.Number({ description: 'Timeout in seconds (5-600)' })),

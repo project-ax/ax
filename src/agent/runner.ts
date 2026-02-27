@@ -1,43 +1,17 @@
-import { join } from 'node:path';
-import { Agent } from '@mariozechner/pi-agent-core';
 import type { AgentMessage } from '@mariozechner/pi-agent-core';
 import type {
-  Model,
   UserMessage,
   AssistantMessage,
 } from '@mariozechner/pi-ai';
 
 import { IPCClient } from './ipc-client.js';
-import { createIPCStreamFn } from './ipc-transport.js';
-import { createLocalTools } from './local-tools.js';
-import { createIPCTools } from './ipc-tools.js';
-import { createProxyStreamFn } from './proxy-stream.js';
-import { buildSystemPrompt, subscribeAgentEvents } from './agent-setup.js';
 import { getLogger, truncate } from '../logger.js';
 import type { ContentBlock } from '../types.js';
 
 const logger = getLogger().child({ component: 'runner' });
 
-// Default model — the actual model ID is forwarded through IPC to the host,
-// which routes it to the configured LLM provider. This just needs to be a
-// valid Model object for pi-agent-core's Agent class.
 const DEFAULT_MODEL_ID = 'claude-sonnet-4-5-20250929';
 const DEFAULT_CONTEXT_WINDOW = 200000;
-
-function createDefaultModel(maxTokens?: number, modelId?: string): Model<any> {
-  return {
-    id: modelId ?? DEFAULT_MODEL_ID,
-    name: modelId ?? 'Claude Sonnet 4.5',
-    api: 'anthropic-messages',
-    provider: 'anthropic',
-    baseUrl: 'https://api.anthropic.com',
-    reasoning: false,
-    input: ['text'],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: DEFAULT_CONTEXT_WINDOW,
-    maxTokens: maxTokens ?? 8192,
-  };
-}
 
 // Compaction thresholds
 const COMPACTION_THRESHOLD = 0.75; // Trigger at 75% of context window
@@ -49,7 +23,7 @@ export interface ConversationTurn {
   sender?: string;
 }
 
-export type AgentType = 'pi-agent-core' | 'pi-coding-agent' | 'claude-code';
+export type AgentType = 'pi-coding-agent' | 'claude-code';
 
 export interface AgentConfig {
   agent?: AgentType;
@@ -84,10 +58,6 @@ function sanitizeSender(sender: string): string {
   return sender.replace(/[^a-zA-Z0-9_.\-]/g, '').slice(0, 100);
 }
 
-/**
- * Convert stored conversation history to pi-ai message format
- * for pre-populating the Agent's state.
- */
 /** Extract text content from a string or ContentBlock[]. */
 function extractText(content: string | ContentBlock[]): string {
   if (typeof content === 'string') return content;
@@ -100,8 +70,7 @@ function extractText(content: string | ContentBlock[]): string {
 export function historyToPiMessages(history: ConversationTurn[]): AgentMessage[] {
   return history.map((turn): AgentMessage => {
     if (turn.role === 'user') {
-      // Extract text for pi-agent-core (which only supports text messages).
-      // Image content blocks are handled at the IPC/LLM level, not the agent level.
+      // Extract text content — image content blocks are handled at the IPC/LLM level.
       let text = extractText(turn.content);
       if (turn.sender) {
         const safe = sanitizeSender(turn.sender);
@@ -204,7 +173,7 @@ export async function compactHistory(
 
 function parseArgs(): AgentConfig {
   const args = process.argv.slice(2);
-  let agent: AgentType = 'pi-agent-core';
+  let agent: AgentType = 'pi-coding-agent';
   let model = '';
   let ipcSocket = '';
   let workspace = '';
@@ -253,105 +222,6 @@ async function readStdin(): Promise<string> {
     chunks.push(chunk);
   }
   return Buffer.concat(chunks).toString('utf-8');
-}
-
-export async function runPiCore(config: AgentConfig): Promise<void> {
-  process.stderr.write(`[diag] runPiCore start\n`);
-  // Extract text for the agent prompt — pi-agent-core only supports text input.
-  // Image blocks (image or image_data) are preserved separately and injected
-  // into IPC LLM calls so the host-side Anthropic provider can send them to Claude.
-  const rawMessage = config.userMessage ?? '';
-  const userMessage = typeof rawMessage === 'string' ? rawMessage : extractText(rawMessage);
-  const imageBlocks: ContentBlock[] = Array.isArray(rawMessage)
-    ? rawMessage.filter((b): b is ContentBlock => b.type === 'image' || b.type === 'image_data')
-    : [];
-  if (!userMessage.trim() && imageBlocks.length === 0) {
-    logger.debug('pi_core_skip_empty');
-    return;
-  }
-  // If images are attached but no text, provide a minimal prompt so
-  // pi-agent-core has something to work with.
-  const promptText = userMessage.trim() || (imageBlocks.length > 0 ? '[image attached]' : '.');
-
-  // Decide LLM transport: proxy (direct Anthropic SDK) or IPC fallback
-  const useProxy = !!config.proxySocket;
-
-  logger.debug('pi_core_start', {
-    workspace: config.workspace,
-    messageLength: userMessage.length,
-    historyTurns: config.history?.length ?? 0,
-    llmTransport: useProxy ? 'proxy' : 'ipc',
-    proxySocket: config.proxySocket,
-  });
-
-  if (!useProxy) {
-    logger.debug('proxy_unavailable', { reason: 'config.proxySocket not set, falling back to IPC for LLM calls' });
-  }
-
-  const client = new IPCClient({ socketPath: config.ipcSocket, sessionId: config.sessionId });
-  await client.connect();
-
-  const { systemPrompt, toolFilter } = buildSystemPrompt(config);
-
-  // Build tools: local (execute in sandbox) + IPC (route to host)
-  const localTools = createLocalTools(config.workspace);
-  const ipcTools = createIPCTools(client, { userId: config.userId, filter: toolFilter });
-  const allTools = [...localTools, ...ipcTools];
-
-  logger.debug('pi_core_tools', {
-    localToolCount: localTools.length,
-    ipcToolCount: ipcTools.length,
-    toolNames: allTools.map(t => t.name),
-    systemPromptLength: systemPrompt.length,
-  });
-
-  // Compact history if it's too long for the context window
-  const history = config.history
-    ? await compactHistory(config.history, client)
-    : [];
-
-  // Convert (possibly compacted) history to pi-ai messages
-  const historyMessages = historyToPiMessages(history);
-
-  const model = createDefaultModel(config.maxTokens, config.model);
-
-  // Select stream function: proxy (Anthropic SDK via Unix socket) or IPC.
-  // Image blocks are passed to IPC transport for host-side resolution.
-  const streamFn = useProxy
-    ? createProxyStreamFn(config.proxySocket!)
-    : createIPCStreamFn(client, imageBlocks.length > 0 ? imageBlocks : undefined);
-
-  logger.debug('pi_core_agent_create', {
-    historyMessages: historyMessages.length,
-    model: model.id,
-    maxTokens: model.maxTokens,
-    llmTransport: useProxy ? 'proxy' : 'ipc',
-  });
-
-  // Create agent with selected LLM transport, pre-populated with history
-  const agent = new Agent({
-    initialState: {
-      systemPrompt,
-      model,
-      tools: allTools,
-      messages: historyMessages,
-    },
-    streamFn,
-  });
-
-  // Subscribe to events — stream text to stdout, log tools/errors to stderr
-  const eventState = subscribeAgentEvents(agent, config);
-
-  // Send the user message and wait for the agent to finish
-  process.stderr.write(`[diag] pi_core_prompt\n`);
-  logger.debug('pi_core_prompt', { messagePreview: truncate(promptText, 200), imageCount: imageBlocks.length });
-  await agent.prompt(promptText);
-  process.stderr.write(`[diag] pi_core_prompt_returned events=${eventState.eventCount()} hasOutput=${eventState.hasOutput()}\n`);
-  await agent.waitForIdle();
-  process.stderr.write(`[diag] pi_core_idle events=${eventState.eventCount()} hasOutput=${eventState.hasOutput()}\n`);
-
-  logger.debug('pi_core_complete', { eventCount: eventState.eventCount(), hasOutput: eventState.hasOutput() });
-  client.disconnect();
 }
 
 export interface StdinPayload {
@@ -423,12 +293,10 @@ export function parseStdinPayload(data: string): StdinPayload {
  * Dispatch to the appropriate agent implementation based on config.agent.
  */
 export async function run(config: AgentConfig): Promise<void> {
-  const agent = config.agent ?? 'pi-agent-core';
+  const agent = config.agent ?? 'pi-coding-agent';
   process.stderr.write(`[diag] dispatch agent=${agent}\n`);
   logger.debug('dispatch', { agent, workspace: config.workspace, ipcSocket: config.ipcSocket });
   switch (agent) {
-    case 'pi-agent-core':
-      return runPiCore(config);
     case 'pi-coding-agent': {
       const { runPiSession } = await import('./runners/pi-session.js');
       return runPiSession(config);

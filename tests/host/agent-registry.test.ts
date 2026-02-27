@@ -28,7 +28,7 @@ describe('AgentRegistry', () => {
       description: 'A test agent',
       status: 'active',
       parentId: null,
-      agentType: 'pi-agent-core',
+      agentType: 'pi-coding-agent',
       capabilities: ['general'],
       createdBy: 'test',
     });
@@ -46,7 +46,7 @@ describe('AgentRegistry', () => {
       name: 'My Agent',
       status: 'active',
       parentId: null,
-      agentType: 'pi-agent-core',
+      agentType: 'pi-coding-agent',
       capabilities: [],
       createdBy: 'test',
     });
@@ -67,7 +67,7 @@ describe('AgentRegistry', () => {
       name: 'Dup',
       status: 'active' as const,
       parentId: null,
-      agentType: 'pi-agent-core',
+      agentType: 'pi-coding-agent',
       capabilities: [],
       createdBy: 'test',
     };
@@ -82,7 +82,7 @@ describe('AgentRegistry', () => {
       name: 'Original Name',
       status: 'active',
       parentId: null,
-      agentType: 'pi-agent-core',
+      agentType: 'pi-coding-agent',
       capabilities: ['general'],
       createdBy: 'test',
     });
@@ -97,7 +97,7 @@ describe('AgentRegistry', () => {
     expect(updated.status).toBe('suspended');
     expect(updated.capabilities).toEqual(['general', 'web']);
     // Immutable fields unchanged
-    expect(updated.agentType).toBe('pi-agent-core');
+    expect(updated.agentType).toBe('pi-coding-agent');
     expect(updated.createdBy).toBe('test');
   });
 
@@ -111,7 +111,7 @@ describe('AgentRegistry', () => {
       name: 'Remove Me',
       status: 'active',
       parentId: null,
-      agentType: 'pi-agent-core',
+      agentType: 'pi-coding-agent',
       capabilities: [],
       createdBy: 'test',
     });
@@ -128,15 +128,15 @@ describe('AgentRegistry', () => {
   test('list filters by status', () => {
     registry.register({
       id: 'a1', name: 'Active', status: 'active',
-      parentId: null, agentType: 'pi-agent-core', capabilities: [], createdBy: 'test',
+      parentId: null, agentType: 'pi-coding-agent', capabilities: [], createdBy: 'test',
     });
     registry.register({
       id: 'a2', name: 'Suspended', status: 'suspended',
-      parentId: null, agentType: 'pi-agent-core', capabilities: [], createdBy: 'test',
+      parentId: null, agentType: 'pi-coding-agent', capabilities: [], createdBy: 'test',
     });
     registry.register({
       id: 'a3', name: 'Archived', status: 'archived',
-      parentId: null, agentType: 'pi-agent-core', capabilities: [], createdBy: 'test',
+      parentId: null, agentType: 'pi-coding-agent', capabilities: [], createdBy: 'test',
     });
 
     expect(registry.list('active')).toHaveLength(1);
@@ -148,7 +148,7 @@ describe('AgentRegistry', () => {
   test('findByCapability returns matching active agents', () => {
     registry.register({
       id: 'web-agent', name: 'Web', status: 'active',
-      parentId: null, agentType: 'pi-agent-core', capabilities: ['web', 'general'], createdBy: 'test',
+      parentId: null, agentType: 'pi-coding-agent', capabilities: ['web', 'general'], createdBy: 'test',
     });
     registry.register({
       id: 'code-agent', name: 'Coder', status: 'active',
@@ -156,7 +156,7 @@ describe('AgentRegistry', () => {
     });
     registry.register({
       id: 'off-agent', name: 'Offline', status: 'suspended',
-      parentId: null, agentType: 'pi-agent-core', capabilities: ['web'], createdBy: 'test',
+      parentId: null, agentType: 'pi-coding-agent', capabilities: ['web'], createdBy: 'test',
     });
 
     const webAgents = registry.findByCapability('web');
@@ -167,19 +167,19 @@ describe('AgentRegistry', () => {
   test('children returns child agents of a parent', () => {
     registry.register({
       id: 'parent', name: 'Parent', status: 'active',
-      parentId: null, agentType: 'pi-agent-core', capabilities: [], createdBy: 'test',
+      parentId: null, agentType: 'pi-coding-agent', capabilities: [], createdBy: 'test',
     });
     registry.register({
       id: 'child1', name: 'Child 1', status: 'active',
-      parentId: 'parent', agentType: 'pi-agent-core', capabilities: [], createdBy: 'test',
+      parentId: 'parent', agentType: 'pi-coding-agent', capabilities: [], createdBy: 'test',
     });
     registry.register({
       id: 'child2', name: 'Child 2', status: 'active',
-      parentId: 'parent', agentType: 'pi-agent-core', capabilities: [], createdBy: 'test',
+      parentId: 'parent', agentType: 'pi-coding-agent', capabilities: [], createdBy: 'test',
     });
     registry.register({
       id: 'orphan', name: 'Orphan', status: 'active',
-      parentId: null, agentType: 'pi-agent-core', capabilities: [], createdBy: 'test',
+      parentId: null, agentType: 'pi-coding-agent', capabilities: [], createdBy: 'test',
     });
 
     const kids = registry.children('parent');
@@ -205,7 +205,7 @@ describe('AgentRegistry', () => {
     const r1 = new AgentRegistry(path);
     r1.register({
       id: 'persist-test', name: 'Persist', status: 'active',
-      parentId: null, agentType: 'pi-agent-core', capabilities: [], createdBy: 'test',
+      parentId: null, agentType: 'pi-coding-agent', capabilities: [], createdBy: 'test',
     });
 
     const r2 = new AgentRegistry(path);

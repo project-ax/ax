@@ -322,7 +322,7 @@ describe('Onboarding Wizard', () => {
     });
 
     const config = parseYaml(readFileSync(join(dir, 'ax.yaml'), 'utf-8'));
-    expect(config.agent).toBe('pi-agent-core');
+    expect(config.agent).toBe('pi-coding-agent');
   });
 
   test('loadExistingConfig reads agent from ax.yaml', async () => {
@@ -577,7 +577,7 @@ describe('Onboarding Wizard', () => {
       outputDir: dir,
       answers: {
         profile: 'balanced',
-        agent: 'pi-agent-core',
+        agent: 'pi-coding-agent',
         model: 'anthropic/claude-sonnet-4-20250514',
         apiKey: 'sk-test',
         channels: [],
@@ -612,7 +612,7 @@ describe('Onboarding Wizard', () => {
       outputDir: dir,
       answers: {
         profile: 'balanced',
-        agent: 'pi-agent-core',
+        agent: 'pi-coding-agent',
         model: 'openrouter/anthropic/claude-sonnet-4',
         llmProvider: 'openrouter',
         apiKey: 'or-key-123456', // gitleaks:allow
@@ -632,7 +632,7 @@ describe('Onboarding Wizard', () => {
       outputDir: dir,
       answers: {
         profile: 'balanced',
-        agent: 'pi-agent-core',
+        agent: 'pi-coding-agent',
         model: 'anthropic/claude-sonnet-4-20250514',
         llmProvider: 'anthropic',
         apiKey: 'sk-ant-test-key',
@@ -651,7 +651,7 @@ describe('Onboarding Wizard', () => {
       outputDir: dir,
       answers: {
         profile: 'balanced',
-        agent: 'pi-agent-core',
+        agent: 'pi-coding-agent',
         model: 'groq/llama-3.3-70b-versatile',
         llmProvider: 'groq',
         apiKey: '',
@@ -673,7 +673,7 @@ describe('Onboarding Wizard', () => {
       outputDir: dir,
       answers: {
         profile: 'balanced',
-        agent: 'pi-agent-core',
+        agent: 'pi-coding-agent',
         model: 'openrouter/gpt-4.1',
         llmProvider: 'openrouter',
         apiKey: 'or-key-test',
@@ -696,7 +696,7 @@ describe('Onboarding Wizard', () => {
       outputDir: dir,
       answers: {
         profile: 'balanced',
-        agent: 'pi-agent-core',
+        agent: 'pi-coding-agent',
         model: 'groq/llama-3.3-70b-versatile',
         llmProvider: 'groq',
         apiKey: 'gsk-test-key-value',
@@ -718,7 +718,7 @@ describe('Onboarding Wizard', () => {
       outputDir: dir,
       answers: {
         profile: 'balanced',
-        agent: 'pi-agent-core',
+        agent: 'pi-coding-agent',
         model: 'anthropic/claude-sonnet-4-20250514',
         imageModel: 'openai/gpt-image-1',
         apiKey: 'sk-test',
@@ -738,7 +738,7 @@ describe('Onboarding Wizard', () => {
       outputDir: dir,
       answers: {
         profile: 'balanced',
-        agent: 'pi-agent-core',
+        agent: 'pi-coding-agent',
         model: 'openrouter/anthropic/claude-sonnet-4',
         imageModel: 'openrouter/google/gemini-2.5-flash-preview-image-generation',
         llmProvider: 'openrouter',
@@ -798,7 +798,7 @@ describe('Onboarding Wizard', () => {
       outputDir: dir,
       answers: {
         profile: 'balanced',
-        agent: 'pi-agent-core',
+        agent: 'pi-coding-agent',
         model: 'anthropic/claude-sonnet-4-20250514',
         imageModel: 'gemini/gemini-2.0-flash-exp',
         apiKey: 'sk-test',
@@ -821,7 +821,7 @@ describe('Onboarding Wizard', () => {
       outputDir: dir,
       answers: {
         profile: 'balanced',
-        agent: 'pi-agent-core',
+        agent: 'pi-coding-agent',
         model: 'anthropic/claude-sonnet-4-20250514',
         imageModel: 'openai/gpt-image-1',
         apiKey: 'sk-test',
@@ -845,7 +845,7 @@ describe('Onboarding Wizard', () => {
       outputDir: dir,
       answers: {
         profile: 'balanced',
-        agent: 'pi-agent-core',
+        agent: 'pi-coding-agent',
         model: 'anthropic/claude-sonnet-4-20250514',
         apiKey: 'sk-test',
         channels: [],
@@ -855,6 +855,6 @@ describe('Onboarding Wizard', () => {
 
     const config = loadConfig(join(dir, 'ax.yaml'));
     expect(config.models).toEqual({ default: ['anthropic/claude-sonnet-4-20250514'] });
-    expect(config.agent).toBe('pi-agent-core');
+    expect(config.agent).toBe('pi-coding-agent');
   });
 });

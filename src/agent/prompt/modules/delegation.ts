@@ -35,9 +35,8 @@ export class DelegationModule extends BasePromptModule {
       '',
       '| Runner | Best for |',
       '|--------|----------|',
+      '| `pi-coding-agent` | General-purpose and coding tasks within AX\'s sandboxed environment with IPC tools. Default if omitted. |',
       '| `claude-code` | **Coding tasks**: writing code, debugging, refactoring, code review, test writing. Has full IDE tooling. |',
-      '| `pi-coding-agent` | Coding tasks within AX\'s sandboxed environment with IPC tools. |',
-      '| `pi-agent-core` | General-purpose tasks: research, summarization, analysis, planning. Default if omitted. |',
       '',
       'If the delegated task involves writing or modifying code, prefer `claude-code`.',
       '',
@@ -58,7 +57,7 @@ export class DelegationModule extends BasePromptModule {
       'follows a provider contract pattern with co-located types."',
       '',
       '### Other parameters',
-      '- `runner` — agent type (`pi-agent-core`, `pi-coding-agent`, `claude-code`).',
+      '- `runner` — agent type (`pi-coding-agent`, `claude-code`).',
       '- `model` — model ID override (e.g. `claude-sonnet-4-5-20250929`).',
       '- `maxTokens` — limit the sub-agent\'s response length.',
       '- `timeoutSec` — deadline in seconds (5–600).',
@@ -73,7 +72,7 @@ export class DelegationModule extends BasePromptModule {
     return [
       '## Delegation',
       'Use `agent_delegate` to delegate subtasks to a sub-agent.',
-      'Set `runner: "claude-code"` for coding tasks. Default runner is `pi-agent-core`.',
+      'Set `runner: "claude-code"` for coding tasks. Default runner is `pi-coding-agent`.',
       'Keep context minimal — a few sentences of relevant background, not your full identity or history.',
     ];
   }

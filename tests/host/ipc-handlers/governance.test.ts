@@ -204,7 +204,7 @@ describe('Governance IPC handlers', () => {
       name: 'Test Bot',
       status: 'active',
       parentId: null,
-      agentType: 'pi-agent-core',
+      agentType: 'pi-coding-agent',
       capabilities: ['general'],
       createdBy: 'test',
     });
@@ -228,7 +228,7 @@ describe('Governance IPC handlers', () => {
       name: 'Specific',
       status: 'active',
       parentId: null,
-      agentType: 'pi-agent-core',
+      agentType: 'pi-coding-agent',
       capabilities: [],
       createdBy: 'test',
     });
