@@ -8,6 +8,14 @@
 **Outcome:** Success — skill loads via Skill tool and appears in the discoverable skills list
 **Notes:** Personal skills at `~/.claude/skills/` ARE auto-discovered by Claude Code (initially tried project dir too, removed duplicate)
 
+## [2026-02-27 14:00] — Resolve open questions in plugin framework design
+
+**Task:** Resolve the 4 open architectural questions in the plugin framework design RFC
+**What I did:** Updated docs/plans/2026-02-26-plugin-framework-design.md — replaced the "Open Questions" section with "Resolved Decisions" containing rationale for each: (1) pnpm workspaces (simplest, strict isolation, less attack surface), (2) lockstep versioning (all first-party, no compatibility matrix), (3) child processes reusing existing sandbox providers for Phase 3 plugin isolation, (4) two-tier core/meta-package split — @ax/core ships noop/mock providers only (~3K LOC), `ax` meta-package bundles the standard set for batteries-included installs. Updated status from "Draft / RFC" to "Approved".
+**Files touched:** docs/plans/2026-02-26-plugin-framework-design.md
+**Outcome:** Success — all 4 decisions documented with rationale
+**Notes:** The core vs extra decision is the most consequential — it defines what @ax/core actually contains. The noop/mock stubs double as SDK reference implementations. The two-tier approach means `npm install ax` still works identically for existing users.
+
 ## [2026-02-27 12:15] — Harden subagent delegation (fix 4 crash-causing bugs)
 
 **Task:** Diagnose and fix "3 concurrent agents crashes the server" in the delegation pipeline.
