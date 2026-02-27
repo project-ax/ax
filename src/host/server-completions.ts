@@ -620,6 +620,9 @@ export async function processCompletion(
       stack: (err as Error).stack,
     });
     db.fail(queued.id);
+    // Clean up canary token on error — without this, every failed completion
+    // permanently leaks an entry in sessionCanaries, eventually causing OOM.
+    sessionCanaries.delete(queued.session_id);
     return { responseContent: 'Internal processing error', finishReason: 'stop' };
   } finally {
     if (proxyCleanup) {

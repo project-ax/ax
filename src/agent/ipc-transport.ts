@@ -106,7 +106,10 @@ export function createIPCStreamFn(client: IPCClient, imageBlocks?: ContentBlock[
       parameters: t.parameters,
     }));
 
-    // Fire IPC call asynchronously and push events to stream
+    // Fire IPC call asynchronously and push events to stream.
+    // The .catch() ensures any exception that escapes the inner try/catch
+    // (e.g. stream.push() throwing in the error handler) does not become
+    // an unhandled promise rejection that crashes the agent process.
     (async () => {
       try {
         // Prepend system prompt as a system message (IPC schema expects it in messages array)
@@ -184,11 +187,19 @@ export function createIPCStreamFn(client: IPCClient, imageBlocks?: ContentBlock[
       } catch (err: unknown) {
         process.stderr.write(`[diag] ipc_llm_stream_error: ${(err as Error).message}\n`);
         logger.debug('stream_error', { error: (err as Error).message, stack: (err as Error).stack });
-        const errMsg = makeErrorMessage((err as Error).message);
-        stream.push({ type: 'start', partial: errMsg });
-        stream.push({ type: 'error', reason: 'error', error: errMsg });
+        try {
+          const errMsg = makeErrorMessage((err as Error).message);
+          stream.push({ type: 'start', partial: errMsg });
+          stream.push({ type: 'error', reason: 'error', error: errMsg });
+        } catch {
+          // stream.push() itself failed — nothing more we can do
+          process.stderr.write(`[diag] ipc_llm_stream_push_failed_in_error_handler\n`);
+        }
       }
-    })();
+    })().catch((err: unknown) => {
+      // Final safety net: catches anything that escapes the inner try/catch
+      process.stderr.write(`[diag] ipc_llm_unhandled: ${(err as Error).message}\n`);
+    });
 
     return stream;
   };

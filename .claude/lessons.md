@@ -5,6 +5,23 @@
 **Context:** Removing pi-agent-core as a user-facing agent type — expected to also drop the npm dep
 **Lesson:** `@mariozechner/pi-coding-agent` does not re-export `Agent`, `AgentTool`, `StreamFn`, or `AgentMessage` from `@mariozechner/pi-agent-core`. If you need these types, you must either keep pi-agent-core as a direct dep or create a local barrel re-export. Check package exports (`dist/index.d.ts`) before assuming transitive deps surface their types.
 **Tags:** pi-agent-core, pi-coding-agent, npm, types, dependencies
+### Promise.race timeouts MUST be cleared in finally blocks
+**Date:** 2026-02-27
+**Context:** Diagnosing server crashes under 3 concurrent delegation agents
+**Lesson:** Every `Promise.race([handler, timeout])` pattern MUST store the timeout ID and call `clearTimeout()` in a finally block. Without this, each call leaks a long-lived timer (15 min in our case). Under concurrent agent delegations, hundreds of leaked timers accumulate, causing memory pressure and eventual OOM. The pattern: `let timeoutId; try { timeoutId = setTimeout(...); await Promise.race(...); } finally { clearTimeout(timeoutId); }`
+**Tags:** ipc, timer-leak, promise-race, memory-leak, delegation
+
+### Test concurrent async handlers using the handler factory directly, not the IPC wrapper
+**Date:** 2026-02-27
+**Context:** Writing tests for concurrent delegation that timed out at 30s
+**Lesson:** When testing concurrent handler behavior (concurrency limits, counters), call `createDelegationHandlers()` directly instead of going through `createIPCHandler()`. The IPC handler wraps every call in a 15-minute `Promise.race` timeout, which blocks tests that use blocking promises. Also: when a test fires a blocking delegation and later needs to verify "counter resets to 0", DON'T `await` the verification call directly — fire it without await, push the resolver, THEN await. Otherwise you deadlock: the await waits for the resolver that hasn't been pushed yet.
+**Tags:** testing, delegation, concurrency, deadlock, ipc-handler
+
+### Always clean up Map entries in ALL code paths (success AND error)
+**Date:** 2026-02-27
+**Context:** Found sessionCanaries map leak causing OOM on repeated delegation failures
+**Lesson:** When a Map entry is set before a try block (like `sessionCanaries.set(id, token)`), ensure the corresponding `.delete()` is in BOTH the success path AND the catch block. Using try/finally for cleanup is ideal but may conflict if the success path needs to delete before returning. At minimum, add the cleanup to the catch block alongside `db.fail()`.
+**Tags:** memory-leak, map-cleanup, error-handling, sessionCanaries
 
 ### Provider contract pattern IS the plugin framework — packaging is the missing piece
 **Date:** 2026-02-26

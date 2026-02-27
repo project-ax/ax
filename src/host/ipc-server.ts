@@ -193,15 +193,17 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
       return JSON.stringify({ ok: false, error: `No handler for action "${actionName}"` });
     }
 
+    // Race the handler against a timeout to prevent hung handlers from
+    // blocking the IPC server indefinitely (safety net).
+    // IMPORTANT: The timer must be cleared in all code paths to prevent leaks.
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
     try {
       const startMs = Date.now();
       logger.debug('handler_start', { action: actionName });
 
-      // Race the handler against a timeout to prevent hung handlers from
-      // blocking the IPC server indefinitely (safety net).
       const handlerPromise = handler(validated.data, effectiveCtx);
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error(`IPC handler "${actionName}" timed out after ${IPC_HANDLER_TIMEOUT_MS}ms`)), IPC_HANDLER_TIMEOUT_MS);
+        timeoutId = setTimeout(() => reject(new Error(`IPC handler "${actionName}" timed out after ${IPC_HANDLER_TIMEOUT_MS}ms`)), IPC_HANDLER_TIMEOUT_MS);
       });
       const result = await Promise.race([handlerPromise, timeoutPromise]);
 
@@ -238,6 +240,8 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
         ok: false,
         error: `Handler error: ${err instanceof Error ? err.message : String(err)}`,
       });
+    } finally {
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
     }
   };
 }

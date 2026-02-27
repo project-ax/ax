@@ -1,5 +1,13 @@
 # Journal
 
+## [2026-02-27 12:15] — Harden subagent delegation (fix 4 crash-causing bugs)
+
+**Task:** Diagnose and fix "3 concurrent agents crashes the server" in the delegation pipeline.
+**What I did:** Found and fixed 4 bugs: (1) IPC handler timer leak — setTimeout never cleared after handler completes, causing memory pressure under load; (2) Delegation handler error inconsistency — exceptions propagated to generic IPC catch instead of returning structured {ok:false, error}; (3) sessionCanaries map leak on error path — failed completions never cleaned up canary tokens; (4) Unhandled promise in IPC transport IIFE — stream.push() failures in the catch block caused agent crashes. Added 18 new tests (11 unit + 7 E2E) covering concurrent delegation, partial failure, rapid-fire stress, timer cleanup, and error response consistency.
+**Files touched:** src/host/ipc-server.ts, src/host/ipc-handlers/delegation.ts, src/host/server-completions.ts, src/agent/ipc-transport.ts, tests/host/delegation-hardening.test.ts (new), tests/e2e/scenarios/delegation-stress.test.ts (new)
+**Outcome:** Success — all 18 new tests pass, full suite green
+**Notes:** The root cause of "3 agents crashes server" was a combination of timer leaks + error response inconsistency. Each IPC call leaked a 15-minute setTimeout; under 3 concurrent delegations making multiple IPC calls, timers accumulated fast. The delegation error handler also let exceptions propagate up, causing the IPC handler to return "Handler error: ..." instead of the expected {ok, error} shape.
+
 ## [2026-02-26 15:00] — AI SDK format for image content blocks
 
 **Task:** Map internal image content blocks to AI SDK UI message stream schema.
