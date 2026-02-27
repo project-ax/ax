@@ -5,6 +5,7 @@
 **Context:** Removing pi-agent-core as a user-facing agent type — expected to also drop the npm dep
 **Lesson:** `@mariozechner/pi-coding-agent` does not re-export `Agent`, `AgentTool`, `StreamFn`, or `AgentMessage` from `@mariozechner/pi-agent-core`. If you need these types, you must either keep pi-agent-core as a direct dep or create a local barrel re-export. Check package exports (`dist/index.d.ts`) before assuming transitive deps surface their types.
 **Tags:** pi-agent-core, pi-coding-agent, npm, types, dependencies
+
 ### Promise.race timeouts MUST be cleared in finally blocks
 **Date:** 2026-02-27
 **Context:** Diagnosing server crashes under 3 concurrent delegation agents
@@ -22,6 +23,18 @@
 **Context:** Found sessionCanaries map leak causing OOM on repeated delegation failures
 **Lesson:** When a Map entry is set before a try block (like `sessionCanaries.set(id, token)`), ensure the corresponding `.delete()` is in BOTH the success path AND the catch block. Using try/finally for cleanup is ideal but may conflict if the success path needs to delete before returning. At minimum, add the cleanup to the catch block alongside `db.fail()`.
 **Tags:** memory-leak, map-cleanup, error-handling, sessionCanaries
+
+### Never use tsx binary as a process wrapper — use `node --import tsx/esm` instead
+**Date:** 2026-02-27
+**Context:** Diagnosing agent delegation failures — tsx wrapper caused EPERM, orphaned processes, and corrupted exit codes
+**Lesson:** The tsx binary (`node_modules/.bin/tsx`) spawns a child Node.js process and relays signals via `relaySignalToChild`. On macOS, this relay fails with EPERM, and tsx has no error handling for it. Always use `node --import <absolute-path-to-tsx/dist/esm/index.mjs>` instead — single process, no signal relay issues. The absolute path is mandatory because agents run with cwd=workspace (temp dir with no node_modules).
+**Tags:** tsx, process management, macOS, signal handling, EPERM, sandbox
+
+### Retry logic must check for valid output before retrying
+**Date:** 2026-02-27
+**Context:** Agents completed work but got retried because the tsx wrapper crashed with exit code 1
+**Lesson:** When an agent subprocess exits non-zero but produced valid stdout output, accept the output instead of retrying. The wrapper crash is irrelevant if the agent finished its work. In `server-completions.ts`, check `response.trim().length > 0` before entering the transient-failure retry path.
+**Tags:** retry, fault tolerance, agent lifecycle, exit codes
 
 ### Provider contract pattern IS the plugin framework — packaging is the missing piece
 **Date:** 2026-02-26

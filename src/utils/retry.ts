@@ -80,7 +80,7 @@ export async function withRetry<T>(
         attempt: attempt + 1,
         maxRetries,
         delayMs: Math.round(delay),
-        error: err instanceof Error ? err.message : String(err),
+        error: err instanceof Error ? err.message : (err == null ? 'Unknown error (thrown value was nullish)' : String(err)),
       });
 
       await sleep(delay, signal);

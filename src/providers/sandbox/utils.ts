@@ -31,13 +31,17 @@ export function enforceTimeout(child: ChildProcess, timeoutSec?: number, graceSe
   setTimeout(() => {
     if (exited) return;
 
-    // Try graceful termination first
-    child.kill('SIGTERM');
+    // Try graceful termination first.
+    // Wrap in try/catch: on macOS, kill() can throw EPERM when the child
+    // process (especially under tsx wrapper) is in a state where the kernel
+    // refuses signal delivery. Without this guard, the unhandled error
+    // propagates through tsx's signal relay and corrupts the exit code.
+    try { child.kill('SIGTERM'); } catch { /* EPERM / ESRCH — already dead or unsignable */ }
 
     // If still alive after grace period, force kill
     setTimeout(() => {
       if (!exited) {
-        child.kill('SIGKILL');
+        try { child.kill('SIGKILL'); } catch { /* EPERM / ESRCH */ }
       }
     }, graceSec * 1000);
   }, timeoutSec * 1000);

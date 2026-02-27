@@ -50,6 +50,11 @@ const PATTERNS: ErrorPattern[] = [
     suggestion: 'Server may have crashed — check logs',
   },
   {
+    test: /kill EPERM|EPERM.*kill/i,
+    diagnosis: 'Signal delivery failed — wrapper process could not relay signal to agent',
+    suggestion: 'This is a process management issue, not an agent error — the agent likely completed successfully',
+  },
+  {
     test: /\b401\b.*unauthorized|authentication.?error/i,
     diagnosis: 'Authentication failed — credentials are missing or expired',
     suggestion: 'Run `ax configure` to refresh credentials',
@@ -81,8 +86,8 @@ function getLogHint(): string {
   return `Details: ${join(home, 'data', 'ax.log')}`;
 }
 
-export function diagnoseError(err: Error | string): DiagnosedError {
-  const raw = typeof err === 'string' ? err : err.message;
+export function diagnoseError(err: Error | string | undefined | null): DiagnosedError {
+  const raw = typeof err === 'string' ? err : err?.message ?? 'Unknown error';
   const logHint = getLogHint();
 
   for (const pattern of PATTERNS) {

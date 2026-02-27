@@ -36,6 +36,15 @@ describe('isTransientAgentFailure', () => {
     expect(isTransientAgentFailure(1, 'IPC call timed out after 30000ms')).toBe(false);
   });
 
+  test('kill EPERM (tsx signal relay failure) is permanent', () => {
+    const stderr = 'Error: kill EPERM\n    at ChildProcess.kill (node:internal/child_process:512:26)\n    at process.relaySignalToChild';
+    expect(isTransientAgentFailure(1, stderr)).toBe(false);
+  });
+
+  test('EPERM with relaySignalToChild is permanent', () => {
+    expect(isTransientAgentFailure(1, 'errno: -1, code: EPERM, syscall: kill\nrelaySignalToChild')).toBe(false);
+  });
+
   // ── Transient failures (should retry) ──
 
   test('OOM kill (exit 137) without timeout stderr is transient', () => {

@@ -3,13 +3,17 @@ import { connectChannelWithRetry } from '../../src/host/server-channels.js';
 import type { ChannelProvider } from '../../src/providers/channel/types.js';
 import { getLogger } from '../../src/logger.js';
 
-function mockChannel(opts?: { connectError?: Error; failCount?: number }): ChannelProvider {
+function mockChannel(opts?: { connectError?: Error | undefined; failCount?: number; rejectUndefined?: boolean }): ChannelProvider {
   let failures = opts?.failCount ?? 0;
   return {
     name: 'test-channel',
     async connect() {
       if (failures > 0) {
         failures--;
+        if (opts?.rejectUndefined) {
+          // Simulate SDKs that reject with undefined (e.g. @slack/bolt socket failures)
+          return Promise.reject(undefined);
+        }
         throw opts?.connectError ?? new Error('connection failed');
       }
     },
@@ -82,4 +86,16 @@ describe('connectChannelWithRetry', () => {
 
     expect(connectSpy).toHaveBeenCalledTimes(1);
   });
+
+  test('wraps undefined rejection with a descriptive Error', async () => {
+    const channel = mockChannel({ rejectUndefined: true, failCount: 1 });
+    const connectSpy = vi.spyOn(channel, 'connect');
+
+    // 1 undefined-rejection then success
+    await connectChannelWithRetry(channel, logger);
+
+    // Should have retried (undefined is not an auth error)
+    expect(connectSpy).toHaveBeenCalledTimes(2);
+  }, 30000);
+
 });

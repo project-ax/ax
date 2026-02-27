@@ -347,7 +347,17 @@ export async function connectChannelWithRetry(
   logger: Logger,
 ): Promise<void> {
   await withRetry(
-    () => channel.connect(),
+    async () => {
+      try {
+        await channel.connect();
+      } catch (err) {
+        // Some SDKs (e.g. @slack/bolt) reject with undefined — wrap so we get a real Error
+        if (err == null) {
+          throw new Error(`${channel.name} connect() rejected without an error value`);
+        }
+        throw err;
+      }
+    },
     {
       maxRetries: CHANNEL_RECONNECT_MAX_RETRIES,
       initialDelayMs: CHANNEL_RECONNECT_INITIAL_DELAY_MS,

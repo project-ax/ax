@@ -45,6 +45,27 @@ describe('sandbox/utils', () => {
       expect(code).toBe(0);
     });
 
+    test('does not throw when child.kill() throws EPERM', async () => {
+      vi.useFakeTimers();
+      const child = spawn('sleep', ['60']);
+      // Simulate EPERM from kill (macOS tsx signal relay issue)
+      const killSpy = vi.spyOn(child, 'kill').mockImplementation(() => {
+        throw Object.assign(new Error('kill EPERM'), { code: 'EPERM', errno: -1, syscall: 'kill' });
+      });
+      enforceTimeout(child, 1, 1);
+      // Advance past timeout — should NOT throw
+      vi.advanceTimersByTime(1_000);
+      expect(killSpy).toHaveBeenCalledTimes(1);
+      // Advance past grace period — should NOT throw either
+      vi.advanceTimersByTime(1_000);
+      expect(killSpy).toHaveBeenCalledTimes(2);
+      // Restore real kill before cleanup
+      killSpy.mockRestore();
+      vi.useRealTimers();
+      try { child.kill('SIGKILL'); } catch { /* already dead */ }
+      await exitCodePromise(child);
+    });
+
     test('sends SIGTERM at timeout, then SIGKILL after grace period', async () => {
       vi.useFakeTimers();
       const child = spawn('sleep', ['60']);

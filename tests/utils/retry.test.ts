@@ -126,6 +126,24 @@ describe('withRetry', () => {
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
+  test('handles undefined/null thrown values without crashing', async () => {
+    const fn = vi.fn()
+      .mockRejectedValueOnce(undefined)
+      .mockRejectedValueOnce(null)
+      .mockResolvedValue('ok');
+
+    vi.useRealTimers();
+
+    const result = await withRetry(fn, {
+      maxRetries: 3,
+      initialDelayMs: 10,
+      jitter: false,
+    });
+
+    expect(result).toBe('ok');
+    expect(fn).toHaveBeenCalledTimes(3);
+  });
+
   test('applies exponential backoff with multiplier', async () => {
     const fn = vi.fn()
       .mockRejectedValueOnce(new Error('fail1'))

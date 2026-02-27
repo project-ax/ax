@@ -18,7 +18,7 @@ import type { Config } from '../../types.js';
 import { exitCodePromise, enforceTimeout, killProcess, checkCommand, sandboxProcess } from './utils.js';
 
 export async function create(_config: Config): Promise<SandboxProvider> {
-  // Project directory — needed so tsx, agent runner source, and node_modules are accessible
+  // Project directory — needed so node, tsx loader, agent runner source, and node_modules are accessible
   const projectDir = resolve('.');
 
   // Resolve the Node.js install root (handles nvm, fnm, volta, etc.)
@@ -73,7 +73,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         '--ro-bind', '/lib64', '/lib64',
         '--ro-bind', '/etc/resolv.conf', '/etc/resolv.conf',
 
-        // Project directory (read-only) — tsx, agent runner, node_modules
+        // Project directory (read-only) — node, tsx loader, agent runner, node_modules
         '--ro-bind', projectDir, projectDir,
 
         // Node.js runtime (read-only)

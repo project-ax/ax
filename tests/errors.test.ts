@@ -42,6 +42,12 @@ describe('diagnoseError', () => {
     expect(d.diagnosis).toContain('API');
   });
 
+  it('should diagnose kill EPERM (tsx signal relay failure)', () => {
+    const d = diagnoseError('Error: kill EPERM\n    at ChildProcess.kill (node:internal/child_process:512:26)\n    at process.relaySignalToChild');
+    expect(d.diagnosis).toContain('signal');
+    expect(d.suggestion).toContain('completed successfully');
+  });
+
   it('should handle unknown errors gracefully', () => {
     const d = diagnoseError('something completely unknown happened');
     expect(d.raw).toContain('something completely unknown');
@@ -56,5 +62,16 @@ describe('diagnoseError', () => {
   it('should diagnose socket hangup', () => {
     const d = diagnoseError('socket hang up');
     expect(d.diagnosis).toContain('closed');
+  });
+
+  it('should handle undefined/null without crashing', () => {
+    const d1 = diagnoseError(undefined as unknown as Error);
+    expect(d1.raw).toBe('Unknown error');
+    expect(d1.diagnosis).toBe('Unexpected error');
+    expect(d1.logHint).toContain('ax.log');
+
+    const d2 = diagnoseError(null as unknown as Error);
+    expect(d2.raw).toBe('Unknown error');
+    expect(d2.diagnosis).toBe('Unexpected error');
   });
 });

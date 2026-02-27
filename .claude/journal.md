@@ -8,6 +8,22 @@
 **Outcome:** Success — all 18 new tests pass, full suite green
 **Notes:** The root cause of "3 agents crashes server" was a combination of timer leaks + error response inconsistency. Each IPC call leaked a 15-minute setTimeout; under 3 concurrent delegations making multiple IPC calls, timers accumulated fast. The delegation error handler also let exceptions propagate up, causing the IPC handler to return "Handler error: ..." instead of the expected {ok, error} shape.
 
+## [2026-02-27 09:35] — Dev/production mode split for agent runner
+
+**Task:** Use .ts source (via tsx ESM loader) during development but compiled dist/*.js in production.
+**What I did:** Added `DEV_MODE` detection in assets.ts using `import.meta.url.endsWith('.ts')`. When host runs via tsx, `runnerPath()` returns `src/agent/runner.ts` and the spawn command includes `--import <tsx-esm-loader>`. When host runs from dist/, `runnerPath()` returns `dist/agent/runner.js` with no tsx dependency. Also added `tsxLoader()` (absolute path to tsx ESM loader) and `isDevMode()` exports.
+**Files touched:** src/utils/assets.ts, src/host/server-completions.ts
+**Outcome:** Success — all 1729 tests pass. Dev mode gets hot-reload-like behavior, production gets zero tsx overhead.
+**Notes:** The tsx ESM loader path must be absolute (not just `tsx/esm`) because agents run with cwd=workspace which has no node_modules.
+
+## [2026-02-27 09:00] — Fix agent delegation EPERM crash / retry loop
+
+**Task:** Diagnose and fix cascading failures when agents delegate to subagents — EPERM crashes, invalid retries, and orphaned processes.
+**What I did:** Root-caused the issue through the full process chain: enforceTimeout → SIGTERM → tsx signal relay → EPERM → exit code 1 → retry loop. Implemented 5 fixes: (1) EPERM error pattern in diagnosis, (2) try/catch in enforceTimeout kill calls, (3) accept valid output despite non-zero exit, (4) classify kill EPERM as permanent failure, (5) eliminate tsx binary wrapper entirely — replaced `tsx runner.ts` with `node --import tsx/esm runner.ts` to run in a single process.
+**Files touched:** src/errors.ts, src/host/server-completions.ts, src/providers/sandbox/utils.ts, src/utils/assets.ts, src/providers/sandbox/bwrap.ts, tests/errors.test.ts, tests/host/fault-tolerance.test.ts, tests/providers/sandbox/utils.test.ts
+**Outcome:** Success — all 1729 tests pass. Root cause was tsx binary creating an extra process layer with a broken macOS signal relay.
+**Notes:** The tsx binary wrapper (spawns cross-spawn child with inherited stdio) was the fundamental issue. Its `relaySignalToChild` has no error handling, so EPERM from macOS kernel causes unhandled exception → exit code 1, while the actual Node.js agent process becomes an orphan. Using `--import tsx/esm` eliminates the wrapper entirely.
+
 ## [2026-02-26 15:00] — AI SDK format for image content blocks
 
 **Task:** Map internal image content blocks to AI SDK UI message stream schema.
@@ -757,3 +773,19 @@ Tests: 53 new tests across 6 test files, all passing. Zero regressions on 383 ex
 **Files touched:** src/types.ts, src/config.ts, src/ipc-schemas.ts, src/agent/runner.ts, src/agent/agent-setup.ts, src/agent/proxy-stream.ts, src/agent/ipc-transport.ts, src/agent/tool-catalog.ts, src/agent/mcp-server.ts, src/agent/prompt/modules/delegation.ts, src/onboarding/prompts.ts, src/host/server-completions.ts, src/host/agent-registry.ts, 20+ test files
 **Outcome:** Success — clean TypeScript build, 167/167 test files pass, 1721/1722 tests (1 skipped macOS seatbelt)
 **Notes:** The npm package @mariozechner/pi-agent-core is still a direct dependency for type imports (AgentMessage, AgentTool, StreamFn). These types are not re-exported by pi-coding-agent. A follow-up could re-export them from a local barrel file and drop the direct dep.
+
+## [2026-02-26 22:14] — Fix diagnoseError crash on undefined/null input
+
+**Task:** Fix TypeError crash in `diagnoseError` when called with `undefined` from a `.catch()` handler
+**What I did:** Added nullish guard to `diagnoseError` — changed type signature to accept `undefined | null`, used optional chaining (`err?.message ?? 'Unknown error'`). Added test covering undefined and null inputs.
+**Files touched:** src/errors.ts, tests/errors.test.ts
+**Outcome:** Success — all 1723 tests pass, crash no longer occurs
+**Notes:** All 5 callers use `err as Error` from `.catch()` blocks. A Promise can reject with `undefined` (e.g., `reject()` with no args), so the error boundary function must be defensive.
+
+## [2026-02-26 22:20] — Fix Slack retry logging "undefined" error
+
+**Task:** Diagnose and fix `error: "undefined"` in Slack channel retry logs
+**What I did:** The `@slack/bolt` SDK can reject with `undefined` on socket failures. Fixed two layers: (1) `withRetry` now logs descriptive message instead of `String(undefined)`, (2) `connectChannelWithRetry` wraps `undefined` rejections into a real Error with the channel name so retry classification and logging work correctly.
+**Files touched:** src/utils/retry.ts, src/host/server-channels.ts, tests/utils/retry.test.ts, tests/host/channel-reconnect.test.ts
+**Outcome:** Success — all 1725 tests pass. Next time Slack connect fails, the log will show "test-channel connect() rejected without an error value" instead of "undefined"
+**Notes:** Root cause of the Slack connection failure itself is unknown — the `error: "undefined"` was masking it. With this fix, the next failure will produce a real error message. Common causes: invalid app token, Socket Mode not enabled, network issues.

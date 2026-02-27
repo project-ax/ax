@@ -22,7 +22,7 @@ import { drainGeneratedImages } from './ipc-handlers/image.js';
 import { startAnthropicProxy } from './proxy.js';
 import { diagnoseError } from '../errors.js';
 import { ensureOAuthTokenFresh, refreshOAuthTokenFromEnv } from '../dotenv.js';
-import { tsxBin as resolveTsxBin, runnerPath as resolveRunnerPath } from '../utils/assets.js';
+import { runnerPath as resolveRunnerPath, tsxLoader, isDevMode } from '../utils/assets.js';
 import type { OpenAIChatRequest } from './server-http.js';
 import type { FileStore } from '../file-store.js';
 
@@ -312,8 +312,14 @@ export async function processCompletion(
       }));
     }
 
-    // Spawn sandbox
-    const tsxBin = resolveTsxBin();
+    // Spawn sandbox — run agent with plain `node`, never through the tsx
+    // binary wrapper (which spawns an extra child process whose signal relay
+    // fails with EPERM on macOS, leaving orphaned grandchild processes).
+    //
+    // Dev mode:  node --import <tsx-esm-loader> src/agent/runner.ts
+    //   → single process, source changes picked up without rebuilding.
+    // Production: node dist/agent/runner.js
+    //   → no tsx dependency, no extra process layers.
     const agentType = config.agent ?? 'pi-coding-agent';
 
     // Start credential-injecting proxy for claude-code agents only.
@@ -347,7 +353,11 @@ export async function processCompletion(
 
     const maxTokens = config.max_tokens ?? 8192;
 
-    const spawnCommand = [tsxBin, resolveRunnerPath(),
+    const spawnCommand = [process.execPath,
+      // Dev mode: load tsx ESM loader so the .ts runner source is compiled on
+      // the fly. Production: run compiled dist/agent/runner.js directly.
+      ...(isDevMode() ? ['--import', tsxLoader()] : []),
+      resolveRunnerPath(),
       '--agent', agentType,
       '--ipc-socket', ipcSocketPath,
       '--workspace', workspace,
@@ -468,6 +478,21 @@ export async function processCompletion(
       reqLogger.info('agent_complete', { durationSec: 0, exitCode, attempt });
 
       if (exitCode === 0) break; // Success — no retry needed
+
+      // If the agent produced valid output despite a non-zero exit code (e.g.
+      // tsx wrapper crashed with EPERM after the agent finished), accept it.
+      // The most common cause: enforceTimeout sends SIGTERM to the tsx wrapper,
+      // tsx's signal relay fails with EPERM on macOS, but the actual Node.js
+      // agent process completed and wrote its output before the wrapper died.
+      if (response.trim().length > 0) {
+        reqLogger.warn('agent_exit_with_output', {
+          exitCode,
+          attempt,
+          stdoutLength: response.length,
+          message: 'Agent produced output despite non-zero exit — accepting response',
+        });
+        break;
+      }
 
       // Determine if this failure is retryable.
       // Transient signals: killed by signal (137=OOM, 139=SEGV), ECONNRESET, EPIPE, spawn errors.
@@ -666,6 +691,11 @@ export function isTransientAgentFailure(exitCode: number, stderr: string): boole
 
   // Permanent: timeout — the sandbox already used its full time budget
   if (lower.includes('timed out') || lower.includes('timeout') || lower.includes('sigkill')) return false;
+
+  // Permanent: tsx wrapper signal relay failure — the agent process wrapper
+  // (tsx) failed to relay a signal. This is a process management issue, not
+  // an agent crash. Retrying will just repeat the same wrapper failure.
+  if (lower.includes('kill eperm') || (lower.includes('eperm') && lower.includes('relaysignaltochild'))) return false;
 
   // Transient: signal kills (OOM=137, SEGV=139, other signals=128+N)
   if (exitCode >= 128 && exitCode <= 191) return true;
