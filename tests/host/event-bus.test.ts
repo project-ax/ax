@@ -253,4 +253,52 @@ describe('EventBus', () => {
       expect(received[0].data).toEqual({ finishReason: 'stop', responseLength: 42 });
     });
   });
+
+  describe('thinking/reasoning events', () => {
+    it('delivers llm.thinking events to subscribers', () => {
+      const bus = createEventBus();
+      const received: StreamEvent[] = [];
+      bus.subscribe((e) => received.push(e));
+
+      bus.emit(makeEvent({ type: 'llm.thinking', data: { contentLength: 150 } }));
+
+      expect(received).toHaveLength(1);
+      expect(received[0].type).toBe('llm.thinking');
+      expect(received[0].data.contentLength).toBe(150);
+    });
+
+    it('delivers llm.thinking events to request-scoped subscribers', () => {
+      const bus = createEventBus();
+      const received: StreamEvent[] = [];
+      bus.subscribeRequest('req-think', (e) => received.push(e));
+
+      bus.emit(makeEvent({ type: 'llm.thinking', requestId: 'req-think', data: { contentLength: 42 } }));
+      bus.emit(makeEvent({ type: 'llm.thinking', requestId: 'req-other', data: { contentLength: 99 } }));
+
+      expect(received).toHaveLength(1);
+      expect(received[0].requestId).toBe('req-think');
+    });
+
+    it('interleaves thinking and text events in order', () => {
+      const bus = createEventBus();
+      const types: string[] = [];
+      bus.subscribe((e) => types.push(e.type));
+
+      bus.emit(makeEvent({ type: 'llm.start' }));
+      bus.emit(makeEvent({ type: 'llm.thinking' }));
+      bus.emit(makeEvent({ type: 'llm.thinking' }));
+      bus.emit(makeEvent({ type: 'llm.chunk' }));
+      bus.emit(makeEvent({ type: 'llm.chunk' }));
+      bus.emit(makeEvent({ type: 'llm.done' }));
+
+      expect(types).toEqual([
+        'llm.start',
+        'llm.thinking',
+        'llm.thinking',
+        'llm.chunk',
+        'llm.chunk',
+        'llm.done',
+      ]);
+    });
+  });
 });

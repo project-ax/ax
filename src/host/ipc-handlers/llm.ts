@@ -93,6 +93,13 @@ export function createLLMHandlers(providers: ProviderRegistry, configModel?: str
             timestamp: Date.now(),
             data: { toolName: (chunk as any).toolCall?.name },
           });
+        } else if (chunkType === 'thinking') {
+          eventBus?.emit({
+            type: 'llm.thinking',
+            requestId: ctx.sessionId,
+            timestamp: Date.now(),
+            data: { contentLength: ((chunk as any).content ?? '').length },
+          });
         } else if (chunkType === 'text') {
           eventBus?.emit({
             type: 'llm.chunk',

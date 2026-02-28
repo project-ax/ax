@@ -868,3 +868,16 @@ Tests: 53 new tests across 6 test files, all passing. Zero regressions on 383 ex
 **Files touched:** `src/host/event-bus.ts` (new), `src/host/server.ts`, `src/host/server-completions.ts`, `src/host/ipc-server.ts`, `src/host/ipc-handlers/llm.ts`, `tests/host/event-bus.test.ts` (new), `tests/host/event-bus-sse.test.ts` (new), `docs/plans/2026-02-27-streaming-event-bus.md` (new)
 **Outcome:** Success — all 26 new tests pass, all existing tests pass (65 server + 29 IPC handler + 20 router/completions)
 **Notes:** EventBus is optional (`eventBus?`) everywhere — zero impact when not wired in. Synchronous emit means it can never block the completion pipeline. SSE endpoint reuses the same auth boundary as the rest of the API (Unix socket / TCP port).
+
+## [2026-02-28 00:50] — Add thinking/reasoning event to streaming event bus
+
+**Task:** Add llm.thinking event type for extended thinking / reasoning model support
+**What I did:**
+- Added `'thinking'` to `ChatChunk.type` union in `src/providers/llm/types.ts`
+- Anthropic provider (`anthropic.ts`): yield `{ type: 'thinking' }` chunks from `thinking_delta` content block deltas
+- OpenAI provider (`openai.ts`): yield `{ type: 'thinking' }` chunks from `reasoning_content`/`reasoning` delta fields (supports o-series, DeepSeek R1, etc.)
+- LLM IPC handler (`ipc-handlers/llm.ts`): emit `llm.thinking` event with `contentLength` for thinking chunks
+- Added 3 thinking-specific unit tests in `event-bus.test.ts`, 6 LLM handler event tests in `ipc-handlers/llm-events.test.ts`, 2 ChatChunk type tests in `providers/llm/thinking-chunk.test.ts`
+**Files touched:** `src/providers/llm/types.ts`, `src/providers/llm/anthropic.ts`, `src/providers/llm/openai.ts`, `src/host/ipc-handlers/llm.ts`, `tests/host/event-bus.test.ts`, `tests/host/ipc-handlers/llm-events.test.ts` (new), `tests/providers/llm/thinking-chunk.test.ts` (new)
+**Outcome:** Success — 29 new tests pass, all 431 existing tests pass (40 test files)
+**Notes:** The thinking event only carries `contentLength` — we intentionally do NOT include thinking content in events (no credentials, no full content in events per the security design). Anthropic thinking deltas arrive as `{ thinking: "..." }` in the delta, while OpenAI-compatible providers use `reasoning_content` or `reasoning` as non-standard delta fields.
