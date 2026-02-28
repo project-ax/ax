@@ -248,9 +248,41 @@ Every extracted provider needs to import some core utilities. These become
    (e.g., `@anthropic-ai/sdk`, `@slack/bolt`, `isomorphic-git`, `@tavily/core`).
 6. Verify `pnpm build` and `pnpm test` pass from the workspace root.
 
-### Step 2: Fix cross-provider dependencies
+### Step 2: Fix cross-provider dependencies and harden module resolution
 
-Before extracting providers, resolve cross-category imports:
+Before extracting providers, resolve cross-category imports and close the CWD
+hijacking vector introduced by package-name resolution.
+
+#### 2a. Harden `resolveProviderPath` against CWD hijacking (SC-SEC-002)
+
+**Problem:** When `provider-map.ts` returns a bare package name like
+`'@ax/provider-llm-anthropic'`, Node.js `import()` resolves it by walking up the
+`node_modules` directory hierarchy from CWD. An attacker who controls the working
+directory can plant a malicious `node_modules/@ax/` that shadows the real package.
+
+The current relative-path approach is immune because `new URL(path, import.meta.url)`
+resolves against the module's own location, not CWD.
+
+**Fix:** Use `import.meta.resolve()` (stable since Node 20.6) for package-name
+entries. This resolves relative to the calling module's location, just like the
+`new URL()` approach does for relative paths:
+
+```typescript
+// Before (vulnerable to CWD shadowing):
+if (modulePath.startsWith('@') || ...) {
+  return modulePath;  // import() walks CWD → parent → ... → root
+}
+
+// After (pinned to our installation):
+if (modulePath.startsWith('@') || ...) {
+  return import.meta.resolve(modulePath);  // resolves from THIS file's location
+}
+```
+
+**Test:** Add a test that verifies package-name entries resolve to paths within the
+AX installation directory, not arbitrary `node_modules/` locations.
+
+#### 2b. Fix cross-provider imports
 
 1. **Extract `parseCompoundId`** from `llm/router.ts` into `src/utils/compound-id.ts`.
    Update both `llm/router.ts` and `image/router.ts` to import from there.
@@ -509,6 +541,7 @@ handles both formats.
 | Test discovery changes | vitest config `exclude` already ignores worktrees; workspace test command runs all |
 | pnpm workspace issues | Start with `pnpm import` to convert existing lockfile |
 | Cross-provider type breakage | Provider-SDK already re-exports all interfaces |
+| CWD module hijacking | `import.meta.resolve()` pins package resolution to AX install dir (Step 2a) |
 
 ## Success Criteria
 
@@ -520,3 +553,4 @@ handles both formats.
 - [ ] No provider imports from `../../` paths — all imports use package names or SDK
 - [ ] SC-SEC-002 preserved: provider-map remains a static allowlist
 - [ ] No new `devDependencies` in the core package from external providers
+- [ ] Package-name entries resolve via `import.meta.resolve()`, not bare `import()`

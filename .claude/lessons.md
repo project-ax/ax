@@ -1,5 +1,11 @@
 # Lessons Learned
 
+### import.meta.resolve() is the secure way to resolve package names
+**Date:** 2026-02-28
+**Context:** Analyzing security of monorepo split — switching provider-map from relative paths to @ax/provider-* package names
+**Lesson:** When using dynamic `import(packageName)`, Node.js resolves from CWD upward through the node_modules hierarchy. An attacker who controls CWD can shadow any package. Use `import.meta.resolve(packageName)` instead — it resolves from the calling module's location (like `new URL(path, import.meta.url)` does for relative paths). Stable since Node 20.6.
+**Tags:** security, import, node-modules, cwd-hijacking, provider-map, SC-SEC-002
+
 ### pi-coding-agent does NOT re-export pi-agent-core types
 **Date:** 2026-02-27
 **Context:** Removing pi-agent-core as a user-facing agent type — expected to also drop the npm dep

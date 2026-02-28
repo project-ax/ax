@@ -157,9 +157,13 @@ export function resolveProviderPath(kind: string, name: string): string {
   }
 
   // Package names (starting with @ or not starting with . or /)
-  // are returned as-is — import() handles them via node_modules resolution.
+  // are resolved via import.meta.resolve() to pin them to THIS module's
+  // node_modules — not the CWD's. Without this, an attacker who controls
+  // the working directory could plant a malicious node_modules/@ax/ that
+  // shadows the real package. import.meta.resolve() behaves like new URL()
+  // for relative paths: it resolves from this file's location, not CWD.
   if (modulePath.startsWith('@') || (!modulePath.startsWith('.') && !modulePath.startsWith('/'))) {
-    return modulePath;
+    return import.meta.resolve(modulePath);
   }
 
   // Resolve the relative path against this module's location to produce

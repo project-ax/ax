@@ -1,5 +1,13 @@
 # Journal
 
+## [2026-02-28 10:00] — Harden resolveProviderPath against CWD module hijacking
+
+**Task:** Add import.meta.resolve() mitigation for package-name entries in provider-map.ts
+**What I did:** Changed resolveProviderPath() to use import.meta.resolve() instead of returning bare package names. This pins resolution to the AX installation's node_modules, not the CWD — preventing an attacker from planting a malicious node_modules/@ax/ in the working directory. Updated the implementation plan (Step 2a) with the security rationale. Added a test documenting the security invariant. Relaxed the naming convention test to accept both relative paths and @ax/provider-* package names (forward-compatible with Phase 2).
+**Files touched:** Modified: src/host/provider-map.ts, tests/host/provider-map.test.ts, docs/plans/2026-02-27-monorepo-split-implementation.md
+**Outcome:** Success — 23/23 provider-related tests pass, security property validated
+**Notes:** Node.js import.meta.resolve() is stable since Node 20.6 (we're on 22.22.0). The key insight: new URL(path, import.meta.url) for relative paths and import.meta.resolve(pkg) for package names both resolve from the module's location, not CWD. This makes them security-equivalent.
+
 ## [2026-02-27 15:30] — Write Phase 2 monorepo split implementation plan
 
 **Task:** Create a detailed implementation plan for extracting providers into separate packages (Phase 2 of plugin framework design)
