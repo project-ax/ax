@@ -116,6 +116,15 @@ export async function create(config: Config): Promise<ChannelProvider> {
     slackLogger.warn('slack_socket_error', { error: err instanceof Error ? err.message : String(err) });
   });
 
+  // Bolt routes internal errors (including floating promise rejections during
+  // socket disconnect/reconnect) through app.error(). Without this handler,
+  // they become unhandled promise rejections that crash the process.
+  app.error(async (error) => {
+    slackLogger.warn('slack_app_error', {
+      error: error.original instanceof Error ? error.original.message : String(error.original ?? error),
+    });
+  });
+
   async function ensureConnected(): Promise<void> {
     if (intentionalDisconnect || reconnecting) return;
 
@@ -131,7 +140,7 @@ export async function create(config: Config): Promise<ChannelProvider> {
         await app.client.auth.test({ token: botToken });
       } catch (err) {
         // Network still down — wait and try again
-        slackLogger.warn('slack_probe_failed', { error: (err as Error).message, backoffMs: delay });
+        slackLogger.warn('slack_probe_failed', { error: err instanceof Error ? err.message : String(err ?? 'unknown'), backoffMs: delay });
         await new Promise(r => setTimeout(r, delay));
         delay = Math.min(delay * 2, MAX_BACKOFF_MS);
         continue;
@@ -149,7 +158,7 @@ export async function create(config: Config): Promise<ChannelProvider> {
         return;
       } catch (err) {
         // Socket reconnect failed — retry with backoff
-        slackLogger.warn('slack_reconnect_failed', { error: (err as Error).message, backoffMs: delay });
+        slackLogger.warn('slack_reconnect_failed', { error: err instanceof Error ? err.message : String(err ?? 'unknown'), backoffMs: delay });
         await new Promise(r => setTimeout(r, delay));
         delay = Math.min(delay * 2, MAX_BACKOFF_MS);
       }
