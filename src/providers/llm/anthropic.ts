@@ -144,7 +144,7 @@ export async function create(config: Config): Promise<LLMProvider> {
       let thinkingChunkCount = 0;
       for await (const event of stream) {
         if (event.type === 'content_block_delta') {
-          const delta = event.delta as Record<string, unknown>;
+          const delta = event.delta as unknown as Record<string, unknown>;
           if ('text' in delta && typeof delta.text === 'string') {
             chunkCount++;
             yield { type: 'text', content: delta.text };
