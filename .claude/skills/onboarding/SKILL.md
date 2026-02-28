@@ -12,7 +12,7 @@ The onboarding system handles first-run configuration (interactive or programmat
 | File | Responsibility | Key Exports |
 |---|---|---|
 | `src/onboarding/wizard.ts` | Config generation (programmatic + interactive) | `runOnboarding()`, `loadExistingConfig()` |
-| `src/onboarding/prompts.ts` | Profile defaults, agent types, provider choices | `PROFILE_DEFAULTS`, `AGENT_TYPES`, `PROVIDER_CHOICES` |
+| `src/onboarding/prompts.ts` | Profile defaults, agent types, provider choices, image provider info | `PROFILE_DEFAULTS`, `AGENT_TYPES`, `PROVIDER_CHOICES`, `IMAGE_PROVIDERS`, `DEFAULT_IMAGE_MODELS` |
 | `src/onboarding/configure.ts` | Interactive @inquirer/prompts wizard, UI helpers | `runConfigure()`, `buildInquirerDefaults()` |
 | `src/cli/bootstrap.ts` | Agent identity reset ritual | `resetAgent()` |
 
@@ -23,7 +23,7 @@ The onboarding system handles first-run configuration (interactive or programmat
 ```typescript
 interface OnboardingAnswers {
   profile: 'paranoid' | 'balanced' | 'yolo';
-  agent?: string;                    // Agent type (defaults to profile default)
+  agent?: string;                    // Agent type: 'pi-coding-agent' | 'claude-code'
   apiKey?: string;                   // Anthropic API key
   oauthToken?: string;               // OAuth token (alternative to API key)
   oauthRefreshToken?: string;
@@ -35,13 +35,14 @@ interface OnboardingAnswers {
   webSearchApiKey?: string;          // Tavily API key
   slackBotToken?: string;
   slackAppToken?: string;
+  imageModel?: string;               // Image generation model (e.g., 'openai/dall-e-3')
 }
 ```
 
 **Output files:**
-- `ax.yaml` — Full config with providers, sandbox, scheduler, channel_config sections
-- `.env` — API keys, OAuth tokens, passphrases (never in ax.yaml)
-- `.clawhub-install-queue` — Optional skill install list
+- `ax.yaml` -- Full config with providers, sandbox, scheduler, channel_config, models (including models.image if imageModel set)
+- `.env` -- API keys, OAuth tokens, passphrases (never in ax.yaml)
+- `.clawhub-install-queue` -- Optional skill install list
 
 ## Profile Defaults
 
@@ -49,8 +50,7 @@ interface OnboardingAnswers {
 
 | Provider | Paranoid | Balanced | Yolo |
 |---|---|---|---|
-| agent | pi-agent-core | pi-agent-core | pi-agent-core |
-| llm | anthropic | anthropic | anthropic |
+| agent | pi-coding-agent | pi-coding-agent | pi-coding-agent |
 | memory | file | sqlite | sqlite |
 | scanner | patterns | patterns | basic |
 | web | none | fetch | fetch |
@@ -61,53 +61,29 @@ interface OnboardingAnswers {
 | sandbox | seatbelt/nsjail | seatbelt/nsjail | subprocess |
 | scheduler | none | cron | cron |
 
+## Agent Types
+
+- **`pi-coding-agent`** -- Default. Uses pi-coding-agent library with proxy or IPC LLM transport.
+- **`claude-code`** -- Uses Claude Agent SDK with TCP bridge + MCP tools. Models optional (relies on agent-internal logic).
+
+## Image Provider Support
+
+The wizard now includes image generation configuration:
+- **Image providers**: openai (DALL-E), openrouter, gemini, groq, and more
+- **`DEFAULT_IMAGE_MODELS`**: Maps providers to default model IDs
+- **Config output**: Writes `models.image` array in `ax.yaml` when imageModel is specified
+
 ## Interactive Configuration
 
-`runConfigure()` uses @inquirer/prompts for terminal UI:
+`runConfigure()` uses @inquirer/prompts:
 1. Profile selection (paranoid/balanced/yolo)
-2. Agent type selection
+2. Agent type selection (pi-coding-agent/claude-code)
 3. Auth method (API key or OAuth)
 4. API key / OAuth token input
 5. Channel selection (multi-select)
 6. Channel-specific tokens (Slack bot/app tokens)
-7. Additional provider settings (Tavily key, passphrase)
-
-`buildInquirerDefaults(existing)` maps existing config to pre-filled defaults for reconfiguration. Masks API keys for display (e.g., `sk-...5678`).
-
-## Reconfiguration
-
-`loadExistingConfig(dir)` reads `ax.yaml` + `.env` and returns `OnboardingAnswers | null`:
-- Reads profile, agent, provider selections from ax.yaml
-- Reads API keys, OAuth tokens, passphrases from .env
-- Detects auth method (api-key vs oauth) based on which tokens are present
-- Strips 'cli' from channels (always implicit)
-- Returns `null` if no config exists
-
-## Bootstrap Ritual
-
-`resetAgent(agentDir, templatesDir)` in `src/cli/bootstrap.ts`:
-
-1. Deletes evolvable identity files: `SOUL.md`, `IDENTITY.md`, old `BOOTSTRAP.md`
-2. Copies fresh `BOOTSTRAP.md` and `USER_BOOTSTRAP.md` from templates directory
-3. **Preserves**: per-user `USER.md` files (in `users/` subdirectory) and `admins` list
-4. Called via `ax bootstrap [agentName]` CLI command with confirmation prompt
-
-The bootstrap triggers bootstrap mode in the prompt builder: IdentityModule shows only BOOTSTRAP.md, guiding the agent through initial identity discovery.
-
-## Channel Config Generation
-
-When channels like `slack` are selected, onboarding generates `channel_config` in ax.yaml:
-
-```yaml
-channel_config:
-  slack:
-    dm_policy: open
-    require_mention: true
-    allowed_users: []
-    max_attachment_bytes: 1048576
-```
-
-Generated config passes Zod validation via `loadConfig()`.
+7. Image generation toggle + provider/model selection
+8. Additional provider settings (Tavily key, passphrase)
 
 ## Common Tasks
 
@@ -124,16 +100,20 @@ Generated config passes Zod validation via `loadConfig()`.
 4. Add `channel_config` generation for the channel
 5. Add `loadExistingConfig` reading for the channel's tokens
 
-**Modifying profile defaults:**
-1. Change `PROFILE_DEFAULTS[profile]` in `prompts.ts`
-2. Update wizard test expectations in `tests/onboarding/wizard.test.ts`
+**Adding a new image provider:**
+1. Add to `IMAGE_PROVIDERS` array in `prompts.ts`
+2. Add display name to `IMAGE_PROVIDER_DISPLAY_NAMES`
+3. Add default model to `DEFAULT_IMAGE_MODELS`
+4. Add provider implementation in `src/providers/image/<name>.ts`
+5. Register in `src/host/provider-map.ts`
 
 ## Gotchas
 
-- **`.env` never goes in ax.yaml**: Secrets (API keys, tokens, passphrases) go in `.env` only. The wizard enforces this separation.
-- **'cli' is stripped from channels on load**: `loadExistingConfig` removes 'cli' from the channels list since it's always implicit. Don't count on it being in the loaded answers.
-- **OAuth vs API key detection**: `loadExistingConfig` checks for `CLAUDE_CODE_OAUTH_TOKEN` in `.env` to determine auth method. Both can't coexist.
-- **`skipSkills: true` suppresses .clawhub-install-queue**: Even if `installSkills` is provided, the queue file isn't written when `skipSkills` is true.
-- **Bootstrap preserves per-user state**: `resetAgent` intentionally keeps `users/` directory. Only shared identity files are wiped.
-- **Profile throws on unknown**: `runOnboarding` throws `'Unknown profile'` if the profile string doesn't match a known entry. Always validate upstream.
-- **Channel config is per-profile**: Different profiles may want different channel defaults (e.g., paranoid might restrict `dm_policy`).
+- **`.env` never goes in ax.yaml**: Secrets go in `.env` only. The wizard enforces this separation.
+- **'cli' is stripped from channels on load**: `loadExistingConfig` removes 'cli' since it's always implicit.
+- **OAuth vs API key detection**: `loadExistingConfig` checks for `CLAUDE_CODE_OAUTH_TOKEN` in `.env`.
+- **`skipSkills: true` suppresses .clawhub-install-queue**: Even if `installSkills` is provided.
+- **Bootstrap preserves per-user state**: `resetAgent` keeps `users/` directory.
+- **Models are task-type keyed**: Config writes `models.default` (LLM) and `models.image` (image generation) as separate arrays.
+- **claude-code models optional**: claude-code agents can omit `models.default` entirely.
+- **Channel config is per-profile**: Different profiles may want different channel defaults.

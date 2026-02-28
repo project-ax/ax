@@ -1,11 +1,11 @@
 ---
 name: ax-utils
-description: Use when working with path validation (safePath), SQLite adapter selection, or disabled provider stubs in src/utils/
+description: Use when working with path validation (safePath), SQLite adapter selection, disabled provider stubs, tracing, asset resolution, or skill format utilities in src/utils/
 ---
 
 ## Overview
 
-The utilities module provides three critical cross-cutting concerns: path traversal defense (`safePath`), a runtime-agnostic SQLite adapter, and a stub provider factory for disabled subsystems. These are used throughout the codebase and are security-critical.
+The utilities module provides critical cross-cutting concerns: path traversal defense (`safePath`), a runtime-agnostic SQLite adapter, stub provider factory, OpenTelemetry tracing, dev/prod asset resolution, and skill format parsing/manifest generation. These are used throughout the codebase.
 
 ## Key Files
 
@@ -14,135 +14,97 @@ The utilities module provides three critical cross-cutting concerns: path traver
 | `src/utils/safe-path.ts` | Path traversal defense (SC-SEC-004) | `safePath()`, `assertWithinBase()` |
 | `src/utils/sqlite.ts` | Runtime-agnostic SQLite wrapper | `openDatabase()`, `SQLiteDatabase`, `SQLiteStatement` |
 | `src/utils/disabled-provider.ts` | Stub provider factory | `disabledProvider<T>()` |
+| `src/utils/tracing.ts` | OpenTelemetry SDK initialization | `initTracing()`, `shutdownTracing()`, `getTracer()`, `isTracingEnabled()` |
+| `src/utils/assets.ts` | Dev/prod mode detection, runner/template path resolution | `DEV_MODE`, `getRunnerPath()`, `getTemplatesDir()` |
+| `src/utils/retry.ts` | Retry with backoff | `retry()` |
+| `src/utils/manifest-generator.ts` | Skill manifest generation from parsed SKILL.md | `generateManifest()`, `hashExecutables()` |
+| `src/utils/skill-format-parser.ts` | AgentSkills SKILL.md format parser | `parseAgentSkill()` |
 
 ## safePath (SC-SEC-004)
 
-**Mandatory for ALL file-based providers.** Every file operation that constructs a path from external input MUST go through `safePath()`.
-
-### API
+**Mandatory for ALL file-based providers.** Every file operation constructing a path from external input MUST use `safePath()`.
 
 ```typescript
 function safePath(baseDir: string, ...segments: string[]): string
 ```
 
-**Sanitization pipeline:**
-1. Remove forward and backward slashes from each segment
-2. Strip null bytes
-3. Remove `..` path components
-4. Strip colons (prevents Windows drive letter injection)
-5. Remove leading/trailing dots
-6. Join segments with `path.join(baseDir, ...sanitized)`
-7. Resolve to absolute path
-8. Verify the resolved path starts with `baseDir` (containment check)
-9. Throw on escape attempts
-
-### assertWithinBase
+**Sanitization pipeline:** strips `/`, `\`, `..`, null bytes, colons, leading/trailing dots. Resolves to absolute. Verifies containment. Throws on escape.
 
 ```typescript
 function assertWithinBase(baseDir: string, targetPath: string): void
 ```
 
-Validates an already-resolved path is within `baseDir`. Useful for checking paths from external sources that aren't constructed by `safePath()`.
-
-### Usage
-
-```typescript
-import { safePath } from '../utils/safe-path.js';
-
-// In a provider or tool
-const filePath = safePath(workspace, userProvidedFilename);
-const content = readFileSync(filePath, 'utf-8');
-
-// NEVER do this:
-const bad = join(workspace, userProvidedFilename); // Path traversal!
-```
+Validates an already-resolved path is within `baseDir`.
 
 ## SQLite Adapter
 
-### Runtime Detection
+`openDatabase()` tries: bun:sqlite -> node:sqlite (22.5+) -> better-sqlite3.
 
-`openDatabase()` tries three SQLite implementations in order:
+**API**: `SQLiteDatabase` (exec, prepare, close), `SQLiteStatement` (run, get, all).
 
-1. **`bun:sqlite`** — Native Bun SQLite (fastest, used in `bun test`)
-2. **`node:sqlite`** — Node.js built-in (requires Node.js 22.5+)
-3. **`better-sqlite3`** — npm package fallback
+**PRAGMAs**: `journal_mode = WAL`, `foreign_keys = ON` set automatically.
 
-### API
+## OpenTelemetry Tracing
 
-```typescript
-function openDatabase(path: string): SQLiteDatabase
+`src/utils/tracing.ts` provides opt-in OpenTelemetry integration:
 
-interface SQLiteDatabase {
-  prepare(sql: string): SQLiteStatement;
-  exec(sql: string): void;
-  close(): void;
-}
+- **`initTracing()`** -- Lazy-loaded SDK initialization when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Auto-configures Langfuse auth if `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` are present.
+- **`shutdownTracing()`** -- Graceful flush and shutdown of the tracer provider.
+- **`getTracer()`** -- Returns the configured tracer instance (no-op if tracing not enabled).
+- **`isTracingEnabled()`** -- Returns whether tracing is active.
+- **Zero overhead**: When no OTLP endpoint is configured, tracer is a no-op with negligible overhead.
 
-interface SQLiteStatement {
-  run(...params: unknown[]): { changes: number };
-  get(...params: unknown[]): unknown;
-  all(...params: unknown[]): unknown[];
-}
-```
+## Dev/Prod Asset Resolution
 
-### Default PRAGMAs
+`src/utils/assets.ts`:
 
-Every opened database gets:
-- `PRAGMA journal_mode = WAL` — Write-ahead logging for concurrent reads
-- `PRAGMA foreign_keys = ON` — Enforce referential integrity
+- **`DEV_MODE`** -- Detects TypeScript source (`src/`) vs compiled JavaScript (`dist/`). True when running from `src/agent/runner.ts`.
+- **`getRunnerPath()`** -- Returns `src/agent/runner.ts` in dev mode, `dist/agent/runner.js` in production.
+- **`getTemplatesDir()`** -- Resolves templates directory from project root.
+- **`getSeedSkillsDir()`** -- Resolves seed skills directory.
+- **EPERM handling**: `enforceTimeout()` in sandbox utils wraps kill in try/catch for tsx-wrapped agents that may throw EPERM on signal.
 
-### Usage
+## Skill Format Parser
 
-```typescript
-import { openDatabase } from '../utils/sqlite.js';
+`src/utils/skill-format-parser.ts`:
 
-const db = openDatabase(join(dataDir, 'conversations.db'));
-db.exec('CREATE TABLE IF NOT EXISTS turns (...)');
-const stmt = db.prepare('SELECT * FROM turns WHERE session_id = ?');
-const rows = stmt.all(sessionId);
-db.close();
-```
+- **`parseAgentSkill(raw)`** -- Parses SKILL.md frontmatter and body into `ParsedAgentSkill`.
+- **Frontmatter**: YAML between `---` delimiters. Supports metadata aliases: `openclaw`, `clawdbot`, `clawdis`.
+- **Install specs**: Normalizes brew (formula), npm, go, uv, pip, cargo packages.
+- **Permission mapping**: OpenClaw terms -> AX IPC actions (`full-disk-access` -> `workspace_write`, `web-access` -> `web_fetch`, etc.).
+- **Code block extraction**: All fenced code blocks extracted into `codeBlocks[]`.
+
+## Manifest Generator
+
+`src/utils/manifest-generator.ts`:
+
+- **`generateManifest(parsed)`** -- Creates `GeneratedManifest` from `ParsedAgentSkill` via static analysis.
+- **Static analysis**: Detects host commands (docker, git, kubectl), env vars (ALL_CAPS patterns), domains (from URLs), IPC tools, script paths.
+- **`hashExecutables(manifest, skillDir)`** -- Adds SHA-256 hashes to manifest executable entries.
 
 ## Disabled Provider
 
-### Factory
-
-```typescript
-function disabledProvider<T>(): T
-```
-
-Returns a `Proxy` that throws `"Provider disabled"` on any property access or method call. Used for `none` provider implementations (e.g., `web/none`, `browser/none`).
-
-### Usage
-
-```typescript
-import { disabledProvider } from '../utils/disabled-provider.js';
-import type { WebProvider } from './types.js';
-
-export function create(): WebProvider {
-  return disabledProvider<WebProvider>();
-}
-```
-
-Calling any method on the returned object throws immediately, preventing accidental use of disabled providers.
+Returns a `Proxy` that throws `"Provider disabled"` on any property access or method call. Used for `none` provider implementations.
 
 ## Common Tasks
 
 **Adding a new sanitization rule to safePath:**
 1. Add the sanitization step to the pipeline in `safe-path.ts`
-2. Add test cases in `tests/utils/safe-path.test.ts` covering the new attack vector
-3. Verify existing tests still pass (don't break legitimate paths)
+2. Add test cases in `tests/utils/safe-path.test.ts`
+3. Verify existing tests still pass
 
 **Supporting a new SQLite runtime:**
-1. Add a detection attempt in the try chain in `sqlite.ts`
-2. Ensure it implements the `SQLiteDatabase`/`SQLiteStatement` interface
+1. Add detection attempt in the try chain in `sqlite.ts`
+2. Ensure it implements `SQLiteDatabase`/`SQLiteStatement`
 3. Test with both `npm test` and `bun test`
 
 ## Gotchas
 
-- **`safePath()` is NOT optional**: Every file-based provider, local tool, and identity file operation MUST use it. This is a security invariant — skipping it is a path traversal vulnerability.
-- **SQLite WAL mode requires cleanup in tests**: WAL creates `-wal` and `-shm` sidecar files. Test cleanup must remove the entire directory, not just the `.db` file.
-- **Runtime detection order matters**: `bun:sqlite` is tried first. If running under Bun, it always wins. Under Node.js, `node:sqlite` is preferred over `better-sqlite3`.
-- **Disabled provider throws on ANY access**: Even property reads throw. Don't try to check if a provider is disabled by reading a property — it will throw.
-- **`safePath` strips more than you'd expect**: Colons, leading dots, trailing dots are all stripped. This can surprise when dealing with legitimate filenames containing these characters.
-- **SQLite `close()` is important**: Always close databases in cleanup, especially in tests. Open handles prevent directory deletion on some platforms.
+- **`safePath()` is NOT optional**: Security invariant. Skipping it is a path traversal vulnerability.
+- **SQLite WAL mode requires cleanup in tests**: Remove `-wal` and `-shm` sidecar files.
+- **Runtime detection order matters**: bun:sqlite first. Under Bun, it always wins.
+- **Disabled provider throws on ANY access**: Even property reads throw.
+- **`safePath` strips more than you'd expect**: Colons, leading dots, trailing dots all stripped.
+- **SQLite `close()` is important**: Open handles prevent directory deletion on some platforms.
+- **Tracing is opt-in**: Only enabled when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Zero overhead otherwise.
+- **DEV_MODE detection**: Based on file extension of the running module. Don't rely on NODE_ENV.

@@ -5,7 +5,7 @@ description: Use when modifying or extending the agent prompt system — adding 
 
 ## Overview
 
-The prompt builder assembles the agent's system prompt from a pipeline of ordered, composable modules. Each module contributes a section (identity, security, skills, etc.) and can be conditionally included or dropped based on context and token budget. The builder handles bootstrap mode (first-run identity discovery) and graceful degradation when context is tight.
+The prompt builder assembles the agent's system prompt from a pipeline of ordered, composable modules. Each module contributes a section (identity, security, skills, delegation, etc.) and can be conditionally included or dropped based on context and token budget. The builder handles bootstrap mode (first-run identity discovery), graceful degradation when context is tight, and produces a `ToolFilterContext` for context-aware tool filtering.
 
 ## Key Files
 
@@ -18,10 +18,13 @@ The prompt builder assembles the agent's system prompt from a pipeline of ordere
 | `src/agent/prompt/modules/identity.ts` | SOUL, IDENTITY, USER, bootstrap | `IdentityModule` (priority 0) |
 | `src/agent/prompt/modules/injection-defense.ts` | Injection attack recognition, taint display | `InjectionDefenseModule` (priority 5) |
 | `src/agent/prompt/modules/security.ts` | Security boundaries and constraints | `SecurityModule` (priority 10) |
-| `src/agent/prompt/modules/context.ts` | CONTEXT.md workspace injection | `ContextModule` (priority 60) |
+| `src/agent/prompt/modules/tool-style.ts` | Tool invocation instructions | `ToolStyleModule` (priority 12) |
+| `src/agent/prompt/modules/memory-recall.ts` | Memory recall pattern instructions | `MemoryRecallModule` (priority 60) |
 | `src/agent/prompt/modules/skills.ts` | Skill markdown files | `SkillsModule` (priority 70) |
+| `src/agent/prompt/modules/delegation.ts` | Agent delegation instructions + runner selection | `DelegationModule` (priority 75) |
 | `src/agent/prompt/modules/heartbeat.ts` | Heartbeat checklist and scheduler tools | `HeartbeatModule` (priority 80) |
 | `src/agent/prompt/modules/runtime.ts` | Agent type, sandbox, profile | `RuntimeModule` (priority 90) |
+| `src/agent/prompt/modules/reply-gate.ts` | Reply optionality logic | `ReplyGateModule` (priority 95) |
 
 ## PromptContext
 
@@ -29,11 +32,11 @@ Every module receives a `PromptContext` with:
 
 ```typescript
 interface PromptContext {
-  agentType: string;          // 'pi-agent-core' | 'pi-coding-agent' | 'claude-code'
+  agentType: string;          // 'pi-coding-agent' | 'claude-code'
   workspace: string;          // Absolute path (sanitized by RuntimeModule)
   sandboxType: string;        // 'nsjail' | 'seatbelt' | 'subprocess' etc.
   profile: string;            // 'paranoid' | 'balanced' | 'yolo'
-  taintRatio: number;         // 0.0–1.0
+  taintRatio: number;         // 0.0-1.0
   taintThreshold: number;     // Profile-dependent threshold
   identityFiles: IdentityFiles;
   contextContent: string;     // CONTEXT.md content
@@ -43,29 +46,20 @@ interface PromptContext {
 }
 ```
 
-## Module Lifecycle
-
-Each module extends `BasePromptModule` and implements:
-
-1. **`name`** — Unique identifier (used in metadata)
-2. **`priority`** — Sort order (0 = first, 100 = last)
-3. **`optional`** — If `true`, budget system can drop it (default `false`)
-4. **`shouldInclude(ctx)`** — Return `false` to skip entirely
-5. **`render(ctx)`** — Return `string[]` of content lines
-6. **`estimateTokens(ctx)`** — Default: `render().join('\n').length / 4`
-7. **`renderMinimal(ctx)`** — Optional compressed version for tight budgets
-
 ## Module Priority Order
 
-| Priority | Module | Required? | Bootstrap? |
-|---|---|---|---|
-| 0 | identity | Yes | Yes (shows BOOTSTRAP.md only) |
-| 5 | injection-defense | No | Skipped |
-| 10 | security | No | Skipped |
-| 60 | context | Optional | Included if content exists |
-| 70 | skills | Optional | Included if skills exist |
-| 80 | heartbeat | Optional | Skipped |
-| 90 | runtime | Optional | Skipped |
+| Priority | Module | Required? | Optional? | Bootstrap? |
+|---|---|---|---|---|
+| 0 | identity | Yes | No | Yes (shows BOOTSTRAP.md only) |
+| 5 | injection-defense | No | No | Skipped |
+| 10 | security | No | No | Skipped |
+| 12 | tool-style | No | No | Skipped |
+| 60 | memory-recall | No | No | Included |
+| 70 | skills | Yes (if skills exist) | Yes | Included |
+| 75 | delegation | Yes (if not bootstrap) | Yes | Skipped |
+| 80 | heartbeat | Yes (if content exists) | Yes | Skipped |
+| 90 | runtime | No | Yes | Skipped |
+| 95 | reply-gate | No | No | Skipped |
 
 ## Token Budget System
 
@@ -78,17 +72,18 @@ Each module extends `BasePromptModule` and implements:
 5. If a module has `renderMinimal()`, try that before dropping entirely
 6. Returns list of modules with their render mode (full or minimal)
 
-`PromptBuilder.build(ctx)` returns `PromptResult`:
-```typescript
-interface PromptResult {
-  content: string;        // Joined prompt text
-  metadata: {
-    moduleCount: number;
-    tokenEstimates: Record<string, number>;
-    buildTimeMs: number;
-  };
-}
-```
+`PromptBuilder.build(ctx)` returns `PromptBuildResult` which includes:
+- `content`: Joined prompt text
+- `metadata`: moduleCount, tokenEstimates, buildTimeMs
+- `ToolFilterContext`: flags for context-aware tool filtering (used by runners)
+
+## Delegation Module
+
+The `DelegationModule` (priority 75):
+- Documents the `agent_delegate` tool for delegating tasks to sub-agents
+- Provides runner selection guidance (pi-coding-agent for coding tasks, claude-code for general tasks)
+- **Optional** and excluded during bootstrap mode
+- Contributes to `ToolFilterContext` (delegation tools available only when module is included)
 
 ## Bootstrap Mode
 
@@ -96,34 +91,27 @@ Detected by `isBootstrapMode(ctx)`: `identityFiles.soul` is empty AND `identityF
 
 In bootstrap mode:
 - IdentityModule renders only BOOTSTRAP.md content
-- InjectionDefense, Security, Heartbeat, Runtime modules all skip (`shouldInclude` returns false)
-- Context and Skills still render if present
-- Goal: guide agent through initial identity discovery before normal operation
+- InjectionDefense, Security, ToolStyle, Delegation, Heartbeat, Runtime, ReplyGate modules skip
+- MemoryRecall, Skills still render if present
 
 ## Common Tasks
 
 **Adding a new prompt module:**
 1. Create `src/agent/prompt/modules/<name>.ts` extending `BasePromptModule`
-2. Set `name`, `priority` (0–100), and optionally `optional = true`
+2. Set `name`, `priority` (0-100), and optionally `optional = true`
 3. Implement `shouldInclude(ctx)` and `render(ctx)`
 4. Optionally implement `renderMinimal(ctx)` for budget-constrained fallback
 5. Register in `PromptBuilder` constructor in `builder.ts` (add to modules array)
 6. Add test in `tests/agent/prompt/modules/<name>.test.ts`
-
-**Modifying module priority:**
-Change the `priority` field on the module class. Lower numbers render earlier in the prompt.
-
-**Adding fields to PromptContext:**
-1. Add the field to `PromptContext` in `src/agent/prompt/types.ts`
-2. Update callers that construct `PromptContext` (in `runner.ts` and `pi-session.ts`)
-3. Use the field in your module's `render()` method
+7. If the module should affect tool availability, update `ToolFilterContext` logic in `buildSystemPrompt()` and `filterTools()` in `tool-catalog.ts`
 
 ## Gotchas
 
-- **Token estimation is approximate**: 1 token ≈ 4 characters. Don't rely on exact counts.
-- **Module ordering matters**: Modules at the top of the prompt have more influence on LLM behavior. Identity and security come first intentionally.
-- **Bootstrap mode disables most modules**: Don't add critical runtime info to modules that skip in bootstrap mode without considering first-run scenarios.
-- **`render()` returns `string[]`, not a single string**: Lines are joined with `\n` by the builder.
-- **Workspace path is sanitized**: RuntimeModule strips the host username from paths. Never expose full paths in prompts.
-- **`optional` defaults to `false`**: Modules without `optional = true` are never budget-dropped. Be conservative about marking things required.
-- **`renderMinimal()` is a soft fallback**: The budget system tries minimal before dropping. If your module has a compressed form, implement it.
+- **Token estimation is approximate**: 1 token ~ 4 characters. Don't rely on exact counts.
+- **Module ordering matters**: Modules at the top have more influence on LLM behavior.
+- **Bootstrap mode disables most modules**: Don't add critical runtime info to modules that skip in bootstrap.
+- **`render()` returns `string[]`, not a single string**: Lines joined with `\n` by the builder.
+- **Workspace path is sanitized**: RuntimeModule strips host username from paths.
+- **`optional` defaults to `false`**: Modules without `optional = true` are never budget-dropped.
+- **`renderMinimal()` is a soft fallback**: Budget system tries minimal before dropping.
+- **ToolFilterContext couples prompt and tools**: Excluded prompt modules automatically exclude corresponding tools via `filterTools()`. If you add a module that controls tool availability, update both the builder and tool catalog.

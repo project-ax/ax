@@ -11,8 +11,8 @@ AX configuration has three layers: `ax.yaml` (parsed and Zod-validated by `confi
 
 | File | Responsibility |
 |---|---|
-| `src/config.ts` | Loads and validates `ax.yaml` via Zod `strictObject` schema |
-| `src/paths.ts` | All path resolution functions; session ID validation/composition |
+| `src/config.ts` | Loads and validates `ax.yaml` via Zod `strictObject` schema; derives provider enums from PROVIDER_MAP |
+| `src/paths.ts` | All path resolution functions; session ID validation/composition; agent workspace and identity paths |
 | `src/dotenv.ts` | `.env` loader, OAuth token refresh (pre-flight + reactive) |
 
 ## Config Structure (`ax.yaml`)
@@ -21,16 +21,44 @@ Validated by `ConfigSchema` (Zod `strictObject` -- rejects unknown keys).
 
 | Field | Type | Default | Notes |
 |---|---|---|---|
-| `agent` | `pi-agent-core \| pi-coding-agent \| claude-code` | `pi-agent-core` | Agent runner type |
+| `agent` | `pi-coding-agent \| claude-code` | `pi-coding-agent` | Agent runner type |
+| `models` | object with task-type keys | optional | Per-task-type model routing |
+| `models.default` | string[] | optional | Default model (required for non-claude-code agents) |
+| `models.fast` | string[] | optional | Fast model; falls back to 'default' |
+| `models.thinking` | string[] | optional | Extended-thinking model; falls back to 'default' |
+| `models.coding` | string[] | optional | Code-optimized model; falls back to 'default' |
+| `models.image` | string[] | optional | Image generation model (routes to image provider) |
 | `profile` | enum from `PROFILE_NAMES` | required | Personality profile |
 | `providers` | object | required | Maps each category to a provider name |
-| `providers.llm` | string | required | LLM provider (e.g., `anthropic`, `mock`) |
+| `providers.memory` | string | required | Memory provider (e.g., `sqlite`, `mock`) |
+| `providers.scanner` | string | required | Scanner provider |
 | `providers.channels` | string[] | required | Active channel providers |
+| `providers.web` | string | required | Web provider |
+| `providers.browser` | string | required | Browser provider |
+| `providers.credentials` | string | required | Credentials provider |
+| `providers.skills` | string | required | Skill store provider |
+| `providers.audit` | string | required | Audit provider |
+| `providers.sandbox` | string | required | Sandbox provider |
+| `providers.scheduler` | string | required | Scheduler provider |
+| `providers.skillScreener` | string | optional | Skill screener provider |
 | `channel_config` | `Record<string, ChannelAccessConfig>` | optional | Per-channel access policies |
 | `max_tokens` | number (256-200000) | 8192 | Max tokens for LLM calls |
 | `sandbox` | object | required | `timeout_sec` (1-3600), `memory_mb` (64-8192) |
-| `scheduler` | object | required | `active_hours` (start/end HH:MM + tz), `max_token_budget`, `heartbeat_interval_min` |
+| `scheduler` | object | required | `active_hours`, `max_token_budget`, `heartbeat_interval_min`, optional `agent_dir` and `defaultDelivery` |
 | `history` | object | `{max_turns:50, thread_context_turns:5}` | Conversation retention settings |
+| `delegation` | object | optional | `max_concurrent` (1-10, default 3), `max_depth` (1-5, default 2) |
+
+## Models Configuration
+
+The `models` object supports per-task-type routing:
+
+- **`default`**: Base model for standard tasks (required for router agents, optional for claude-code)
+- **`fast`**: Speed-optimized model; falls back to `default`
+- **`thinking`**: Extended-reasoning model; falls back to `default`
+- **`coding`**: Code-generation model; falls back to `default`
+- **`image`**: Image generation model; routes to image provider, not LLM
+
+Each value is a string array. First entry is primary model. Router-based agents require at least `models.default`.
 
 ## Paths (`paths.ts`)
 
@@ -42,19 +70,26 @@ Validated by `ConfigSchema` (Zod `strictObject` -- rejects unknown keys).
 | `dataDir()` | `~/.ax/data` | Data subdirectory |
 | `dataFile(...segs)` | `~/.ax/data/<segs>` | Resolve file under data dir |
 | `workspaceDir(sessionId)` | `~/.ax/data/workspaces/<...>` | Colon IDs become nested dirs; UUIDs stay flat |
-| `agentDir(name)` | `~/.ax/agents/<name>` | Agent identity files (SOUL.md, IDENTITY.md, etc.) |
+| `agentDir(name)` | `~/.ax/agents/<name>` | Agent directory |
 | `agentUserDir(name, userId)` | `~/.ax/agents/<name>/users/<userId>` | Per-user state within an agent |
-| `composeSessionId(...parts)` | `part1:part2:part3` | Joins with `:`, validates segments, requires 3+ parts |
+| `agentIdentityDir(agentId)` | `~/.ax/agents/<agentId>/agent` | Agent identity (SOUL.md, IDENTITY.md, etc.) |
+| `agentWorkspaceDir(agentId)` | `~/.ax/agents/<agentId>/agent/workspace` | Agent's shared workspace |
+| `agentSkillsDir(agentId)` | `~/.ax/agents/<agentId>/agent/workspace/skills` | Agent's skills directory |
+| `userWorkspaceDir(agentId, userId)` | `~/.ax/agents/<agentId>/users/<userId>/workspace` | User-specific persistent workspace |
+| `scratchDir(sessionId)` | `~/.ax/scratch/<...>` | Ephemeral per-session scratch |
+| `registryPath()` | `~/.ax/registry.json` | Agent registry (enterprise) |
+| `proposalsDir()` | `~/.ax/data/proposals` | Governance proposals directory |
+| `composeSessionId(...parts)` | `part1:part2:part3` | Joins with `:`, validates, requires 3+ parts |
 | `parseSessionId(id)` | `string[] \| null` | Splits colon IDs; returns null for UUIDs |
 | `isValidSessionId(id)` | boolean | Accepts UUID or 3+ colon-separated segments |
 
 ## Dotenv / OAuth (`dotenv.ts`)
 
 - **`loadDotEnv()`**: Reads `~/.ax/.env`, sets `process.env` (skips already-set keys), then calls `_refreshIfNeeded()`
-- **`ensureOAuthTokenFresh()`**: Pre-flight check. Returns immediately if token has >5 min remaining. Called by server before each agent spawn.
-- **`refreshOAuthTokenFromEnv()`**: Force-refresh. Used by proxy on reactive 401 retry. Updates both `process.env` and `.env` file.
+- **`ensureOAuthTokenFresh()`**: Pre-flight check. Returns immediately if token has >5 min remaining.
+- **`refreshOAuthTokenFromEnv()`**: Force-refresh. Used by proxy on reactive 401 retry.
 - **OAuth env vars**: `CLAUDE_CODE_OAUTH_TOKEN`, `AX_OAUTH_REFRESH_TOKEN`, `AX_OAUTH_EXPIRES_AT`
-- **`updateEnvFile()`**: Preserves comments and ordering; replaces matching keys in-place, appends new keys
+- **`updateEnvFile()`**: Preserves comments and ordering; replaces matching keys in-place
 
 ## Common Tasks
 
@@ -68,10 +103,19 @@ Validated by `ConfigSchema` (Zod `strictObject` -- rejects unknown keys).
 2. Use `axHome()` or `dataDir()` as base -- never hardcode `~/.ax`
 3. Validate user-supplied segments with `validatePathSegment()` to prevent path traversal
 
+**Adding a new model task type:**
+1. Add task type to `MODEL_TASK_TYPES` array in `src/types.ts`
+2. Add corresponding field to `ModelMap` interface in `src/types.ts`
+3. Update `models` schema in `ConfigSchema` in `config.ts`
+4. Update router fallback logic in relevant handler code
+
 ## Gotchas
 
-- **`.env` not auto-loaded by tsx or bun scripts**: Neither `tsx` nor Bun's npm script runner loads `.env`. Call `loadDotEnv()` manually at entry points, or use `bun src/main.ts` directly (Bun auto-loads `.env` for direct `.ts` files only).
-- **OAuth refresh has two layers**: (1) Pre-flight via `ensureOAuthTokenFresh()` before agent spawn, (2) Reactive 401 retry via `refreshOAuthTokenFromEnv()` in the proxy. Both update `process.env` and the `.env` file.
-- **Zod strictObject rejects unknown keys**: Every field in the TypeScript `Config` type MUST also exist in `ConfigSchema`. Adding a field to only one side causes silent validation failures at runtime.
-- **`AX_HOME` overrides all paths**: Set in tests to isolate SQLite databases and prevent lock contention between parallel test files.
-- **Session ID segments are filesystem-safe**: Validated by `SEGMENT_RE` (`/^[a-zA-Z0-9_.\-]+$/`). Colons are separators, never part of a segment.
+- **`.env` not auto-loaded by tsx or bun scripts**: Call `loadDotEnv()` manually at entry points, or use `bun src/main.ts` directly.
+- **OAuth refresh has two layers**: Pre-flight via `ensureOAuthTokenFresh()` before agent spawn, reactive 401 retry via `refreshOAuthTokenFromEnv()` in the proxy.
+- **Zod strictObject rejects unknown keys**: Every field in the TypeScript `Config` type MUST also exist in `ConfigSchema`.
+- **`AX_HOME` overrides all paths**: Set in tests to isolate SQLite databases and prevent lock contention.
+- **Session ID segments are filesystem-safe**: Validated by `SEGMENT_RE` (`/^[a-zA-Z0-9_.@\-]+$/`). Colons are separators, never part of a segment.
+- **Models are string arrays**: First entry is primary model; remaining entries for fallback.
+- **Image provider is separate from LLM provider**: Images route via `models.image` to a separate `ImageProvider`, not through LLM chat.
+- **Provider enums derived at runtime**: `providerEnum()` dynamically builds Zod enums from `PROVIDER_MAP` keys.

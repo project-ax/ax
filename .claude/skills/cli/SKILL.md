@@ -1,31 +1,38 @@
 ---
 name: ax-cli
-description: Use when modifying CLI commands — chat, send, bootstrap, or adding new CLI commands in src/cli/
+description: Use when modifying CLI commands — chat, send, bootstrap, plugin, or adding new CLI commands in src/cli/
 ---
 
 ## Overview
 
-The CLI subsystem provides the user-facing command interface for AX. Entry point is `src/cli/index.ts` which routes commands via `routeCommand()`. Commands communicate with the AX server over a Unix socket using the OpenAI-compatible API. The chat command uses Ink (React-based terminal UI); send is a one-shot HTTP client.
+The CLI subsystem provides the user-facing command interface for AX. Entry point is `src/cli/index.ts` which routes commands via `routeCommand()`. Commands communicate with the AX server over a Unix socket using the OpenAI-compatible API. The chat command uses Ink (React-based terminal UI); send is a one-shot HTTP client. The plugin command manages third-party provider packages.
 
 ## Key Files
 
 | File | Responsibility |
 |---|---|
-| `src/cli/index.ts` | Command router, `main()` entry point, `runServe()`, help text |
+| `src/cli/index.ts` | Command router, `main()` entry point, `runServe()`, help text, --port flag, tracing init |
 | `src/cli/chat.ts` | Interactive chat client (Ink/React TUI), persistent sessions |
 | `src/cli/send.ts` | One-shot message sender, streaming + JSON output |
 | `src/cli/bootstrap.ts` | Agent identity reset (deletes SOUL.md/IDENTITY.md, copies templates) |
+| `src/cli/plugin.ts` | Plugin management: add, remove, list, verify |
 | `src/cli/components/App.ts` | Ink React component for the chat UI |
 
 ## Commands
 
 | Command | Handler | Description |
 |---|---|---|
-| `ax serve` (default) | `runServe(args)` | Start HTTP server on Unix socket; first-run triggers `configure` |
+| `ax serve` (default) | `runServe(args)` | Start HTTP server on Unix socket (or TCP with `--port`); first-run triggers `configure` |
 | `ax chat` | `runChat(args)` | Interactive Ink TUI; persistent session via ConversationStore |
 | `ax send <msg>` | `runSend(args)` | One-shot message; ephemeral by default (no session persistence) |
 | `ax configure` | `runConfigure(axHome)` | First-time setup wizard (onboarding) |
 | `ax bootstrap [agent]` | `runBootstrap(args)` | Reset agent identity; prompts confirmation if SOUL.md exists |
+| `ax plugin <cmd>` | `runPlugin(args)` | Plugin management: add, remove, list, verify |
+
+## Server Flags
+
+- `--port <number>` -- Listen on TCP port instead of Unix socket (useful for containers or external clients)
+- Tracing initialization: `initTracing()` called at startup when `OTEL_EXPORTER_OTLP_ENDPOINT` is set
 
 ## Chat Command (`chat.ts`)
 
@@ -43,6 +50,13 @@ The CLI subsystem provides the user-facing command interface for AX. Entry point
 - **Output modes**: Streaming SSE (default), `--no-stream` (full response), `--json` (raw OpenAI JSON)
 - **SSE parsing**: Reads `data:` lines, extracts `choices[0].delta.content` until `[DONE]`
 
+## Plugin Command (`plugin.ts`)
+
+- **`ax plugin add <package>`** -- Install a provider plugin from npm, verify MANIFEST.json, prompt for review, write to plugins.lock
+- **`ax plugin remove <package>`** -- Uninstall a plugin and remove from plugins.lock
+- **`ax plugin list`** -- Show installed plugins with kind, version, and integrity status
+- **`ax plugin verify`** -- Re-verify all installed plugin integrity hashes
+
 ## Session IDs
 
 Format: colon-separated segments with minimum 3 parts.
@@ -53,15 +67,6 @@ Format: colon-separated segments with minimum 3 parts.
 | `<agent>:<source>:<name>` | `main:cli:work` | Named CLI session |
 | `<agent>:<channel>:<scope>:<id>` | `main:slack:dm:U12345` | Slack DM |
 | UUID (legacy) | `550e8400-...` | Pre-session-ID format |
-
-Colon-separated IDs map to nested directories: `main:cli:default` -> `~/.ax/data/workspaces/main/cli/default/`
-
-## Bootstrap (`bootstrap.ts`)
-
-- **Evolvable files deleted**: `SOUL.md`, `IDENTITY.md`
-- **Templates copied**: `BOOTSTRAP.md`, `USER_BOOTSTRAP.md` from `./templates/`
-- **Preserved across reset**: Per-user `USER.md` files, admins file
-- Default agent name: `main`
 
 ## Common Tasks
 
@@ -75,8 +80,10 @@ Colon-separated IDs map to nested directories: `main:cli:default` -> `~/.ax/data
 
 ## Gotchas
 
-- **Session IDs use colons mapped to nested dirs**: `main:cli:default` becomes `data/workspaces/main/cli/default/`. Don't use filesystem separators in session IDs.
-- **Legacy UUID sessions still work**: `isValidSessionId()` accepts both UUID and colon format. UUID sessions use flat directories under `workspaces/`.
+- **Session IDs use colons mapped to nested dirs**: `main:cli:default` becomes `data/workspaces/main/cli/default/`.
+- **Legacy UUID sessions still work**: `isValidSessionId()` accepts both UUID and colon format.
 - **`loadDotEnv()` called at CLI entry**: `main()` calls `loadDotEnv()` before routing. Individual commands do not re-load.
-- **First-run detection in serve**: If `ax.yaml` does not exist, `runServe` automatically triggers `runConfigure` before starting the server.
-- **Ink requires React**: `chat.ts` imports React and Ink. The send command is plain Node.js with no UI framework.
+- **First-run detection in serve**: If `ax.yaml` does not exist, `runServe` automatically triggers `runConfigure`.
+- **Ink requires React**: `chat.ts` imports React and Ink. The send command is plain Node.js.
+- **`--port` enables TCP**: When `--port` is set, server listens on TCP in addition to (or instead of) Unix socket.
+- **Tracing is opt-in**: Only enabled when `OTEL_EXPORTER_OTLP_ENDPOINT` is set in environment.

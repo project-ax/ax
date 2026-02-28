@@ -5,19 +5,20 @@ description: Use when modifying agent runner implementations — pi-session (pi-
 
 ## Overview
 
-AX supports multiple agent runners that execute inside the sandbox. Each runner wires up LLM communication, tool registration, and output streaming differently. The entry point `runner.ts` dispatches to the appropriate runner based on config. All runners share common infrastructure: IPC client, identity loading, prompt building, and stream utilities.
+AX supports multiple agent runners that execute inside the sandbox. Each runner wires up LLM communication, tool registration, and output streaming differently. The entry point `runner.ts` dispatches to the appropriate runner based on config. All runners share common infrastructure: IPC client, identity loading, prompt building, tool catalog with context-aware filtering, and stream utilities.
 
 ## Key Files
 
 | File | Responsibility | Key Exports |
 |---|---|---|
-| `src/agent/runner.ts` | Entry point, stdin parse, dispatch | `run()`, `runPiCore()`, `parseStdinPayload()`, `AgentConfig` |
+| `src/agent/runner.ts` | Entry point, stdin parse, dispatch | `run()`, `parseStdinPayload()`, `compactHistory()`, `AgentConfig` |
 | `src/agent/runners/pi-session.ts` | pi-coding-agent runner (history-aware, dual LLM transport) | `runPiSession()` |
-| `src/agent/runners/claude-code.ts` | Claude Agent SDK runner (TCP bridge, MCP tools) | `runClaudeCode()` |
+| `src/agent/runners/claude-code.ts` | Claude Agent SDK runner (TCP bridge, MCP tools) | `runClaudeCode()`, `buildSDKPrompt()` |
 | `src/agent/mcp-server.ts` | MCP tool registry for claude-code | `createIPCMcpServer()` |
 | `src/agent/tcp-bridge.ts` | HTTP-to-Unix-socket forwarder | `startTCPBridge()`, `TCPBridge` |
 | `src/agent/stream-utils.ts` | Message conversion, stream events, helpers | `convertPiMessages()`, `emitStreamEvents()`, `createSocketFetch()`, `createLazyAnthropicClient()` |
-| `src/agent/ipc-transport.ts` | IPC-based LLM streaming adapter | (pi-ai streamFn interface) |
+| `src/agent/ipc-transport.ts` | IPC-based LLM streaming adapter with image block injection | `createIPCStreamFn()` |
+| `src/agent/tool-catalog.ts` | Single source of truth for tool metadata and context-aware filtering | `TOOL_CATALOG`, `filterTools()`, `ToolFilterContext` |
 
 ## Runner Dispatch
 
@@ -25,72 +26,66 @@ AX supports multiple agent runners that execute inside the sandbox. Each runner 
 
 | `config.agent` | Runner | LLM Framework |
 |---|---|---|
-| `pi-agent-core` | `runPiCore()` (inline in runner.ts) | pi-agent-core Agent |
 | `pi-coding-agent` | `runPiSession()` | pi-coding-agent Session |
 | `claude-code` | `runClaudeCode()` | Claude Agent SDK `query()` |
+
+Note: `pi-agent-core` was removed as a user-facing agent type.
 
 ## pi-session Runner
 
 **Architecture**: Flexible LLM transport + pi-coding-agent session with history.
 
 **LLM Transport Selection** (in order of preference):
-1. **Proxy socket** — Direct Anthropic SDK over Unix socket (lower latency, no IPC overhead)
-2. **IPC fallback** — Route through `ipc_client.call({action: 'llm_call'})` if proxy unavailable
+1. **Proxy socket** -- Direct Anthropic SDK over Unix socket (lower latency, no IPC overhead)
+2. **IPC fallback** -- Route through `ipc_client.call({action: 'llm_call'})` if proxy unavailable
 
 **Key flow:**
 1. Connect IPC client to host Unix socket
 2. Create LLM stream function (proxy preferred, IPC fallback)
-3. Load identity files, build system prompt via `PromptBuilder`
-4. Create IPC tools (memory, web, audit, skills, scheduler, identity/user write)
+3. Load identity files, build system prompt via `buildSystemPrompt()` (returns prompt + `ToolFilterContext`)
+4. Create IPC tools (filtered by `ToolFilterContext` -- memory, web, audit, skills, scheduler, identity/user write, delegation, image_generate)
 5. Load + compact conversation history from stdin (75% context window threshold)
 6. Create `AgentSession` with tools, history, custom system prompt
 7. Call `session.sendMessage(userMessage)` and stream text to stdout
-8. Subscribe to events: text_delta → stdout, tool calls → logged
+8. Subscribe to events: text_delta -> stdout, tool calls -> logged
+
+**Timeout passthrough**: `LLM_CALL_TIMEOUT_MS` (configurable via `AX_LLM_TIMEOUT_MS`, defaults to 10 min) passed to IPC calls.
 
 **Tools**: Defined as pi-ai `ToolDefinition` objects using TypeBox schemas in `ipc-tools.ts`.
-
-**History compaction**: If history exceeds 75% of context window, older messages are dropped while preserving the most recent turns.
 
 ## claude-code Runner
 
 **Architecture**: TCP bridge + IPC MCP server + Agent SDK query.
 
 **Key flow:**
-1. Start TCP bridge (`startTCPBridge(proxySocket)`) — localhost:PORT → Unix socket proxy
+1. Start TCP bridge (`startTCPBridge(proxySocket)`) -- localhost:PORT -> Unix socket proxy
 2. Connect IPC client for MCP tool access
 3. Create IPC MCP server (`createIPCMcpServer(client)`) exposing tools via MCP protocol
-4. Build system prompt via `PromptBuilder`
+4. Build system prompt via `buildSystemPrompt()` (returns prompt + `ToolFilterContext`)
 5. Call `query()` from Claude Agent SDK with:
    - `systemPrompt`: built prompt
    - `maxTurns: 20`
-   - `ANTHROPIC_BASE_URL`: `http://127.0.0.1:${bridge.port}` (TCP bridge → proxy)
+   - `ANTHROPIC_BASE_URL`: `http://127.0.0.1:${bridge.port}` (TCP bridge -> proxy)
    - `disallowedTools`: `['WebFetch', 'WebSearch', 'Skill']` (use AX's IPC versions)
    - `mcpServers`: the IPC MCP server
 6. Stream text blocks to stdout
 
-**TCP Bridge** (`tcp-bridge.ts`): Creates an HTTP server on localhost:0 (random port) that forwards all requests to the credential-injecting Unix socket proxy using undici's Agent. Strips encoding headers (fetch auto-decompresses). No credential logic — just a dumb forwarder.
+**Image support via `buildSDKPrompt()`**: When the user message contains `image_data` content blocks, `buildSDKPrompt()` returns an `AsyncIterable<SDKUserMessage>` with structured content blocks (text + base64 images) instead of a plain string.
 
-**MCP Server** (`mcp-server.ts`): Uses `createSdkMcpServer()` from the Agent SDK to expose IPC tools as MCP tools. Tools use Zod v4 schemas (NOT TypeBox). Includes: memory_*, web_*, audit_query, identity_write, user_write, scheduler_*.
+**TCP Bridge** (`tcp-bridge.ts`): HTTP server on localhost:0 forwarding to Unix socket proxy. Strips encoding headers.
 
-## Stream Utilities
-
-`stream-utils.ts` provides shared helpers used by both runners:
-
-- **`convertPiMessages(messages)`** — pi-ai format → IPC/Anthropic API format. Handles user, assistant, toolResult roles. Empty content gets safe fallbacks (Anthropic API rejects empty strings).
-- **`emitStreamEvents(stream, msg, text, toolCalls, stopReason)`** — Emits standard pi-ai events (start, text_delta, toolcall_*, done) from a completed assistant message.
-- **`createSocketFetch(socketPath)`** — Returns a `fetch` function routing through a Unix socket via undici.
-- **`createLazyAnthropicClient(proxySocket)`** — Lazy-initialized Anthropic SDK client that connects via proxy socket. Uses `apiKey: 'ax-proxy'` (host injects real key).
-- **`loadContext(workspace)`** — Reads CONTEXT.md or returns `''`.
-- **`loadSkills(skillsDir)`** — Reads .md files from skills directory or returns `[]`.
+**MCP Server** (`mcp-server.ts`): Agent SDK MCP server exposing IPC tools as Zod-based tool definitions. Includes: memory_*, web_*, audit_query, identity_write, user_write, scheduler_*, skill_*, skill_import, skill_search, agent_delegate, image_generate, workspace_*.
 
 ## Common Tasks
 
 **Adding a tool available to both runners:**
-1. Add to `src/agent/ipc-tools.ts` (pi-agent-core/pi-session — TypeBox schemas)
-2. Add to `src/agent/mcp-server.ts` (claude-code — Zod v4 schemas)
-3. Add Zod schema in `src/ipc-schemas.ts` with `.strict()`
-4. Add handler in `src/host/ipc-server.ts`
-5. Update tool count assertion in `tests/sandbox-isolation.test.ts`
+1. Add spec to `TOOL_CATALOG` in `src/agent/tool-catalog.ts` (TypeBox)
+2. Add to `src/agent/ipc-tools.ts` (pi-session -- TypeBox)
+3. Add to `src/agent/mcp-server.ts` (claude-code -- Zod)
+4. Add Zod schema in `src/ipc-schemas.ts` with `.strict()`
+5. Add handler in `src/host/ipc-server.ts`
+6. Update tool count assertion in `tests/sandbox-isolation.test.ts`
+7. If context-dependent, update `filterTools()` in `tool-catalog.ts`
 
 **Adding a new runner type:**
 1. Create `src/agent/runners/<name>.ts` exporting an async function
@@ -103,10 +98,12 @@ AX supports multiple agent runners that execute inside the sandbox. Each runner 
 
 - **Dual tool registration is mandatory**: Tools MUST exist in BOTH `ipc-tools.ts` AND `mcp-server.ts`. Missing one means that runner variant has no access.
 - **TypeBox vs Zod**: pi-session tools use TypeBox (`@sinclair/typebox`), MCP server uses Zod v4. Don't mix them.
-- **Proxy vs IPC transport**: pi-session prefers proxy (lower latency). claude-code always uses TCP bridge → proxy. IPC fallback adds serialization overhead.
+- **Proxy vs IPC transport**: pi-session prefers proxy (lower latency). claude-code always uses TCP bridge -> proxy. IPC fallback adds serialization overhead.
 - **IPC timeout**: Configurable via `AX_LLM_TIMEOUT_MS` env var, defaults to 10 minutes. Long-running agent loops can hit this.
-- **`createLazyAnthropicClient` uses `apiKey: 'ax-proxy'`**: This is a dummy value — the host proxy injects the real key. Never pass real keys to the agent.
-- **`convertPiMessages` uses `'.'` for empty content**: Anthropic API rejects empty strings. The fallback dot prevents validation errors.
-- **TCP bridge strips encoding headers**: `transfer-encoding`, `content-encoding`, `content-length` are removed because fetch auto-decompresses. Don't add them back.
-- **MCP server `stripTaint()`**: Removes `taint` fields from IPC responses before returning to Agent SDK, since the SDK doesn't understand AX taint tags.
-- **claude-code disallows WebFetch/WebSearch/Skill**: These are replaced by AX's IPC-routed equivalents to ensure taint tracking and SSRF protection.
+- **`createLazyAnthropicClient` uses `apiKey: 'ax-proxy'`**: Dummy value -- the host proxy injects the real key. Never pass real keys.
+- **`convertPiMessages` uses `'.'` for empty content**: Anthropic API rejects empty strings.
+- **TCP bridge strips encoding headers**: `transfer-encoding`, `content-encoding`, `content-length` removed.
+- **MCP server `stripTaint()`**: Removes `taint` fields from IPC responses before returning to Agent SDK.
+- **claude-code disallows WebFetch/WebSearch/Skill**: Replaced by AX's IPC-routed equivalents for taint tracking.
+- **Image blocks via `buildSDKPrompt()`**: Structured content blocks only generated when `image_data` blocks are present in user message.
+- **Context-aware filtering**: Both runners now use `ToolFilterContext` from `buildSystemPrompt()` to automatically exclude tools based on missing prompt modules.

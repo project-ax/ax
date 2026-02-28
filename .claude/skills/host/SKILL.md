@@ -1,78 +1,169 @@
 ---
 name: ax-host
-description: Use when modifying the trusted host process — server orchestration, message routing, IPC handler, or request lifecycle in src/host/
+description: Use when modifying the trusted host process — server orchestration, message routing, IPC handler, request lifecycle, event streaming, file handling, plugin loading, or agent delegation in src/host/
 ---
 
 ## Overview
 
-The host subsystem is the trusted half of AX. It runs the HTTP server (OpenAI-compatible API over Unix socket), routes inbound/outbound messages through security scanning and taint tracking, dispatches IPC actions from sandboxed agents to provider implementations, and manages the agent process lifecycle (spawn, stdin, stdout, cleanup).
+The host subsystem is the trusted half of AX. It runs the HTTP server (OpenAI-compatible API over Unix socket and optional TCP), routes inbound/outbound messages through security scanning and taint tracking, dispatches IPC actions from sandboxed agents to provider implementations, manages the agent process lifecycle (spawn, stdin, stdout, cleanup), streams real-time completion events via SSE, handles file uploads/downloads, loads third-party plugin providers, and orchestrates sub-agent delegation with depth/concurrency limits.
 
 ## Key Files
 
-| File | Responsibility | Lines |
-|---|---|---|
-| `src/host/server.ts` | HTTP server, request lifecycle, agent spawn, channel/scheduler wiring | ~930 |
-| `src/host/router.ts` | Inbound scan + taint-wrap + canary inject; outbound scan + canary check | ~155 |
-| `src/host/ipc-server.ts` | Unix socket server, IPC action dispatch, Zod validation, taint budget gate | ~550 |
-| `src/host/proxy.ts` | Credential-injecting Anthropic forward proxy, OAuth 401 retry | ~235 |
-| `src/host/taint-budget.ts` | Per-session taint ratio tracking, action gating (SC-SEC-003) | ~130 |
-| `src/host/provider-map.ts` | Static allowlist mapping config names to provider modules (SC-SEC-002) | ~95 |
-| `src/host/registry.ts` | Loads and assembles ProviderRegistry from config | ~40 |
+| File | Responsibility |
+|---|---|
+| `src/host/server.ts` | HTTP server, request lifecycle, agent spawn, channel/scheduler wiring, file handlers, SSE events, port flag |
+| `src/host/server-completions.ts` | Completion processing, workspace setup, history loading, image extraction, agent spawning, response parsing |
+| `src/host/server-channels.ts` | Channel ingestion, message deduplication, thread gating/backfill, emoji reactions, attachment handling |
+| `src/host/server-files.ts` | File upload/download API, workspace file storage, MIME type handling |
+| `src/host/server-http.ts` | HTTP utilities, SSE chunking, body reading, error responses |
+| `src/host/server-lifecycle.ts` | Workspace cleanup, graceful shutdown, stale session cleanup |
+| `src/host/event-bus.ts` | Typed pub/sub for real-time completion observability, global + per-request listeners |
+| `src/host/router.ts` | Inbound scan + taint-wrap + canary inject; outbound scan + canary check |
+| `src/host/ipc-server.ts` | Unix socket server, IPC action dispatch, Zod validation, taint budget gate, heartbeat, event emission |
+| `src/host/ipc-handlers/image.ts` | Image generation handler, in-memory image storage per session |
+| `src/host/ipc-handlers/delegation.ts` | Agent delegation with depth/concurrency limits, zombie counter prevention |
+| `src/host/ipc-handlers/plugin.ts` | Plugin status/list queries (host-internal actions) |
+| `src/host/plugin-host.ts` | Plugin lifecycle manager, integrity verification, process management, IPC proxy |
+| `src/host/plugin-lock.ts` | Plugin manifest pinning, SHA-512 integrity hashing, lock file I/O |
+| `src/host/plugin-manifest.ts` | Plugin capability schema, validation, human-readable formatting |
+| `src/host/proxy.ts` | Credential-injecting Anthropic forward proxy, OAuth 401 retry |
+| `src/host/taint-budget.ts` | Per-session taint ratio tracking, action gating (SC-SEC-003) |
+| `src/host/provider-map.ts` | Static allowlist mapping config names to provider modules (SC-SEC-002), plugin registration runtime allowlist |
+| `src/host/registry.ts` | Loads and assembles ProviderRegistry from config, plugin host integration |
 
-## Request Lifecycle (server.ts `processCompletion`)
+## Request Lifecycle (server.ts + server-completions.ts)
 
-1. Build `InboundMessage`, call `router.processInbound()` (scan, taint-wrap, canary inject, enqueue)
-2. Dequeue message **by ID** (not FIFO) from MessageQueue
-3. Create workspace dir, copy skills, write `message.txt` and `CONTEXT.md`
-4. Build conversation history (DB-persisted for persistent sessions, client-provided for ephemeral)
-5. Start credential proxy if LLM is not mock; refresh OAuth pre-flight
-6. Spawn sandboxed agent process, write JSON payload to stdin (history, message, taintRatio, profile)
-7. Collect stdout/stderr in parallel (avoids pipe buffer deadlock)
-8. Call `router.processOutbound()` (scan output, check canary leakage, strip canary)
-9. Persist conversation turns, clean up workspace/proxy
+### HTTP Completion Request
 
-## Router (router.ts)
+1. **HTTP Handler** -- Parse OpenAIChatRequest JSON, validate session_id, derive stable session ID (explicit -> user field -> random UUID), extract user/conversationId
+2. **Router + Inbound Scan** -- Build InboundMessage, call `router.processInbound()` (scan, taint-wrap, canary inject, enqueue), emit `completion.start` and `scan.inbound` events
+3. **Message Dequeue** -- Dequeue **by ID** (not FIFO) from MessageQueue
+4. **Workspace Setup** -- Create workspace dir, refresh skills from host (~/.ax/skills/ -> workspace/skills/), build conversation history (DB-persisted for persistent sessions, client-provided for ephemeral), prepend parent channel context for thread sessions
+5. **Credential Proxy** (claude-code only) -- Refresh OAuth pre-flight, start Anthropic credential-injecting proxy, pass proxy socket to agent
+6. **Agent Spawn** -- Build spawn command with runner args, spawn with stdio pipes, write JSON payload to stdin (history, message, taintRatio, profile, requestId), collect stdout/stderr concurrently
+7. **Outbound Scanning + Response Processing** -- Call `router.processOutbound()`, parse agent response (structured JSON with __ax_response or plain text), extract image_data blocks -> save to workspace/files/ -> convert to file refs, drain generated images
+8. **Persistence + Cleanup** -- Persist conversation turns, attach file refs, clean up workspace/proxy, emit `completion.done` event
 
-- **`processInbound(msg)`**: Canonicalizes session ID, generates canary token, wraps content in `<external_content>` taint tags, records in taint budget, runs `scanner.scanInput()`, enqueues with canary appended as HTML comment. Returns `RouterResult` with `queued` boolean.
-- **`processOutbound(response, sessionId, canaryToken)`**: Checks `scanner.checkCanary()` for leakage, runs `scanner.scanOutput()`, strips canary from response. Redacts entire response if canary leaked.
+### Channel Message Ingestion (server-channels.ts)
+
+1. **Deduplication**: TTL-based `processedMessages` map keyed by `channelName:messageId`
+2. **Thread Gating**: Threads only processed if SOUL.md exists
+3. **Thread Backfill**: Fetch parent message + thread root, build context
+4. **Bootstrap Gate**: Require admin claim and IDENTITY.md before processing
+5. **Attachment Handling**: Download image attachments, embed as `image_data` content blocks (no disk round-trip)
+6. **processCompletion Call**: Pass preprocessed message, userId, replyOptional flag
+7. **Outbound**: Upload generated images + file refs to channel
+
+## Event Bus (event-bus.ts)
+
+Typed pub/sub for real-time completion observability.
+
+- **Synchronous emit** (fire-and-forget) -- never blocks the hot path
+- **Global listeners**: receive all events (max 100)
+- **Per-request listeners**: scoped to requestId (max 50 per request)
+- **Event types**: dot-namespaced (e.g. `completion.start`, `llm.done`, `scan.inbound`)
+- **No secrets**: event.data never contains credentials or sensitive info
+- **SSE endpoint**: `GET /v1/events?request_id=...&types=...` with 15s keepalive
+
+## File Storage (server-files.ts)
+
+- **Endpoints**: `POST /v1/files?agent=<name>&user=<id>` (upload), `GET /v1/files/<fileId>?agent=<name>&user=<id>` (download)
+- **Storage**: `~/.ax/agents/<name>/workspaces/<userId>/files/<fileId>`
+- **MIME types**: `image/png`, `image/jpeg`, `image/gif`, `image/webp` (10 MB max)
+- **FileStore**: metadata registry (fileId -> agentName, userId) for lookups without query params
 
 ## IPC Server (ipc-server.ts)
 
 **Protocol**: 4-byte big-endian length prefix + JSON over Unix socket.
 
-**Dispatch pipeline** (steps in `handleIPC`):
+**Dispatch pipeline**:
 1. Parse JSON
 2. Validate envelope schema (`IPCEnvelopeSchema`)
 3. Validate action-specific Zod schema (`.strict()` mode)
-4. **Step 3.5**: Taint budget check -- hard-blocks tainted sessions (except `identity_write` and `user_write` which do soft queuing in their handlers)
+4. **Step 3.5**: Taint budget check -- hard-blocks tainted sessions (except `identity_write`, `user_write`, `identity_propose`)
 5. Dispatch to handler function, audit log result
 
-**Handler pattern**: `handlers` record maps action name to `async (req, ctx) => result`. Each handler calls the corresponding provider method and returns a JSON-serializable result.
+**Heartbeat frames**: Long-running handlers emit `{_heartbeat: true, ts}` every 15s to prevent client timeout.
+
+**Event emission**: Handlers emit events via `eventBus` (e.g., `llm.start`, `llm.done`) for streaming observability.
+
+## Plugin System
+
+### Plugin Manifest (plugin-manifest.ts)
+- Schema validation: name, kind (llm/image/memory/etc.), capabilities
+- Capabilities: network (host:port endpoints), filesystem (none/read/write), credentials (injected keys)
+- No wildcards, explicit declarations only
+
+### Plugin Lock File (plugin-lock.ts)
+- `~/.ax/plugins.lock` -- JSON file pinning exact versions and SHA-512 hashes
+- On every startup, hashes verified before plugin loads
+
+### Plugin Host (plugin-host.ts)
+- **Lifecycle**: startAll() -> spawn workers -> verify integrity -> register providers
+- **Worker Process**: fork() with restricted environment (no credentials, minimal env vars)
+- **IPC Protocol**: plugin_call -> plugin_response
+- **Credential Injection**: server-side resolver (plugin never sees credential store)
+- **Timeouts**: startup (10s), call (30s)
+- **Graceful Shutdown**: send plugin_shutdown, wait 5s, force-kill
+
+### Provider Map (provider-map.ts)
+- **Built-in Allowlist** (`_PROVIDER_MAP`): static mapping of (kind, name) -> relative/package paths
+- **Plugin Registration**: runtime allowlist (`_pluginProviderMap`) for Phase 3 plugins
+- **URL Scheme Guard**: post-resolution check ensures all paths are file:// URLs (SC-SEC-002)
+- Functions: `resolveProviderPath()`, `registerPluginProvider()`, `unregisterPluginProvider()`, `listPluginProviders()`
+
+## Image Generation (ipc-handlers/image.ts)
+
+- **Handler**: `image_generate` IPC action
+- **Storage**: Generated images held in-memory per session in `pendingImages` map
+- **Lifetime**: After agent finishes, `drainGeneratedImages(sessionId)` retrieves all images for channel upload + history persistence
+
+## Agent Delegation (ipc-handlers/delegation.ts)
+
+- **Handler**: `agent_delegate` IPC action
+- **Depth Tracking**: stored in `agentId` (e.g., `delegate-foo:depth=1`)
+- **Limits**: maxDepth (default 2), maxConcurrent (default 3)
+- **Zombie Counter Prevention**: `activeDelegations++` before any await, decremented in finally block
+- **Config Override**: optional runner/model/maxTokens/timeoutSec passed to processCompletion
+
+## Router (router.ts)
+
+- **`processInbound(msg)`**: Canonicalizes session ID, generates canary token, wraps content in `<external_content>` taint tags, records in taint budget, runs `scanner.scanInput()`, enqueues with canary appended. Returns `RouterResult` with `queued`, `messageId`, `canaryToken`.
+- **`processOutbound(response, sessionId, canaryToken)`**: Checks canary leakage, scans output, strips canary. Redacts entire response if canary leaked.
 
 ## Common Tasks
 
 **Adding a new HTTP endpoint:**
 1. Add URL match in `handleRequest()` in `server.ts`
-2. Create handler function (follow `handleModels` / `handleCompletions` pattern)
+2. Create handler function (follow existing patterns)
 3. Return JSON with `Content-Length` header
+4. For streaming endpoints, use SSE format (handleEvents pattern)
 
 **Adding a new IPC action handler:**
-1. Add Zod schema in `src/ipc-schemas.ts` (must use `.strict()`)
-2. Add handler in `handlers` record in `ipc-server.ts`
+1. Add Zod schema in `src/ipc-schemas.ts` (`.strict()`)
+2. Add handler in domain module (e.g., `createLLMHandlers`)
 3. Register tool in `src/agent/ipc-tools.ts` AND `src/agent/mcp-server.ts`
-4. Update tool count assertion in `tests/sandbox-isolation.test.ts`
+4. Update tool count in `tests/sandbox-isolation.test.ts`
+5. If handler emits events, add event types to event bus
 
-**Modifying the routing pipeline:**
-1. Edit `processInbound` / `processOutbound` in `router.ts`
-2. Update `RouterResult` / `OutboundResult` types if adding fields
-3. Update callers in `server.ts` (HTTP path, channel path, scheduler path)
+**Adding streaming events:**
+1. Emit via `eventBus.emit()` in completion/agent/provider paths
+2. Use dot-namespaced event type (e.g., `llm.token_delta`)
+3. Include requestId for per-request filtering
+4. Never include secrets in event.data
 
 ## Gotchas
 
-- **Dequeue by ID, not FIFO**: `db.dequeueById(result.messageId)` -- FIFO dequeue causes session ID mismatches and empty canary tokens (`''.includes('')` is always true, redacting every response).
-- **Consumed response body in proxy retry**: After reading the body for a 401 check, the original response is consumed. The retry path must use the new response; the fallthrough path must reconstruct from the already-read body.
-- **Pino uses underscore keys**: Logger calls are `logger.info('server_listening')` not `'server listening'`. Tests scanning log output must match underscores.
-- **identity_write / user_write skip global taint gate**: These actions do soft queuing (return `{ queued: true }`) in their handlers instead of hard-blocking at step 3.5.
-- **Collect stdout/stderr in parallel**: Sequential collection deadlocks when one pipe buffer fills while the other is being drained.
-- **Channel deduplication**: Slack delivers events multiple times on reconnect. Server uses TTL-based `processedMessages` map keyed by `channelName:messageId`.
-- **OAuth pre-flight**: `ensureOAuthTokenFresh()` runs before each agent spawn; proxy handles reactive 401 retry as fallback.
+- **Dequeue by ID, not FIFO**: FIFO dequeue causes session ID mismatches and empty canary tokens.
+- **Consumed response body in proxy retry**: After reading body for 401 check, original response is consumed. Retry must use new response.
+- **Pino uses underscore keys**: `logger.info('server_listening')` not `'server listening'`.
+- **identity_write / user_write / identity_propose skip global taint gate**: These do soft queuing in their handlers.
+- **Collect stdout/stderr in parallel**: Sequential collection deadlocks when one pipe buffer fills.
+- **Channel deduplication**: TTL-based `processedMessages` map keyed by `channelName:messageId`.
+- **Extract image_data blocks immediately**: image_data blocks are transient -- must never be stored in conversation store. `extractImageDataBlocks()` is the single conversion point.
+- **Event emission is synchronous**: Emits never await or throw.
+- **Plugin integrity verified on startup**: verifyPluginIntegrity() called before PluginHost registers.
+- **Zombie counter in delegation**: Always wrap activeDelegations mutation in try/finally.
+- **Request-scoped _sessionId for images**: Stripped before schema validation.
+- **SSE keepalive**: handleEvents sends `:keepalive\n\n` every 15s.
+- **Port flag support**: `--port <number>` listens on TCP instead of Unix socket.
