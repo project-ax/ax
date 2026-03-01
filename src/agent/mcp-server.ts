@@ -209,7 +209,7 @@ export function createIPCMcpServer(client: IPCClient, opts?: MCPServerOptions): 
       '- write_file: Write a base64-encoded binary file (requires tier, path, data, mimeType)',
       {
         type: z.enum(['write', 'read', 'list', 'write_file']),
-        tier: z.string().describe('"agent", "user", or "scratch"'),
+        tier: z.string().describe('"agent" or "user"'),
         path: z.string().optional().describe('Relative path within the tier'),
         content: z.string().optional().describe('File content (for write)'),
         data: z.string().optional().describe('Base64-encoded binary content (for write_file)'),

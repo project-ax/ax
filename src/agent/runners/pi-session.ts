@@ -341,6 +341,8 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
   // IMPORTANT: codingTools (the pre-instantiated export) captures process.cwd()
   // at import time via closures — those tools would write to the wrong directory.
   // createCodingTools(cwd) creates fresh tools bound to the workspace.
+  // Local tools (write, read, edit) operate on /scratch (ephemeral, cwd).
+  // The IPC 'workspace' tool handles persistent tiers (agent, user).
   const tools = createCodingTools(config.workspace);
 
   // Create IPC tool definitions for pi-coding-agent

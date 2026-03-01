@@ -81,8 +81,9 @@ export class RuntimeModule extends BasePromptModule {
       lines.push(`**Agent ID**: ${ctx.agentId}`);
     }
     if (ctx.hasWorkspaceTiers) {
-      lines.push('', '### Workspace Tiers',
-        '- **agent** (`/shared`): Shared files (read-only in sandbox). Use `workspace({ type: "write", tier: "agent" })` to write via IPC.',
+      lines.push('', '### Workspace',
+        '- **Working directory** (`/scratch`): Ephemeral space. Local tools (write, read, edit) operate here by default.',
+        '- **agent** (`/agent`): Persistent shared files (read-only in sandbox). Use `workspace({ type: "write", tier: "agent" })` to write via IPC.',
         '- **user** (`/user`): Your personal persistent files. Use `workspace({ type: "write", tier: "user" })`.',
       );
     }

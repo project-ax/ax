@@ -9,8 +9,8 @@
  * Canonical mount table:
  *   /scratch  — Session cwd/HOME (ephemeral, rw)
  *   /skills   — Merged agent + user skills (overlayfs, ro)
- *   /agent    — Agent identity files: SOUL.md, etc. (ro)
- *   /shared   — Shared agent workspace (ro)
+ *   /identity — Agent identity files: SOUL.md, etc. (ro)
+ *   /agent    — Agent workspace, persistent shared files (ro)
  *   /user     — Per-user persistent storage (rw)
  *
  * Providers that support filesystem remapping (Docker, bwrap, nsjail) mount
@@ -27,8 +27,8 @@ import type { SandboxConfig } from './types.js';
 export const CANONICAL = {
   scratch:  '/scratch',
   skills:   '/skills',
+  identity: '/identity',
   agent:    '/agent',
-  shared:   '/shared',
   user:     '/user',
 } as const;
 
@@ -41,8 +41,8 @@ export function canonicalEnv(config: SandboxConfig): Record<string, string> {
     AX_IPC_SOCKET: config.ipcSocket,
     AX_WORKSPACE: CANONICAL.scratch,
     AX_SKILLS: CANONICAL.skills,
-    ...(config.agentDir        ? { AX_AGENT_DIR: CANONICAL.agent } : {}),
-    ...(config.agentWorkspace  ? { AX_AGENT_WORKSPACE: CANONICAL.shared } : {}),
+    ...(config.agentDir        ? { AX_AGENT_DIR: CANONICAL.identity } : {}),
+    ...(config.agentWorkspace  ? { AX_AGENT_WORKSPACE: CANONICAL.agent } : {}),
     ...(config.userWorkspace   ? { AX_USER_WORKSPACE: CANONICAL.user } : {}),
     // Redirect caches to /tmp so they don't pollute workspace
     npm_config_cache: '/tmp/.ax-npm-cache',
@@ -70,14 +70,14 @@ export function createCanonicalSymlinks(config: SandboxConfig): {
   // skills → real skills dir (merged via overlayfs on host, or single dir)
   symlinkSync(config.skills, join(mountRoot, 'skills'));
 
-  // agent → real agentDir (identity files)
+  // identity → real agentDir (identity files)
   if (config.agentDir) {
-    symlinkSync(config.agentDir, join(mountRoot, 'agent'));
+    symlinkSync(config.agentDir, join(mountRoot, 'identity'));
   }
 
-  // shared → agent workspace (read-only)
+  // agent → agent workspace (read-only)
   if (config.agentWorkspace) {
-    symlinkSync(config.agentWorkspace, join(mountRoot, 'shared'));
+    symlinkSync(config.agentWorkspace, join(mountRoot, 'agent'));
   }
 
   // user → per-user persistent workspace (read-write)
@@ -108,8 +108,8 @@ export function symlinkEnv(config: SandboxConfig, mountRoot: string): Record<str
     AX_IPC_SOCKET: config.ipcSocket,
     AX_WORKSPACE: join(mountRoot, 'scratch'),
     AX_SKILLS: join(mountRoot, 'skills'),
-    ...(config.agentDir        ? { AX_AGENT_DIR: join(mountRoot, 'agent') } : {}),
-    ...(config.agentWorkspace  ? { AX_AGENT_WORKSPACE: join(mountRoot, 'shared') } : {}),
+    ...(config.agentDir        ? { AX_AGENT_DIR: join(mountRoot, 'identity') } : {}),
+    ...(config.agentWorkspace  ? { AX_AGENT_WORKSPACE: join(mountRoot, 'agent') } : {}),
     ...(config.userWorkspace   ? { AX_USER_WORKSPACE: join(mountRoot, 'user') } : {}),
     npm_config_cache: '/tmp/.ax-npm-cache',
     XDG_CACHE_HOME: '/tmp/.ax-cache',

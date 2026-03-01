@@ -49,10 +49,10 @@ describe('RuntimeModule enterprise features', () => {
     const lines = mod.render(ctx);
     const content = lines.join('\n');
 
-    expect(content).toContain('### Workspace Tiers');
+    expect(content).toContain('### Workspace');
     expect(content).toContain('agent');
     expect(content).toContain('user');
-    expect(content).toContain('/shared');
+    expect(content).toContain('/agent');
     expect(content).toContain('/user');
   });
 
@@ -78,7 +78,7 @@ describe('RuntimeModule enterprise features', () => {
     const content = lines.join('\n');
 
     expect(content).toContain('**Agent ID**: main');
-    expect(content).toContain('### Workspace Tiers');
+    expect(content).toContain('### Workspace');
     expect(content).toContain('### Governance');
   });
 });

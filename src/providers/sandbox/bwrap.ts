@@ -55,10 +55,10 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         '--ro-bind', config.skills, CANONICAL.skills,
 
         // Agent identity directory (read-only) — SOUL.md, etc.
-        ...(config.agentDir ? ['--ro-bind', config.agentDir, CANONICAL.agent] : []),
+        ...(config.agentDir ? ['--ro-bind', config.agentDir, CANONICAL.identity] : []),
 
         // Enterprise mounts — canonical paths
-        ...(config.agentWorkspace ? ['--ro-bind', config.agentWorkspace, CANONICAL.shared] : []),
+        ...(config.agentWorkspace ? ['--ro-bind', config.agentWorkspace, CANONICAL.agent] : []),
         ...(config.userWorkspace ? ['--bind', config.userWorkspace, CANONICAL.user] : []),
 
         // IPC socket directory (read-write)

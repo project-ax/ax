@@ -38,12 +38,12 @@ describe('CANONICAL constants', () => {
     expect(CANONICAL.skills).toBe('/skills');
   });
 
-  test('agent is /agent (identity files)', () => {
-    expect(CANONICAL.agent).toBe('/agent');
+  test('identity is /identity (identity files)', () => {
+    expect(CANONICAL.identity).toBe('/identity');
   });
 
-  test('shared is /shared (agent workspace)', () => {
-    expect(CANONICAL.shared).toBe('/shared');
+  test('agent is /agent (agent workspace)', () => {
+    expect(CANONICAL.agent).toBe('/agent');
   });
 
   test('user is /user (per-user persistent storage)', () => {
@@ -75,8 +75,8 @@ describe('canonicalEnv', () => {
       userWorkspace: '/home/alice/.ax/agents/main/users/alice/workspace',
     }));
 
-    expect(envFull.AX_AGENT_DIR).toBe('/agent');
-    expect(envFull.AX_AGENT_WORKSPACE).toBe('/shared');
+    expect(envFull.AX_AGENT_DIR).toBe('/identity');
+    expect(envFull.AX_AGENT_WORKSPACE).toBe('/agent');
     expect(envFull.AX_USER_WORKSPACE).toBe('/user');
   });
 
@@ -128,8 +128,8 @@ describe('createCanonicalSymlinks', () => {
     const { mountRoot, cleanup } = createCanonicalSymlinks(config);
     cleanupFn = cleanup;
 
-    expect(readlinkSync(join(mountRoot, 'agent'))).toBe(config.agentDir);
-    expect(readlinkSync(join(mountRoot, 'shared'))).toBe(config.agentWorkspace);
+    expect(readlinkSync(join(mountRoot, 'identity'))).toBe(config.agentDir);
+    expect(readlinkSync(join(mountRoot, 'agent'))).toBe(config.agentWorkspace);
     expect(readlinkSync(join(mountRoot, 'user'))).toBe(config.userWorkspace);
   });
 
@@ -138,8 +138,8 @@ describe('createCanonicalSymlinks', () => {
     const { mountRoot, cleanup } = createCanonicalSymlinks(config);
     cleanupFn = cleanup;
 
+    expect(existsSync(join(mountRoot, 'identity'))).toBe(false);
     expect(existsSync(join(mountRoot, 'agent'))).toBe(false);
-    expect(existsSync(join(mountRoot, 'shared'))).toBe(false);
     expect(existsSync(join(mountRoot, 'user'))).toBe(false);
   });
 
@@ -187,8 +187,8 @@ describe('symlinkEnv', () => {
 
     const env = symlinkEnv(config, mountRoot);
 
-    expect(env.AX_AGENT_DIR).toBe(join(mountRoot, 'agent'));
-    expect(env.AX_AGENT_WORKSPACE).toBe(join(mountRoot, 'shared'));
+    expect(env.AX_AGENT_DIR).toBe(join(mountRoot, 'identity'));
+    expect(env.AX_AGENT_WORKSPACE).toBe(join(mountRoot, 'agent'));
     expect(env.AX_USER_WORKSPACE).toBe(join(mountRoot, 'user'));
   });
 });

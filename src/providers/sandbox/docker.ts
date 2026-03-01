@@ -82,9 +82,9 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         '-v', `${config.workspace}:${CANONICAL.scratch}:rw`,
         '-v', `${config.skills}:${CANONICAL.skills}:ro`,
         '-v', `${socketDir}:${socketDir}:rw`,
-        ...(config.agentDir ? ['-v', `${config.agentDir}:${CANONICAL.agent}:ro`] : []),
+        ...(config.agentDir ? ['-v', `${config.agentDir}:${CANONICAL.identity}:ro`] : []),
         // Enterprise mounts — canonical paths
-        ...(config.agentWorkspace ? ['-v', `${config.agentWorkspace}:${CANONICAL.shared}:ro`] : []),
+        ...(config.agentWorkspace ? ['-v', `${config.agentWorkspace}:${CANONICAL.agent}:ro`] : []),
         ...(config.userWorkspace ? ['-v', `${config.userWorkspace}:${CANONICAL.user}:rw`] : []),
 
         // Working directory — canonical

@@ -235,31 +235,31 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     name: 'workspace',
     label: 'Workspace',
     description:
-      'Read and write files in workspace tiers.\n\nOperations:\n' +
-      '- write: Write a text file to a workspace tier (agent, user, or scratch)\n' +
+      'Read and write files in persistent workspace tiers.\n\nOperations:\n' +
+      '- write: Write a text file to a workspace tier (agent or user)\n' +
       '- read: Read a file from a workspace tier\n' +
       '- list: List files in a workspace tier directory\n' +
       '- write_file: Write a base64-encoded binary file to a workspace tier',
     parameters: Type.Union([
       Type.Object({
         type: Type.Literal('write'),
-        tier: Type.String({ description: '"agent", "user", or "scratch"' }),
+        tier: Type.String({ description: '"agent" or "user"' }),
         path: Type.String({ description: 'Relative path within the tier (e.g. "docs/notes.md")' }),
         content: Type.String({ description: 'File content to write' }),
       }),
       Type.Object({
         type: Type.Literal('read'),
-        tier: Type.String({ description: '"agent", "user", or "scratch"' }),
+        tier: Type.String({ description: '"agent" or "user"' }),
         path: Type.String({ description: 'Relative path within the tier' }),
       }),
       Type.Object({
         type: Type.Literal('list'),
-        tier: Type.String({ description: '"agent", "user", or "scratch"' }),
+        tier: Type.String({ description: '"agent" or "user"' }),
         path: Type.Optional(Type.String({ description: 'Subdirectory to list (defaults to root)' })),
       }),
       Type.Object({
         type: Type.Literal('write_file'),
-        tier: Type.String({ description: '"agent", "user", or "scratch"' }),
+        tier: Type.String({ description: '"agent" or "user"' }),
         path: Type.String({ description: 'Relative path within the tier (e.g. "files/image.png")' }),
         data: Type.String({ description: 'Base64-encoded binary content' }),
         mimeType: Type.String({ description: 'MIME type of the file (e.g. "image/png")' }),

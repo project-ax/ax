@@ -43,10 +43,10 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         '--bindmount_ro', `${config.skills}:${CANONICAL.skills}`,
 
         // Mount agent identity directory (read-only) — SOUL.md, etc.
-        ...(config.agentDir ? ['--bindmount_ro', `${config.agentDir}:${CANONICAL.agent}`] : []),
+        ...(config.agentDir ? ['--bindmount_ro', `${config.agentDir}:${CANONICAL.identity}`] : []),
 
         // Enterprise mounts — canonical paths
-        ...(config.agentWorkspace ? ['--bindmount_ro', `${config.agentWorkspace}:${CANONICAL.shared}`] : []),
+        ...(config.agentWorkspace ? ['--bindmount_ro', `${config.agentWorkspace}:${CANONICAL.agent}`] : []),
         ...(config.userWorkspace ? ['--bindmount', `${config.userWorkspace}:${CANONICAL.user}`] : []),
 
         // Mount IPC socket directory
