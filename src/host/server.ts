@@ -30,6 +30,7 @@ import { resolveDelivery } from './delivery.js';
 import { templatesDir as resolveTemplatesDir, seedSkillsDir as resolveSeedSkillsDir } from '../utils/assets.js';
 import { createEventBus, type EventBus } from './event-bus.js';
 import { attachEventConsole, attachJsonEventConsole } from './event-console.js';
+import { createOrchestrator, type Orchestrator } from './orchestration/orchestrator.js';
 
 // Extracted modules
 import { sendError, sendSSEChunk, readBody } from './server-http.js';
@@ -285,6 +286,9 @@ export async function createServer(
     return result.responseContent;
   }
 
+  // Create orchestrator for agent lifecycle management and async delegation
+  const orchestrator = createOrchestrator(eventBus, providers.audit);
+
   const handleIPC = createIPCHandler(providers, {
     taintBudget,
     agentDir: agentDirVal,
@@ -297,6 +301,7 @@ export async function createServer(
       maxDepth: config.delegation.max_depth,
     } : undefined,
     eventBus,
+    orchestrator,
   });
 
   const defaultCtx = { sessionId: 'server', agentId: 'system', userId: defaultUserId };
@@ -804,6 +809,9 @@ export async function createServer(
       });
       httpServer = null;
     }
+
+    // Stop orchestrator
+    orchestrator.shutdown();
 
     // Stop IPC server
     try { ipcServer.close(); } catch {

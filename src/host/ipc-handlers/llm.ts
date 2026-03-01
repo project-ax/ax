@@ -88,11 +88,16 @@ export function createLLMHandlers(providers: ProviderRegistry, configModel?: str
         const chunkType = (chunk as any).type;
         if (chunkType === 'tool_use') {
           const tc = (chunk as any).toolCall;
+          const toolData: Record<string, unknown> = { toolId: tc?.id, toolName: tc?.name, args: tc?.args };
+          // Surface delegate's wait param for async-vs-sync debugging
+          if (tc?.name === 'agent') {
+            toolData.wait = tc?.args?.wait ?? null;
+          }
           eventBus?.emit({
             type: 'tool.call',
             requestId: ctx.sessionId,
             timestamp: Date.now(),
-            data: { toolId: tc?.id, toolName: tc?.name, args: tc?.args },
+            data: toolData,
           });
         } else if (chunkType === 'thinking') {
           eventBus?.emit({

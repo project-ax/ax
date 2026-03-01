@@ -50,6 +50,7 @@ export interface DelegateRequest {
   model?: string;
   maxTokens?: number;
   timeoutSec?: number;
+  wait?: boolean;
 }
 
 export interface IPCHandlerOptions {

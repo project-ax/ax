@@ -1,5 +1,21 @@
 # Journal
 
+## [2026-03-01 07:00] — Fix spawning→completed invalid state transition in fire-and-forget delegation
+
+**Task:** Fix `invalid_state_transition from=spawning to=completed` warnings when fire-and-forget delegates complete
+**What I did:** Added `orchestrator.supervisor.transition(handle.id, 'running', ...)` immediately after `orchestrator.register()` in the fire-and-forget path, so the handle goes `spawning → running → completed` instead of trying the invalid `spawning → completed`. Updated test mocks to start at `spawning` state and assert the `running` transition happens.
+**Files touched:** src/host/ipc-handlers/delegation.ts, tests/host/delegation-hardening.test.ts
+**Outcome:** Success — build clean, 24 delegation tests pass
+**Notes:** The orchestrator state machine only allows `spawning → {running, failed, canceled}`. The delegation handler was skipping the `running` transition because it registered the handle and immediately launched the background delegate without updating state.
+
+## [2026-03-01 07:00] — Consolidate delegate + delegate_collect into single `agent` tool
+
+**Task:** Complete consolidation of two singleton delegation tools (`delegate`, `delegate_collect`) into a single `agent` tool with `type: "delegate"` and `type: "collect"` discriminators; rename IPC action `agent_delegate_collect` → `agent_collect`
+**What I did:** Updated actionMap in tool-catalog.ts, handler key in delegation.ts, IPC schema in ipc-schemas.ts, MCP server mapping in mcp-server.ts. Fixed 6 test files (ipc-tools, tool-catalog, mcp-server, tool-catalog-sync, sandbox-isolation, delegation-hardening) for name/count changes.
+**Files touched:** src/ipc-schemas.ts, src/agent/tool-catalog.ts, src/agent/mcp-server.ts, src/host/ipc-handlers/delegation.ts, tests/agent/ipc-tools.test.ts, tests/agent/tool-catalog.test.ts, tests/agent/mcp-server.test.ts, tests/sandbox-isolation.test.ts, tests/host/delegation-hardening.test.ts
+**Outcome:** Success — build clean, 126 tests pass across 6 test files
+**Notes:** Consolidation follows the existing codebase pattern where multi-op tools use a `type` discriminator + `actionMap`. The `agent` tool now has `delegate` and `collect` as type values mapping to `agent_delegate` and `agent_collect` IPC actions respectively.
+
 ## [2026-02-28 18:00] — Move warning banner below navbar
 
 **Task:** Reposition the dev warning banner to appear below the main navigation header instead of above it
@@ -1117,3 +1133,32 @@ Tests: 53 new tests across 6 test files, all passing. Zero regressions on 383 ex
 **Files touched:** 10 files in `tests/agent/`
 **Outcome:** Success — all 324 agent tests pass across 34 test files
 **Notes:** IPC client tests (`ipc-client.test.ts`) and host tests were left untouched since they test transport/IPC actions which haven't changed.
+
+## [2026-02-28 23:20] — Implement `wait` parameter for async parallel delegation
+
+**Task:** Add `wait` parameter end-to-end: schema → handler → tool definition → prompt guidance, enabling fire-and-forget delegation with `wait: false`
+**What I did:**
+- Added `wait: z.boolean().optional()` to `AgentDelegateSchema` in `src/ipc-schemas.ts`
+- Added `wait?: boolean` to `DelegateRequest` interface in `src/host/ipc-server.ts`
+- Updated delegation handler (`src/host/ipc-handlers/delegation.ts`) to branch on `req.wait === false`: fire-and-forget returns `{handleId, status: "started"}` immediately, registers handle with orchestrator, launches delegate in background, stores result/error in handle metadata on completion
+- Wired orchestrator in `src/host/server.ts` — create + pass to IPC handler + shutdown in `stopServer()`
+- Added `wait` param to tool catalog (`src/agent/tool-catalog.ts`) and MCP server (`src/agent/mcp-server.ts`)
+- Updated delegation prompt module (`src/agent/prompt/modules/delegation.ts`) with parallel vs sequential guidance
+- Added 7 new tests in `tests/host/delegation-hardening.test.ts` covering: immediate return, background completion, explicit wait:true, omitted defaults to blocking, parallel execution, concurrency counter, orchestrator integration (success + failure)
+**Files touched:** `src/ipc-schemas.ts`, `src/host/ipc-server.ts`, `src/host/ipc-handlers/delegation.ts`, `src/host/server.ts`, `src/agent/tool-catalog.ts`, `src/agent/mcp-server.ts`, `src/agent/prompt/modules/delegation.ts`, `tests/host/delegation-hardening.test.ts`
+**Outcome:** Success — build clean, all 1975 tests pass across 184 test files
+**Notes:** Default `wait: true` preserves backward compatibility. The orchestrator was already imported/typed in ipc-server.ts but not instantiated in server.ts — this change activates it.
+
+## [2026-03-01 06:47] — Add `delegate_collect` tool for collecting fire-and-forget results
+
+**Task:** The agent was using `sleep 15` to wait for `wait: false` delegates because there was no tool to collect results. The prompt referenced `agent_orch_status` for polling, but that's not exposed as an agent-side tool.
+**What I did:**
+- Added `AgentDelegateCollectSchema` to `src/ipc-schemas.ts` (handleIds + optional timeoutMs)
+- Added `agent_delegate_collect` handler to `src/host/ipc-handlers/delegation.ts` — stores pending promises in a Map keyed by handleId, collect handler awaits all given handles and returns results
+- Added `delegate_collect` tool to `src/agent/tool-catalog.ts` and `src/agent/mcp-server.ts`
+- Updated delegation prompt to reference `delegate_collect` with example pattern instead of polling
+- Added 5 tests: multi-handle collect, blocking behavior, unknown handles, error collection, cleanup after collect
+- Fixed 4 test files with hardcoded tool counts (10→11): sandbox-isolation, ipc-tools, mcp-server, tool-catalog
+**Files touched:** `src/ipc-schemas.ts`, `src/host/ipc-handlers/delegation.ts`, `src/agent/tool-catalog.ts`, `src/agent/mcp-server.ts`, `src/agent/prompt/modules/delegation.ts`, `tests/host/delegation-hardening.test.ts`, `tests/sandbox-isolation.test.ts`, `tests/agent/ipc-tools.test.ts`, `tests/agent/mcp-server.test.ts`, `tests/agent/tool-catalog.test.ts`
+**Outcome:** Success — build clean, all 126 affected tests pass
+**Notes:** Key design decision: `delegate_collect` blocks until all handles complete (no polling loop needed). The pending map is cleaned up after collection.

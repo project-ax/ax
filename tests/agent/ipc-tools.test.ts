@@ -26,7 +26,7 @@ describe('ipc-tools', () => {
     expect(names).toContain('web');
     expect(names).toContain('audit');
     expect(names).toContain('identity');
-    expect(names).toContain('delegate');
+    expect(names).toContain('agent');
     expect(names).toContain('image');
   });
 
@@ -185,8 +185,8 @@ describe('ipc-tools', () => {
   test('delegate uses default timeout (heartbeat-based)', async () => {
     const client = createMockClient();
     const tools = createIPCTools(client as any);
-    const tool = findTool(tools, 'delegate');
-    await tool.execute('tc-delegate', { task: 'research X', context: 'some context' });
+    const tool = findTool(tools, 'agent');
+    await tool.execute('tc-delegate', { type: 'delegate', task: 'research X', context: 'some context' });
     expect(client.call).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'agent_delegate', task: 'research X' }),
       600000,  // delegate has timeoutMs: 600_000
@@ -210,12 +210,12 @@ describe('ipc-tools', () => {
       filter: { hasHeartbeat: false, hasSkills: false, hasWorkspaceTiers: false, hasGovernance: false },
     });
     const names = tools.map((t) => t.name);
-    // memory(1) + web(1) + audit(1) + identity(1) + delegation(1) + image(1) = 6 tools
+    // memory(1) + web(1) + audit(1) + identity(1) + agent(1) + image(1) = 6 tools
     expect(names).toContain('memory');
     expect(names).toContain('web');
     expect(names).toContain('audit');
     expect(names).toContain('identity');
-    expect(names).toContain('delegate');
+    expect(names).toContain('agent');
     expect(names).toContain('image');
     expect(tools.length).toBe(6);
   });

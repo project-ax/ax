@@ -191,6 +191,12 @@ export const AgentDelegateSchema = ipcAction('agent_delegate', {
   model: safeString(128).optional(),
   maxTokens: z.number().int().min(1).max(200_000).optional(),
   timeoutSec: z.number().int().min(5).max(600).optional(),
+  wait: z.boolean().optional(),
+});
+
+export const AgentCollectSchema = ipcAction('agent_collect', {
+  handleIds: z.array(safeString(128)).min(1).max(20),
+  timeoutMs: z.number().int().min(1000).max(600_000).optional(),
 });
 
 // ── Identity ────────────────────────────────────────

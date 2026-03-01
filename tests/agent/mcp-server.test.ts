@@ -173,7 +173,7 @@ describe('IPC MCP Server', () => {
     const expectedTools = [
       'memory', 'web', 'audit', 'identity',
       'scheduler', 'skill',
-      'delegate', 'image',
+      'agent', 'image',
       'workspace', 'governance',
     ];
 
@@ -215,7 +215,7 @@ describe('IPC MCP Server', () => {
     expect(names).toContain('web');
     expect(names).toContain('audit');
     expect(names).toContain('identity');
-    expect(names).toContain('delegate');
+    expect(names).toContain('agent');
     expect(names).not.toContain('scheduler');
     expect(names).not.toContain('skill');
     expect(names).not.toContain('workspace');

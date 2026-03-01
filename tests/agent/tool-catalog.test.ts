@@ -53,7 +53,7 @@ describe('tool-catalog', () => {
   test('contains all expected tool names', () => {
     const expected = [
       'memory', 'web', 'identity', 'scheduler', 'skill',
-      'workspace', 'governance', 'audit', 'delegate', 'image',
+      'workspace', 'governance', 'audit', 'agent', 'image',
     ];
     expect(TOOL_NAMES).toEqual(expected);
   });
@@ -278,6 +278,6 @@ describe('filterTools', () => {
     // Identity
     expect(names).toContain('identity');
     // Delegation
-    expect(names).toContain('delegate');
+    expect(names).toContain('agent');
   });
 });

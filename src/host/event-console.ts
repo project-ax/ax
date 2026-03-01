@@ -65,7 +65,8 @@ function formatEvent(event: StreamEvent): { label: string; status: string } | nu
 
     case 'tool.call': {
       const name = data.toolName ?? 'unknown';
-      return { label: `tool.call: ${name}`, status: green('ok') };
+      const extra = name === 'agent' ? ` wait=${data.wait ?? 'undefined'}` : '';
+      return { label: `tool.call: ${name}`, status: green('ok') + dim(extra) };
     }
 
     case 'scan.inbound': {

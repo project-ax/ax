@@ -1,13 +1,30 @@
 /**
  * IPC handler: agent delegation with depth/concurrency limits.
+ *
+ * Supports two modes via the `wait` parameter:
+ * - `wait: true` (default) — blocks until the delegate completes, returns `{response}`
+ * - `wait: false` — fire-and-forget, returns `{handleId, status: "started"}` immediately;
+ *   the caller collects results via `agent_collect`.
  */
+import { randomUUID } from 'node:crypto';
 import type { ProviderRegistry, AgentType } from '../../types.js';
 import type { IPCContext, DelegationConfig, IPCHandlerOptions, DelegateRequest } from '../ipc-server.js';
+import type { AgentHandle } from '../orchestration/types.js';
+
+/** Settled result for a fire-and-forget delegation. */
+interface PendingDelegate {
+  promise: Promise<{ response: string } | { error: string }>;
+  /** Orchestrator handle (if available). */
+  handle?: AgentHandle;
+}
 
 export function createDelegationHandlers(providers: ProviderRegistry, opts?: IPCHandlerOptions) {
   const maxConcurrent = opts?.delegation?.maxConcurrent ?? 3;
   const maxDepth = opts?.delegation?.maxDepth ?? 2;
   let activeDelegations = 0;
+
+  /** In-flight fire-and-forget delegates, keyed by handleId. */
+  const pending = new Map<string, PendingDelegate>();
 
   return {
     agent_delegate: async (req: any, ctx: IPCContext) => {
@@ -40,6 +57,9 @@ export function createDelegationHandlers(providers: ProviderRegistry, opts?: IPC
       // the handler throws — preventing the "zombie counter" bug where
       // activeDelegations stays inflated and blocks all future delegations.
       activeDelegations++;
+
+      const fireAndForget = req.wait === false;
+
       try {
         await providers.audit.log({
           action: 'agent_delegate',
@@ -47,6 +67,7 @@ export function createDelegationHandlers(providers: ProviderRegistry, opts?: IPC
           args: {
             task: req.task.slice(0, 500),
             depth: currentDepth + 1,
+            wait: req.wait ?? true,
             ...(req.runner ? { runner: req.runner } : {}),
             ...(req.model ? { model: req.model } : {}),
           },
@@ -63,7 +84,61 @@ export function createDelegationHandlers(providers: ProviderRegistry, opts?: IPC
           model: req.model,
           maxTokens: req.maxTokens,
           timeoutSec: req.timeoutSec,
+          wait: req.wait,
         };
+
+        if (fireAndForget) {
+          // Register a handle in the orchestrator (if available) so the
+          // caller can check status via agent_orch_status.
+          const handleId = randomUUID();
+          const orchestrator = opts?.orchestrator;
+          let handle: AgentHandle | undefined;
+          if (orchestrator) {
+            handle = orchestrator.register({
+              agentId: childCtx.agentId,
+              agentType: (req.runner as AgentType) ?? 'pi-coding-agent',
+              parentId: null,
+              sessionId: ctx.sessionId,
+              userId: ctx.userId ?? '',
+              activity: `Delegated: ${req.task.slice(0, 100)}`,
+              metadata: { handleId, task: req.task.slice(0, 500) },
+            });
+            // Transition from spawning → running immediately so that
+            // completed/failed transitions are valid when the delegate finishes.
+            orchestrator.supervisor.transition(handle.id, 'running', `Delegating: ${req.task.slice(0, 100)}`);
+          }
+
+          const effectiveHandleId = handle?.id ?? handleId;
+
+          // Launch in background — store promise so agent_collect can await it
+          const delegatePromise = opts.onDelegate(delegateReq, childCtx)
+            .then((response): { response: string } => {
+              if (handle) {
+                handle.metadata.response = response;
+                handle.metadata.completedAt = Date.now();
+                orchestrator!.supervisor.transition(handle.id, 'completed', 'Delegation completed');
+              }
+              return { response };
+            })
+            .catch((err): { error: string } => {
+              const errorMsg = err instanceof Error ? err.message : String(err);
+              if (handle) {
+                handle.metadata.error = errorMsg;
+                handle.metadata.completedAt = Date.now();
+                orchestrator!.supervisor.transition(handle.id, 'failed', `Delegation failed: ${errorMsg}`);
+              }
+              return { error: `Delegation failed: ${errorMsg}` };
+            })
+            .finally(() => {
+              activeDelegations--;
+            });
+
+          pending.set(effectiveHandleId, { promise: delegatePromise, handle });
+
+          return { handleId: effectiveHandleId, status: 'started' };
+        }
+
+        // Default blocking path (wait: true or omitted)
         const response = await opts.onDelegate(delegateReq, childCtx);
         return { response };
       } catch (err) {
@@ -77,7 +152,64 @@ export function createDelegationHandlers(providers: ProviderRegistry, opts?: IPC
           error: `Delegation failed: ${err instanceof Error ? err.message : String(err)}`,
         };
       } finally {
-        activeDelegations--;
+        // Only decrement in blocking path — fire-and-forget decrements in .finally() above
+        if (!fireAndForget) {
+          activeDelegations--;
+        }
+      }
+    },
+
+    /**
+     * Collect results from fire-and-forget delegates.
+     * Blocks until all requested handles have completed (or timeout).
+     */
+    agent_collect: async (req: any, _ctx: IPCContext) => {
+      const handleIds: string[] = req.handleIds;
+      const timeoutMs: number = req.timeoutMs ?? 300_000; // 5 min default
+
+      // Validate all handles exist
+      const unknown = handleIds.filter(id => !pending.has(id));
+      if (unknown.length > 0) {
+        return {
+          ok: false,
+          error: `Unknown handle IDs: ${unknown.join(', ')}`,
+        };
+      }
+
+      // Race all pending promises against a timeout
+      const promises = handleIds.map(async (id) => {
+        const entry = pending.get(id)!;
+        const result = await entry.promise;
+        return { handleId: id, ...result };
+      });
+
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      try {
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutId = setTimeout(
+            () => reject(new Error(`agent_collect timed out after ${timeoutMs}ms`)),
+            timeoutMs,
+          );
+        });
+
+        const results = await Promise.race([
+          Promise.all(promises),
+          timeoutPromise,
+        ]);
+
+        // Clean up settled handles from the pending map
+        for (const id of handleIds) {
+          pending.delete(id);
+        }
+
+        return { results };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      } finally {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
       }
     },
   };

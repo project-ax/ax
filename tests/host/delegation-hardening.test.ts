@@ -421,6 +421,405 @@ describe('delegation error response format', () => {
   });
 });
 
+// ── wait parameter: async fire-and-forget delegation ─────────
+
+describe('wait parameter (async parallel delegation)', () => {
+  test('wait: false returns {handleId, status: "started"} immediately', async () => {
+    const providers = mockProviders();
+    let resolveDelegate: (v: string) => void;
+
+    const { agent_delegate } = createDelegationHandlers(providers, {
+      delegation: { maxConcurrent: 3, maxDepth: 5 },
+      onDelegate: async () => {
+        return new Promise<string>(resolve => { resolveDelegate = resolve; });
+      },
+    });
+
+    const result = await agent_delegate({ task: 'Async task', wait: false }, defaultCtx);
+
+    // Should return immediately with handleId and status
+    expect(result.handleId).toBeDefined();
+    expect(typeof result.handleId).toBe('string');
+    expect(result.status).toBe('started');
+    // Should NOT have a response (hasn't completed yet)
+    expect(result.response).toBeUndefined();
+
+    // Clean up: resolve the background delegate
+    resolveDelegate!('done');
+    await new Promise(r => setTimeout(r, 10));
+  });
+
+  test('wait: false delegate actually completes in background', async () => {
+    const providers = mockProviders();
+    let resolveDelegate: (v: string) => void;
+    let delegateCompleted = false;
+
+    const { agent_delegate } = createDelegationHandlers(providers, {
+      delegation: { maxConcurrent: 3, maxDepth: 5 },
+      onDelegate: async () => {
+        return new Promise<string>(resolve => {
+          resolveDelegate = (v: string) => {
+            delegateCompleted = true;
+            resolve(v);
+          };
+        });
+      },
+    });
+
+    await agent_delegate({ task: 'Background task', wait: false }, defaultCtx);
+    expect(delegateCompleted).toBe(false);
+
+    // Resolve and wait for the background work to complete
+    resolveDelegate!('background-done');
+    await new Promise(r => setTimeout(r, 50));
+    expect(delegateCompleted).toBe(true);
+  });
+
+  test('wait: true (explicit) preserves blocking behavior', async () => {
+    const providers = mockProviders();
+
+    const { agent_delegate } = createDelegationHandlers(providers, {
+      delegation: { maxConcurrent: 3, maxDepth: 5 },
+      onDelegate: async () => 'blocking-result',
+    });
+
+    const result = await agent_delegate({ task: 'Blocking task', wait: true }, defaultCtx);
+
+    // Should have the response directly (blocking mode)
+    expect(result.response).toBe('blocking-result');
+    expect(result.handleId).toBeUndefined();
+    expect(result.status).toBeUndefined();
+  });
+
+  test('wait omitted defaults to blocking (backward compat)', async () => {
+    const providers = mockProviders();
+
+    const { agent_delegate } = createDelegationHandlers(providers, {
+      delegation: { maxConcurrent: 3, maxDepth: 5 },
+      onDelegate: async () => 'default-blocking',
+    });
+
+    // No wait parameter at all
+    const result = await agent_delegate({ task: 'Default task' }, defaultCtx);
+
+    expect(result.response).toBe('default-blocking');
+    expect(result.handleId).toBeUndefined();
+  });
+
+  test('concurrent wait: false delegates run in parallel', async () => {
+    const providers = mockProviders();
+    const resolvers: ((v: string) => void)[] = [];
+    const startTimes: number[] = [];
+
+    const { agent_delegate } = createDelegationHandlers(providers, {
+      delegation: { maxConcurrent: 5, maxDepth: 5 },
+      onDelegate: async () => {
+        startTimes.push(Date.now());
+        return new Promise<string>(resolve => {
+          resolvers.push(resolve);
+        });
+      },
+    });
+
+    // Fire 3 async delegates
+    const r1 = await agent_delegate({ task: 'Parallel 1', wait: false }, defaultCtx);
+    const r2 = await agent_delegate({ task: 'Parallel 2', wait: false }, defaultCtx);
+    const r3 = await agent_delegate({ task: 'Parallel 3', wait: false }, defaultCtx);
+
+    // All should return immediately with handleId
+    expect(r1.status).toBe('started');
+    expect(r2.status).toBe('started');
+    expect(r3.status).toBe('started');
+
+    // All 3 handleIds should be unique
+    const ids = [r1.handleId, r2.handleId, r3.handleId];
+    expect(new Set(ids).size).toBe(3);
+
+    // Wait for onDelegate to be called for all 3
+    await new Promise(r => setTimeout(r, 50));
+    expect(resolvers.length).toBe(3);
+
+    // Resolve all
+    for (const resolve of resolvers) resolve('done');
+    await new Promise(r => setTimeout(r, 10));
+  });
+
+  test('activeDelegations counter works correctly for fire-and-forget', async () => {
+    const providers = mockProviders();
+    const resolvers: ((v: string) => void)[] = [];
+
+    const { agent_delegate } = createDelegationHandlers(providers, {
+      delegation: { maxConcurrent: 2, maxDepth: 5 },
+      onDelegate: async () => {
+        return new Promise<string>(resolve => {
+          resolvers.push(resolve);
+        });
+      },
+    });
+
+    // Fire 2 async delegates (fills concurrency)
+    await agent_delegate({ task: 'Async 1', wait: false }, defaultCtx);
+    await agent_delegate({ task: 'Async 2', wait: false }, defaultCtx);
+
+    // 3rd should be rejected (concurrency limit)
+    const r3 = await agent_delegate({ task: 'Async 3 (rejected)', wait: false }, defaultCtx);
+    expect(r3.ok).toBe(false);
+    expect(r3.error).toContain('concurrent');
+
+    // Resolve one background delegate
+    await new Promise(r => setTimeout(r, 10));
+    resolvers[0]!('done');
+    await new Promise(r => setTimeout(r, 50));
+
+    // Now slot is free — 4th should work
+    const r4 = await agent_delegate({ task: 'Async 4 (should pass)', wait: false }, defaultCtx);
+    expect(r4.status).toBe('started');
+
+    // Clean up
+    for (const resolve of resolvers) resolve('done');
+    await new Promise(r => setTimeout(r, 10));
+  });
+
+  test('wait: false with orchestrator registers handle and stores result', async () => {
+    const providers = mockProviders();
+    let resolveDelegate: (v: string) => void;
+
+    // Create a minimal mock orchestrator (starts at 'spawning' like real code)
+    const handles = new Map<string, any>();
+    const mockOrchestrator = {
+      register: vi.fn((opts: any) => {
+        const handle = {
+          id: opts.metadata?.handleId ?? 'mock-id',
+          agentId: opts.agentId,
+          state: 'spawning',
+          metadata: { ...opts.metadata },
+        };
+        handles.set(handle.id, handle);
+        return handle;
+      }),
+      supervisor: {
+        transition: vi.fn((id: string, state: string) => {
+          const h = handles.get(id);
+          if (h) h.state = state;
+        }),
+      },
+    };
+
+    const { agent_delegate } = createDelegationHandlers(providers, {
+      delegation: { maxConcurrent: 3, maxDepth: 5 },
+      onDelegate: async () => {
+        return new Promise<string>(resolve => { resolveDelegate = resolve; });
+      },
+      orchestrator: mockOrchestrator as any,
+    });
+
+    const result = await agent_delegate({ task: 'Orch test', wait: false }, defaultCtx);
+    expect(result.status).toBe('started');
+    expect(mockOrchestrator.register).toHaveBeenCalled();
+
+    // Handle should have been transitioned spawning → running immediately
+    const handleBeforeResolve = handles.get(result.handleId);
+    expect(handleBeforeResolve.state).toBe('running');
+
+    // Resolve the delegate
+    resolveDelegate!('orch-response');
+    await new Promise(r => setTimeout(r, 50));
+
+    // The orchestrator handle should have the response in metadata
+    const handle = handles.get(result.handleId);
+    expect(handle).toBeDefined();
+    expect(handle.metadata.response).toBe('orch-response');
+    expect(handle.state).toBe('completed');
+  });
+
+  test('wait: false with orchestrator stores error on failure', async () => {
+    const providers = mockProviders();
+
+    const handles = new Map<string, any>();
+    const mockOrchestrator = {
+      register: vi.fn((opts: any) => {
+        const handle = {
+          id: opts.metadata?.handleId ?? 'mock-id',
+          agentId: opts.agentId,
+          state: 'spawning',
+          metadata: { ...opts.metadata },
+        };
+        handles.set(handle.id, handle);
+        return handle;
+      }),
+      supervisor: {
+        transition: vi.fn((id: string, state: string) => {
+          const h = handles.get(id);
+          if (h) h.state = state;
+        }),
+      },
+    };
+
+    const { agent_delegate } = createDelegationHandlers(providers, {
+      delegation: { maxConcurrent: 3, maxDepth: 5 },
+      onDelegate: async () => { throw new Error('background crash'); },
+      orchestrator: mockOrchestrator as any,
+    });
+
+    const result = await agent_delegate({ task: 'Fail orch test', wait: false }, defaultCtx);
+    expect(result.status).toBe('started');
+
+    await new Promise(r => setTimeout(r, 50));
+
+    const handle = handles.get(result.handleId);
+    expect(handle).toBeDefined();
+    expect(handle.metadata.error).toContain('background crash');
+    expect(handle.state).toBe('failed');
+  });
+});
+
+// ── agent_collect: collecting fire-and-forget results ──────
+
+describe('agent_collect', () => {
+  test('collects results from multiple wait:false delegates', async () => {
+    const providers = mockProviders();
+    const resolvers: ((v: string) => void)[] = [];
+
+    const handlers = createDelegationHandlers(providers, {
+      delegation: { maxConcurrent: 5, maxDepth: 5 },
+      onDelegate: async () => {
+        return new Promise<string>(resolve => {
+          resolvers.push(resolve);
+        });
+      },
+    });
+
+    // Launch 3 fire-and-forget delegates
+    const r1 = await handlers.agent_delegate({ task: 'Task A', wait: false }, defaultCtx);
+    const r2 = await handlers.agent_delegate({ task: 'Task B', wait: false }, defaultCtx);
+    const r3 = await handlers.agent_delegate({ task: 'Task C', wait: false }, defaultCtx);
+
+    expect(r1.status).toBe('started');
+    expect(r2.status).toBe('started');
+    expect(r3.status).toBe('started');
+
+    // Wait for onDelegate to be called
+    await new Promise(r => setTimeout(r, 50));
+
+    // Resolve all delegates with different results
+    resolvers[0]!('result-A');
+    resolvers[1]!('result-B');
+    resolvers[2]!('result-C');
+
+    // Collect all results
+    const collected = await handlers.agent_collect(
+      { handleIds: [r1.handleId, r2.handleId, r3.handleId] },
+      defaultCtx,
+    );
+
+    expect(collected.results).toBeDefined();
+    expect(collected.results).toHaveLength(3);
+
+    const byHandle = new Map(collected.results.map((r: any) => [r.handleId, r]));
+    expect(byHandle.get(r1.handleId).response).toBe('result-A');
+    expect(byHandle.get(r2.handleId).response).toBe('result-B');
+    expect(byHandle.get(r3.handleId).response).toBe('result-C');
+  });
+
+  test('blocks until delegates complete', async () => {
+    const providers = mockProviders();
+    let resolveDelegate: (v: string) => void;
+
+    const handlers = createDelegationHandlers(providers, {
+      delegation: { maxConcurrent: 3, maxDepth: 5 },
+      onDelegate: async () => {
+        return new Promise<string>(resolve => { resolveDelegate = resolve; });
+      },
+    });
+
+    const r1 = await handlers.agent_delegate({ task: 'Slow task', wait: false }, defaultCtx);
+
+    // Start collecting — should not resolve yet
+    let collectResolved = false;
+    const collectPromise = handlers.agent_collect(
+      { handleIds: [r1.handleId] },
+      defaultCtx,
+    ).then((result) => {
+      collectResolved = true;
+      return result;
+    });
+
+    await new Promise(r => setTimeout(r, 50));
+    expect(collectResolved).toBe(false);
+
+    // Resolve the delegate
+    resolveDelegate!('finally-done');
+    const collected = await collectPromise;
+    expect(collectResolved).toBe(true);
+    expect(collected.results[0].response).toBe('finally-done');
+  });
+
+  test('returns error for unknown handle IDs', async () => {
+    const providers = mockProviders();
+
+    const handlers = createDelegationHandlers(providers, {
+      delegation: { maxConcurrent: 3, maxDepth: 5 },
+      onDelegate: async () => 'done',
+    });
+
+    const result = await handlers.agent_collect(
+      { handleIds: ['nonexistent-handle'] },
+      defaultCtx,
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('Unknown handle IDs');
+  });
+
+  test('collects errors from failed delegates', async () => {
+    const providers = mockProviders();
+
+    const handlers = createDelegationHandlers(providers, {
+      delegation: { maxConcurrent: 3, maxDepth: 5 },
+      onDelegate: async () => { throw new Error('delegate exploded'); },
+    });
+
+    const r1 = await handlers.agent_delegate({ task: 'Will fail', wait: false }, defaultCtx);
+    await new Promise(r => setTimeout(r, 50));
+
+    const collected = await handlers.agent_collect(
+      { handleIds: [r1.handleId] },
+      defaultCtx,
+    );
+
+    expect(collected.results).toHaveLength(1);
+    expect(collected.results[0].error).toContain('delegate exploded');
+    expect(collected.results[0].response).toBeUndefined();
+  });
+
+  test('cleans up handles after collection', async () => {
+    const providers = mockProviders();
+
+    const handlers = createDelegationHandlers(providers, {
+      delegation: { maxConcurrent: 3, maxDepth: 5 },
+      onDelegate: async () => 'done',
+    });
+
+    const r1 = await handlers.agent_delegate({ task: 'Cleanup test', wait: false }, defaultCtx);
+    await new Promise(r => setTimeout(r, 50));
+
+    // First collect succeeds
+    const first = await handlers.agent_collect(
+      { handleIds: [r1.handleId] },
+      defaultCtx,
+    );
+    expect(first.results).toHaveLength(1);
+
+    // Second collect for same handle fails (cleaned up)
+    const second = await handlers.agent_collect(
+      { handleIds: [r1.handleId] },
+      defaultCtx,
+    );
+    expect(second.ok).toBe(false);
+    expect(second.error).toContain('Unknown handle IDs');
+  });
+});
+
 // ── Delegation audit completeness ────────────────────────────
 
 describe('delegation audit trail', () => {

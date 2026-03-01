@@ -254,20 +254,31 @@ export function createIPCMcpServer(client: IPCClient, opts?: MCPServerOptions): 
       limit: z.number().optional(),
     }, (args) => ipcCall('audit_query', args)),
 
-    // ── Delegate (singleton) ──
-    tool('delegate',
-      'Delegate a task to a sub-agent running in its own sandbox. ' +
-      'Subject to depth and concurrency limits.',
+    // ── Agent ──
+    tool('agent',
+      'Delegate tasks to sub-agents and collect results.\n\n' +
+      'Operations:\n' +
+      '- delegate: Launch a sub-agent in its own sandbox (blocks by default, or fire-and-forget with wait: false)\n' +
+      '- collect: Collect results from fire-and-forget delegates launched with wait: false',
       {
-        task: z.string().describe('The task description for the sub-agent'),
-        context: z.string().optional().describe('Background context the sub-agent should know'),
+        type: z.enum(['delegate', 'collect']),
+        task: z.string().optional().describe('The task description for the sub-agent (delegate)'),
+        context: z.string().optional().describe('Background context the sub-agent should know (delegate)'),
         runner: z.enum(['pi-coding-agent', 'claude-code']).optional()
-          .describe('Runner type for the sub-agent'),
-        model: z.string().optional().describe('Model ID override for the sub-agent'),
-        maxTokens: z.number().optional().describe('Max tokens for the sub-agent response'),
-        timeoutSec: z.number().optional().describe('Timeout in seconds (5-600)'),
+          .describe('Runner type for the sub-agent (delegate)'),
+        model: z.string().optional().describe('Model ID override for the sub-agent (delegate)'),
+        maxTokens: z.number().optional().describe('Max tokens for the sub-agent response (delegate)'),
+        timeoutSec: z.number().optional().describe('Timeout in seconds, 5-600 (delegate)'),
+        wait: z.boolean().optional().describe('If false, launch in background and return immediately with a handleId. Default: true (delegate)'),
+        handleIds: z.array(z.string()).optional().describe('Handle IDs returned by delegate with wait: false (collect)'),
+        timeoutMs: z.number().optional().describe('Timeout in milliseconds, default 300000 (collect)'),
       },
-      (args) => ipcCall('agent_delegate', args),
+      (args) => {
+        const { type, ...rest } = args;
+        const params = Object.fromEntries(Object.entries(rest).filter(([_, v]) => v !== undefined));
+        const action = type === 'delegate' ? 'agent_delegate' : 'agent_collect';
+        return ipcCall(action, params);
+      },
     ),
 
     // ── Image (singleton) ──

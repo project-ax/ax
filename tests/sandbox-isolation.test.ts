@@ -460,7 +460,7 @@ describe('MCP server tool registry security', () => {
 
     const expected = [
       'memory', 'web', 'identity', 'scheduler', 'skill',
-      'audit', 'delegate', 'image',
+      'audit', 'agent', 'image',
       // Enterprise tools
       'workspace', 'governance',
     ];
@@ -495,7 +495,7 @@ describe('IPC tools do not expose paths', () => {
     expect(names).toContain('web');
     expect(names).toContain('audit');
     expect(names).toContain('skill');
-    expect(names).toContain('delegate');
+    expect(names).toContain('agent');
     expect(names).toContain('image');
   });
 });

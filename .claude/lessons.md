@@ -450,3 +450,9 @@ After the migration, images are persisted to the **enterprise user workspace** a
 **Context:** Previously orchestration IPC handlers were defined but never registered in the main dispatcher
 **Lesson:** After wiring orchestration handlers via `opts.orchestrator` in `createIPCHandler`, the cross-component test skip set is still needed because that test doesn't configure an orchestrator. Update the comment from "separate handler" to "requires Orchestrator instance" for accuracy.
 **Tags:** ipc-server, orchestration, handler-registration, cross-component-test
+
+### Async fire-and-forget needs a collect mechanism, not polling
+**Date:** 2026-03-01
+**Context:** Added `wait: false` to delegate, told the prompt to "poll via agent_orch_status" — but that IPC action wasn't exposed as an agent tool. The agent resorted to `sleep 15 && echo ...`.
+**Lesson:** When adding an async fire-and-forget pattern, always provide a **blocking collect tool** (like `delegate_collect`) that accepts handleIds and awaits all results. Polling is bad UX for LLMs — they improvise with sleep/retry. A collect action that blocks until done is cleaner. Also: verify end-to-end that the agent actually has access to every tool/action referenced in its prompt.
+**Tags:** delegation, async, fire-and-forget, agent-tools, prompt-tool-mismatch

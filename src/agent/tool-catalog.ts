@@ -322,24 +322,37 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     singletonAction: 'audit_query',
   },
 
-  // ── Delegate (singleton) ──
+  // ── Agent ──
   {
-    name: 'delegate',
-    label: 'Delegate Task',
+    name: 'agent',
+    label: 'Agent',
     description:
-      'Delegate a task to a sub-agent running in its own sandbox. ' +
-      'Subject to depth and concurrency limits.',
-    parameters: Type.Object({
-      task: Type.String({ description: 'The task description for the sub-agent' }),
-      context: Type.Optional(Type.String({ description: 'Background context the sub-agent should know' })),
-      runner: Type.Optional(Type.String({ description: '"pi-coding-agent" or "claude-code"' })),
-      model: Type.Optional(Type.String({ description: 'Model ID override for the sub-agent (e.g. "claude-sonnet-4-5-20250929")' })),
-      maxTokens: Type.Optional(Type.Number({ description: 'Max tokens for the sub-agent response' })),
-      timeoutSec: Type.Optional(Type.Number({ description: 'Timeout in seconds (5-600)' })),
-    }),
+      'Delegate tasks to sub-agents and collect results.\n\nOperations:\n' +
+      '- delegate: Launch a sub-agent in its own sandbox (blocks by default, or fire-and-forget with wait: false)\n' +
+      '- collect: Collect results from fire-and-forget delegates launched with wait: false',
+    parameters: Type.Union([
+      Type.Object({
+        type: Type.Literal('delegate'),
+        task: Type.String({ description: 'The task description for the sub-agent' }),
+        context: Type.Optional(Type.String({ description: 'Background context the sub-agent should know' })),
+        runner: Type.Optional(Type.String({ description: '"pi-coding-agent" or "claude-code"' })),
+        model: Type.Optional(Type.String({ description: 'Model ID override for the sub-agent (e.g. "claude-sonnet-4-5-20250929")' })),
+        maxTokens: Type.Optional(Type.Number({ description: 'Max tokens for the sub-agent response' })),
+        timeoutSec: Type.Optional(Type.Number({ description: 'Timeout in seconds (5-600)' })),
+        wait: Type.Optional(Type.Boolean({ description: 'If false, launch in background and return immediately with a handleId. Default: true (blocking).' })),
+      }),
+      Type.Object({
+        type: Type.Literal('collect'),
+        handleIds: Type.Array(Type.String({ description: 'Handle IDs returned by delegate with wait: false' })),
+        timeoutMs: Type.Optional(Type.Number({ description: 'Timeout in milliseconds (default: 300000 = 5 min)' })),
+      }),
+    ]),
     category: 'delegation',
     timeoutMs: 600_000,
-    singletonAction: 'agent_delegate',
+    actionMap: {
+      delegate: 'agent_delegate',
+      collect: 'agent_collect',
+    },
   },
 
   // ── Image (singleton) ──
