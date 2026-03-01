@@ -4,7 +4,7 @@
  * agent spawning, outbound scanning, and memory persistence.
  */
 
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -250,31 +250,17 @@ export async function processCompletion(
   const isPersistent = !!persistentSessionId;
   let proxyCleanup: (() => void) | undefined;
   let enterpriseScratch = '';
+  // Skills dir is a peer of workspace (not inside it), so sandboxes can mount
+  // it read-only without path overlap.  No temp copy needed — use the persistent
+  // dir directly.
+  const skillsDir = agentSkillsDir(config.agent_name ?? 'main');
+  mkdirSync(skillsDir, { recursive: true });
   try {
     if (persistentSessionId) {
       workspace = workspaceDir(persistentSessionId);
       mkdirSync(workspace, { recursive: true });
     } else {
       workspace = mkdtempSync(join(tmpdir(), 'ax-ws-'));
-    }
-    // Refresh skills into workspace before each agent spawn.
-    // Copies from persistent ~/.ax skills dir and removes stale files (reverted/deleted skills).
-    // Runs every turn so skill_propose auto-approvals appear on the next turn.
-    const hostSkillsDir = agentSkillsDir(config.agent_name ?? 'main');
-    const wsSkillsDir = join(workspace, 'skills');
-    mkdirSync(wsSkillsDir, { recursive: true });
-    try {
-      const hostFiles = readdirSync(hostSkillsDir).filter((f: string) => f.endsWith('.md'));
-      for (const f of hostFiles) {
-        copyFileSync(join(hostSkillsDir, f), join(wsSkillsDir, f));
-      }
-      // Remove workspace skill files that no longer exist on host (deleted/reverted)
-      const hostSet = new Set(hostFiles);
-      for (const f of readdirSync(wsSkillsDir).filter((f: string) => f.endsWith('.md'))) {
-        if (!hostSet.has(f)) unlinkSync(join(wsSkillsDir, f));
-      }
-    } catch {
-      reqLogger.debug('skills_refresh_failed', { hostSkillsDir });
     }
 
     // Build conversation history: prefer DB-persisted history for persistent sessions,
@@ -432,7 +418,7 @@ export async function processCompletion(
     // Permanent: auth failures, bad config, content filter blocks.
     const sandboxConfig = {
       workspace,
-      skills: wsSkillsDir,
+      skills: skillsDir,
       ipcSocket: ipcSocketPath,
       agentDir,
       timeoutSec: config.sandbox.timeout_sec,

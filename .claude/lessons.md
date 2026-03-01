@@ -1,5 +1,11 @@
 # Lessons Learned
 
+### Prefer structural layout fixes over runtime workarounds
+**Date:** 2026-03-01
+**Context:** Skills dir was inside workspace, requiring a per-turn copy to avoid mount permission overlap. Moving skills to be a peer of workspace (`agentIdentityDir()/skills` instead of `agentWorkspaceDir()/skills`) eliminated the need entirely.
+**Lesson:** When two directories need different mount permissions, fix the directory layout so they're peers — don't work around a bad layout with runtime copying. A one-line path change beats 15 lines of temp-dir management.
+**Tags:** architecture, simplicity, sandbox, skills, workspace
+
 ### existsSync follows symlinks — use lstatSync for symlink existence checks
 **Date:** 2026-03-01
 **Context:** Writing tests for createCanonicalSymlinks that creates symlinks pointing to non-existent targets in test environment

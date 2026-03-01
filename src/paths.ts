@@ -31,10 +31,10 @@
  *           AGENTS.md         — operating instructions
  *           HEARTBEAT.md      — scheduled task checklist
  *           capabilities.yaml — capability declarations
- *           workspace/        — shared code, docs, skills
+ *           workspace/        — shared code, docs
  *             repo/
  *             docs/
- *             skills/
+ *           skills/           — skill files (peer of workspace, not inside it)
  *         users/
  *           <userId>/         — per-user state (isolated per user)
  *             USER.md         — user preferences, style, context
@@ -175,9 +175,9 @@ export function agentWorkspaceDir(agentId: string): string {
   return join(agentIdentityDir(agentId), 'workspace');
 }
 
-/** Path to an agent's skills directory: ~/.ax/agents/<agentId>/agent/workspace/skills/ */
+/** Path to an agent's skills directory: ~/.ax/agents/<agentId>/agent/skills/ */
 export function agentSkillsDir(agentId: string): string {
-  return join(agentWorkspaceDir(agentId), 'skills');
+  return join(agentIdentityDir(agentId), 'skills');
 }
 
 /**

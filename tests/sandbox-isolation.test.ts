@@ -273,7 +273,6 @@ describe('claude-code env spread', () => {
 describe('server workspace isolation', () => {
   test('spawn command does not pass workspace/skills paths as CLI args', async () => {
     const { readFileSync } = await import('node:fs');
-    // Completion processing (including spawn command construction) is now in server-completions.ts
     const source = readFileSync(resolve('src/host/server-completions.ts'), 'utf-8');
 
     // Workspace, skills, and agentDir are NOT passed as CLI args — they're
@@ -283,13 +282,24 @@ describe('server workspace isolation', () => {
     expect(spawnSection).not.toContain("'--skills'");
     expect(spawnSection).not.toContain("'--agent-dir'");
 
-    // Skills are still copied into workspace (server-side)
-    expect(source).toContain("const wsSkillsDir = join(workspace, 'skills')");
+    // Skills dir is the persistent agentSkillsDir(), passed directly via sandbox config.
+    // No temp copy needed — skills dir is a peer of workspace, not inside it.
+    expect(source).toContain("skills: skillsDir");
 
-    // hostSkillsDir should NOT appear in spawn command args
-    expect(spawnSection).not.toContain('hostSkillsDir');
+    // Must NOT have temp dir creation or copy logic for skills
+    expect(source).not.toContain("wsSkillsDir");
+    expect(source).not.toContain("hostSkillsDir");
+    expect(source).not.toContain("ax-skills-");
   });
 
+  test('skills dir is a peer of workspace, not a subpath', async () => {
+    const { readFileSync } = await import('node:fs');
+    const pathsSource = readFileSync(resolve('src/paths.ts'), 'utf-8');
+
+    // Skills dir must be derived from agentIdentityDir, not agentWorkspaceDir
+    expect(pathsSource).toMatch(/agentSkillsDir.*agentIdentityDir/s);
+    expect(pathsSource).not.toMatch(/agentSkillsDir.*agentWorkspaceDir/s);
+  });
 });
 
 // ── stripTaint deep nesting ──────────────────────────────────────────

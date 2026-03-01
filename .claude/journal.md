@@ -1,5 +1,17 @@
 # Journal
 
+## [2026-03-01 18:42] — Move skills dir to peer of workspace, eliminate temp-dir copy
+
+**Task:** Replace the skills-inside-workspace copy approach with a simpler layout where skills is a peer of workspace
+**What I did:**
+- Changed `agentSkillsDir()` from `agentWorkspaceDir()/skills` to `agentIdentityDir()/skills`
+- Removed per-turn copy logic from `server-completions.ts` (copyFileSync loop, stale file removal)
+- Removed unused imports (`copyFileSync`, `unlinkSync`, `readdirSync`)
+- Updated sandbox isolation tests and server.test.ts to assert the new pattern
+**Files touched:** src/paths.ts, src/host/server-completions.ts, tests/sandbox-isolation.test.ts, tests/host/server.test.ts
+**Outcome:** Success — all 1999 tests pass, build clean
+**Notes:** Skills as a peer of workspace means no path overlap, so sandboxes can mount it ro directly without temp copies.
+
 ## [2026-03-01 14:50] — Simplify workspace paths for LLM agents in sandboxes
 
 **Task:** Remap sandbox mount destinations from host paths to simple canonical paths so LLMs don't see confusing deeply-nested paths

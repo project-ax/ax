@@ -346,8 +346,8 @@ describe('Server', () => {
     expect(existsSync(wsDir)).toBe(true);
   });
 
-  it('should copy skills into workspace, not expose host path', async () => {
-    // Create a skill file in the persistent skills directory (~/.ax/agents/main/agent/workspace/skills/)
+  it('should use persistent skills dir (peer of workspace), not copy into workspace', async () => {
+    // Create a skill file in the persistent skills directory (~/.ax/agents/main/agent/skills/)
     const persistentSkillsDir = agentSkillsDir('main');
     mkdirSync(persistentSkillsDir, { recursive: true });
     const testSkillPath = join(persistentSkillsDir, '_test-skill.md');
@@ -368,13 +368,15 @@ describe('Server', () => {
 
       expect(res.status).toBe(200);
 
-      // Skills should be copied into the workspace
+      // Skills should exist at the persistent location (peer of workspace)
+      expect(existsSync(persistentSkillsDir)).toBe(true);
+      const skills = readdirSync(persistentSkillsDir);
+      expect(skills).toContain('_test-skill.md');
+
+      // Skills should NOT be copied into the session workspace
       const wsDir = workspaceDir(sessionId);
       const wsSkillsDir = join(wsDir, 'skills');
-      expect(existsSync(wsSkillsDir)).toBe(true);
-
-      const wsSkills = readdirSync(wsSkillsDir);
-      expect(wsSkills).toContain('_test-skill.md');
+      expect(existsSync(wsSkillsDir)).toBe(false);
     } finally {
       // Cleanup handled by afterEach (testAxHome removal)
     }
