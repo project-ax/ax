@@ -127,7 +127,7 @@ describe('prettyFormat', () => {
     expect(output).toMatch(/\n$/);
   });
 
-  it('formats warn with level label suffix', async () => {
+  it('formats warn without level label suffix (color is enough)', async () => {
     const { prettyFormat } = await import('../src/logger.js');
     const output = stripAnsi(prettyFormat({
       time: 1709128837000,
@@ -137,10 +137,10 @@ describe('prettyFormat', () => {
     }));
     expect(output).toContain('browser_disabled');
     expect(output).toContain('hint=npx playwright install chromium');
-    expect(output).toMatch(/\bwarn\b/);
+    expect(output).not.toMatch(/\bwarn\b/);
   });
 
-  it('formats error with level label suffix', async () => {
+  it('formats error without level label suffix (color is enough)', async () => {
     const { prettyFormat } = await import('../src/logger.js');
     const output = stripAnsi(prettyFormat({
       time: 1709128837000,
@@ -149,7 +149,7 @@ describe('prettyFormat', () => {
       exitCode: 1,
     }));
     expect(output).toContain('agent_failed');
-    expect(output).toMatch(/\berror\b/);
+    expect(output).not.toMatch(/\berror\b/);
   });
 
   it('includes timestamp in HH:MM:SS format', async () => {

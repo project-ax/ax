@@ -92,6 +92,18 @@ export async function create(config: Config): Promise<ChannelProvider> {
 
   const slackLogger = getLogger().child({ component: 'slack' });
 
+  // Bridge Bolt's internal logger to our pino logger so its messages match
+  // our pretty console format instead of printing raw "[WARN]  bolt-app ..." lines.
+  const boltLogger = {
+    debug(...msgs: unknown[]) { slackLogger.debug(msgs.join(' ')); },
+    info(...msgs: unknown[]) { slackLogger.info(msgs.join(' ')); },
+    warn(...msgs: unknown[]) { slackLogger.warn(msgs.join(' ')); },
+    error(...msgs: unknown[]) { slackLogger.error(msgs.join(' ')); },
+    setLevel() { /* controlled by our logger */ },
+    getLevel() { return LogLevel.DEBUG; },
+    setName() { /* ignored — component binding already set */ },
+  };
+
   let messageHandler: ((msg: InboundMessage) => Promise<void>) | null = null;
   let botUserId: string | undefined;
   let teamId: string | undefined;
@@ -103,11 +115,13 @@ export async function create(config: Config): Promise<ChannelProvider> {
   // Disable the library's built-in auto-reconnect — it has an unhandled promise
   // rejection bug in delayReconnectAttempt when start() fails during reconnection.
   // We run our own health-check loop (ensureConnected) instead.
-  const receiver = new SocketModeReceiver({ appToken, logLevel: LogLevel.ERROR });
+  const receiver = new SocketModeReceiver({ appToken, logLevel: LogLevel.ERROR, logger: boltLogger });
   (receiver.client as any).autoReconnectEnabled = false;
   const app = new App({
     token: botToken,
     receiver,
+    logLevel: LogLevel.DEBUG,
+    logger: boltLogger,
   });
 
   // Catch errors emitted by the socket-mode client so they don't become

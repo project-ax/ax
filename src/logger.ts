@@ -53,14 +53,6 @@ const LEVEL_COLORS: Record<number, (s: string) => string> = {
   60: (s: string) => styleText('red', s),        // fatal
 };
 
-const LEVEL_LABELS: Record<number, string> = {
-  20: 'debug',
-  30: 'info',
-  40: 'warn',
-  50: 'error',
-  60: 'fatal',
-};
-
 // Keys to exclude from the details display
 const SKIP_KEYS = new Set(['level', 'time', 'pid', 'hostname', 'msg', 'name']);
 
@@ -91,10 +83,7 @@ export function prettyFormat(obj: Record<string, unknown>): string {
   const details = formatDetails(obj);
   const detailStr = details ? '  ' + styleText('gray', details) : '';
 
-  // Show level label only for warn/error (info is implied by context)
-  const levelLabel = level >= 40 ? '  ' + colorize(LEVEL_LABELS[level] ?? '') : '';
-
-  return `${styleText('gray', time)}  ${styleText('bold', colorize(msg))}${detailStr}${levelLabel}\n`;
+  return `${styleText('gray', time)}  ${styleText('bold', colorize(msg))}${detailStr}\n`;
 }
 
 // ═══════════════════════════════════════════════════════
