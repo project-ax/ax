@@ -227,6 +227,107 @@ describe('attachEventConsole', () => {
 
     unsub();
   });
+
+  it('shows agentId and type for agent.registered', () => {
+    const bus = createEventBus();
+    const unsub = attachEventConsole(bus);
+
+    bus.emit(makeEvent({
+      type: 'agent.registered',
+      data: { handleId: 'h1', agentId: 'main', agentType: 'pi-session', parentId: null, userId: 'u1' },
+    }));
+
+    const output = stripAnsi(writeSpy.mock.calls[0][0] as string);
+    expect(output).toContain('agent.registered');
+    expect(output).toContain('main');
+    expect(output).toContain('pi-session');
+
+    unsub();
+  });
+
+  it('shows state transition for agent.state', () => {
+    const bus = createEventBus();
+    const unsub = attachEventConsole(bus);
+
+    bus.emit(makeEvent({
+      type: 'agent.state',
+      data: { handleId: 'h1', agentId: 'main', agentType: 'pi-session', oldState: 'running', newState: 'thinking' },
+    }));
+
+    const output = stripAnsi(writeSpy.mock.calls[0][0] as string);
+    expect(output).toContain('agent.state');
+    expect(output).toContain('main: running → thinking');
+
+    unsub();
+  });
+
+  it('shows agentId for agent.completed', () => {
+    const bus = createEventBus();
+    const unsub = attachEventConsole(bus);
+
+    bus.emit(makeEvent({
+      type: 'agent.completed',
+      data: { handleId: 'h1', agentId: 'researcher', oldState: 'running', newState: 'completed', result: 'Found 3 results' },
+    }));
+
+    const output = stripAnsi(writeSpy.mock.calls[0][0] as string);
+    expect(output).toContain('agent.completed');
+    expect(output).toContain('researcher');
+    expect(output).toContain('Found 3 results');
+
+    unsub();
+  });
+
+  it('shows agentId and error for agent.failed', () => {
+    const bus = createEventBus();
+    const unsub = attachEventConsole(bus);
+
+    bus.emit(makeEvent({
+      type: 'agent.failed',
+      data: { handleId: 'h1', agentId: 'worker', oldState: 'running', newState: 'failed', error: 'OOM killed' },
+    }));
+
+    const output = stripAnsi(writeSpy.mock.calls[0][0] as string);
+    expect(output).toContain('agent.failed');
+    expect(output).toContain('worker');
+    expect(output).toContain('OOM killed');
+
+    unsub();
+  });
+
+  it('shows agentId and reason for agent.canceled', () => {
+    const bus = createEventBus();
+    const unsub = attachEventConsole(bus);
+
+    bus.emit(makeEvent({
+      type: 'agent.canceled',
+      data: { handleId: 'h1', agentId: 'worker', oldState: 'running', newState: 'canceled', reason: 'user request' },
+    }));
+
+    const output = stripAnsi(writeSpy.mock.calls[0][0] as string);
+    expect(output).toContain('agent.canceled');
+    expect(output).toContain('worker');
+    expect(output).toContain('user request');
+
+    unsub();
+  });
+
+  it('shows agentId and reason for agent.interrupt', () => {
+    const bus = createEventBus();
+    const unsub = attachEventConsole(bus);
+
+    bus.emit(makeEvent({
+      type: 'agent.interrupt',
+      data: { handleId: 'h1', agentId: 'worker', reason: 'timeout', previousState: 'running', userId: 'u1' },
+    }));
+
+    const output = stripAnsi(writeSpy.mock.calls[0][0] as string);
+    expect(output).toContain('agent.interrupt');
+    expect(output).toContain('worker');
+    expect(output).toContain('timeout');
+
+    unsub();
+  });
 });
 
 describe('attachJsonEventConsole', () => {

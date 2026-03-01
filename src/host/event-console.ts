@@ -104,6 +104,42 @@ function formatEvent(event: StreamEvent): { label: string; status: string } | nu
       return { label: 'server.ready', status: green(parts.join('  ')) };
     }
 
+    case 'agent.registered': {
+      const id = data.agentId ?? 'unknown';
+      const agentType = data.agentType ? ` (${data.agentType})` : '';
+      return { label: 'agent.registered', status: green(`${id}${agentType}`) };
+    }
+
+    case 'agent.state': {
+      const transition = `${data.oldState} → ${data.newState}`;
+      const who = data.agentId ? `${data.agentId}: ` : '';
+      return { label: 'agent.state', status: dim(`${who}${transition}`) };
+    }
+
+    case 'agent.completed': {
+      const id = data.agentId ?? 'unknown';
+      const result = data.result ? `: ${String(data.result).slice(0, 80)}` : '';
+      return { label: 'agent.completed', status: green(`${id}${result}`) };
+    }
+
+    case 'agent.failed': {
+      const id = data.agentId ?? 'unknown';
+      const err = data.error ? `: ${String(data.error).slice(0, 80)}` : '';
+      return { label: 'agent.failed', status: red(`${id}${err}`) };
+    }
+
+    case 'agent.canceled': {
+      const id = data.agentId ?? 'unknown';
+      const reason = data.reason ? `: ${String(data.reason).slice(0, 80)}` : '';
+      return { label: 'agent.canceled', status: yellow(`${id}${reason}`) };
+    }
+
+    case 'agent.interrupt': {
+      const id = data.agentId ?? 'unknown';
+      const reason = data.reason ? `: ${String(data.reason).slice(0, 80)}` : '';
+      return { label: 'agent.interrupt', status: yellow(`${id}${reason}`) };
+    }
+
     // Skip noisy per-chunk events
     case 'llm.chunk':
       return null;
