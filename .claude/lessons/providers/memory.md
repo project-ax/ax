@@ -1,5 +1,11 @@
 # Provider Lessons: Memory
 
+### Check dependency chain before implementing plan tasks — missing prereqs block you
+**Date:** 2026-03-02
+**Context:** Implementing Task 8 (MemoryFS Provider) which depends on Task 2 (ItemsStore). The ItemsStore had not been implemented yet, though the plan listed it as a prerequisite.
+**Lesson:** Before starting a plan task, verify that all dependency tasks listed in the plan's build order are actually implemented. The plan specifies "Task 8 depends on Tasks 2-7" but doesn't enforce it. Check for the actual source files, not just the plan text. If a prerequisite is missing, implement it inline -- the plan already has the full spec.
+**Tags:** memoryfs, dependencies, plan-execution, items-store
+
 ### Salience formula produces 0 at zero reinforcement — test ratios need nonzero counts
 **Date:** 2026-03-02
 **Context:** Implementing salience scoring. Tests compared ratios of scores with reinforcementCount: 0, which produces 0/0 = NaN because log(0+1) = log(1) = 0.

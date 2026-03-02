@@ -1,4 +1,4 @@
-// src/providers/memory/memoryfs/items-store.ts — SQLite-backed CRUD for MemoryFSItem rows
+// src/providers/memory/memoryfs/items-store.ts — SQLite CRUD for MemoryFS items
 import { randomUUID } from 'node:crypto';
 import { openDatabase, type SQLiteDatabase } from '../../../utils/sqlite.js';
 import type { MemoryFSItem } from './types.js';

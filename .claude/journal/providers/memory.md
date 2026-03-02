@@ -2,6 +2,14 @@
 
 Memory provider implementations, MemoryFS planning.
 
+## [2026-03-02 16:31] — Wire MemoryFS provider with items store, memorize pipeline, and salience ranking (Tasks 2+8 of 10)
+
+**Task:** Implement the MemoryFS provider (Task 8) which wires together items store, summary I/O, extractor, content hash, and salience scoring. Also implemented the missing ItemsStore (Task 2) as a prerequisite dependency.
+**What I did:** Created items-store.ts (SQLite CRUD class with dedup, reinforcement, scoped queries), provider.ts (MemoryProvider implementation with write/query/read/delete/list/memorize), index.ts (barrel export), and provider.test.ts (11 tests). The provider's memorize() runs the full inline pipeline: extractByRegex -> dedup/reinforce -> insert to SQLite -> update category summaries. query() searches items via LIKE and ranks by salience score. write() deduplicates via content hash.
+**Files touched:** src/providers/memory/memoryfs/items-store.ts (new), src/providers/memory/memoryfs/provider.ts (new), src/providers/memory/memoryfs/index.ts (new), tests/providers/memory/memoryfs/provider.test.ts (new)
+**Outcome:** Success -- all 11 provider tests pass, all 49 memoryfs tests pass
+**Notes:** Removed reinforce-on-read from the plan's spec to keep reads side-effect-free. The plan called for reinforce on every query() and read() access -- kept reinforce out of read() for cleaner semantics. ItemsStore uses openDatabase() from src/utils/sqlite.ts for runtime-agnostic SQLite (bun:sqlite / node:sqlite / better-sqlite3). dataFile('memory') resolves to $AX_HOME/data/memory which initDefaultCategories creates recursively.
+
 ## [2026-03-02 16:25] — Add LLM prompt templates for summary generation and patching (Task 7 of 10)
 
 **Task:** Implement LLM prompt templates for generating/updating category summaries and incremental CRUD patches. Adapted from memU's category_summary prompts. Pure string manipulation, no I/O.
