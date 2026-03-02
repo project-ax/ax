@@ -2,6 +2,14 @@
 
 Memory provider implementations, MemoryFS planning.
 
+## [2026-03-02 16:12] — Add content hashing with type-scoped dedup and ref IDs (Task 3 of 10)
+
+**Task:** Create deterministic content hashing for deduplication matching memU's compute_content_hash, plus short ref ID builder.
+**What I did:** Wrote test file first (TDD) with 6 tests covering determinism, type-scoping, whitespace normalization, case normalization, uniqueness, and ref ID slicing. Verified failure, then implemented computeContentHash (sha256 of "{type}:{normalized}" truncated to 16 hex chars) and buildRefId (first 6 chars).
+**Files touched:** src/providers/memory/memoryfs/content-hash.ts (new), tests/providers/memory/memoryfs/content-hash.test.ts (new)
+**Outcome:** Success — all 6 tests pass
+**Notes:** Pure function module with no I/O. Uses node:crypto createHash. Normalization: lowercase + collapse whitespace + trim.
+
 ## [2026-03-02 16:09] — Add SQLite items store (Task 2 of 10)
 
 **Task:** Create the SQLite-backed items store for CRUD on MemoryFSItem rows
