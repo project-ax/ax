@@ -4,6 +4,7 @@ Category-based organization of all journal entries. Total: 108 entries across 9 
 
 ## Entries
 
+- 2026-03-02 11:42 — Nest CANONICAL paths under /workspace, make mount root the CWD [providers/sandbox.md](providers/sandbox.md)
 - 2026-03-02 12:00 — Create MemoryFS v2 plan (files-first, memU-inspired) [docs/plans.md](docs/plans.md)
 - 2026-03-01 21:20 — Fix CI unhandled ENOENT in phase1.test.ts [testing/integration.md](testing/integration.md)
 - 2026-03-01 19:30 — Create MemoryFS implementation plan [providers/memory.md](providers/memory.md)

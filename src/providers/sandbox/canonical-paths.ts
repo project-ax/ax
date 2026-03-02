@@ -6,12 +6,13 @@
  * remap mounts to these short canonical paths. The LLM sees /scratch instead
  * of a deeply-nested host path, regardless of sandbox type.
  *
- * Canonical mount table:
- *   /scratch  — Session cwd/HOME (ephemeral, rw)
- *   /skills   — Merged agent + user skills (overlayfs, ro)
- *   /identity — Agent identity files: SOUL.md, etc. (ro)
- *   /agent    — Agent workspace, persistent shared files (ro)
- *   /user     — Per-user persistent storage (rw)
+ * Canonical mount table (all under /workspace, which is the CWD):
+ *   /workspace          — CWD/HOME (mount root)
+ *   /workspace/scratch  — Session working files (rw, lost when session ends)
+ *   /workspace/skills   — Merged agent + user skills (overlayfs, ro)
+ *   /workspace/identity — Agent identity files: SOUL.md, etc. (ro)
+ *   /workspace/agent    — Agent workspace, persistent shared files (ro)
+ *   /workspace/user     — Per-user persistent storage (ro, writes via IPC)
  *
  * Providers that support filesystem remapping (Docker, bwrap, nsjail) mount
  * directly to canonical paths. Providers that don't (seatbelt, subprocess)
@@ -25,11 +26,12 @@ import type { SandboxConfig } from './types.js';
 
 /** Canonical paths inside the sandbox — what the LLM sees. */
 export const CANONICAL = {
-  scratch:  '/scratch',
-  skills:   '/skills',
-  identity: '/identity',
-  agent:    '/agent',
-  user:     '/user',
+  root:     '/workspace',
+  scratch:  '/workspace/scratch',
+  skills:   '/workspace/skills',
+  identity: '/workspace/identity',
+  agent:    '/workspace/agent',
+  user:     '/workspace/user',
 } as const;
 
 /**
@@ -39,7 +41,7 @@ export const CANONICAL = {
 export function canonicalEnv(config: SandboxConfig): Record<string, string> {
   return {
     AX_IPC_SOCKET: config.ipcSocket,
-    AX_WORKSPACE: CANONICAL.scratch,
+    AX_WORKSPACE: CANONICAL.root,
     AX_SKILLS: CANONICAL.skills,
     ...(config.agentDir        ? { AX_AGENT_DIR: CANONICAL.identity } : {}),
     ...(config.agentWorkspace  ? { AX_AGENT_WORKSPACE: CANONICAL.agent } : {}),
@@ -80,7 +82,7 @@ export function createCanonicalSymlinks(config: SandboxConfig): {
     symlinkSync(config.agentWorkspace, join(mountRoot, 'agent'));
   }
 
-  // user → per-user persistent workspace (read-write)
+  // user → per-user persistent workspace (read-only in sandbox, writes via IPC)
   if (config.userWorkspace) {
     symlinkSync(config.userWorkspace, join(mountRoot, 'user'));
   }
@@ -106,7 +108,7 @@ export function createCanonicalSymlinks(config: SandboxConfig): {
 export function symlinkEnv(config: SandboxConfig, mountRoot: string): Record<string, string> {
   return {
     AX_IPC_SOCKET: config.ipcSocket,
-    AX_WORKSPACE: join(mountRoot, 'scratch'),
+    AX_WORKSPACE: mountRoot,
     AX_SKILLS: join(mountRoot, 'skills'),
     ...(config.agentDir        ? { AX_AGENT_DIR: join(mountRoot, 'identity') } : {}),
     ...(config.agentWorkspace  ? { AX_AGENT_WORKSPACE: join(mountRoot, 'agent') } : {}),

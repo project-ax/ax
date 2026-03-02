@@ -38,11 +38,11 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         '-D', `MOUNT_ROOT=${mountRoot}`,
         cmd, ...args,
       ], {
-        cwd: sEnv.AX_WORKSPACE,
+        cwd: mountRoot,
         env: {
           // Minimal env — canonical symlink paths so the LLM sees simple /workspace-like paths
           PATH: process.env.PATH ?? '/usr/bin:/usr/local/bin',
-          HOME: sEnv.AX_WORKSPACE,
+          HOME: mountRoot,
           ...sEnv,
         },
         stdio: ['pipe', 'pipe', 'pipe'],

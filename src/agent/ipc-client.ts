@@ -14,6 +14,8 @@ export interface IPCClientOptions {
   maxReconnectAttempts?: number;
   /** Session ID included in every IPC request for host-side scoping. */
   sessionId?: string;
+  /** User ID included in every IPC request for per-user scoping. */
+  userId?: string;
 }
 
 export class IPCClient {
@@ -21,6 +23,7 @@ export class IPCClient {
   private timeoutMs: number;
   private maxReconnectAttempts: number;
   private sessionId?: string;
+  private userId?: string;
   private socket: Socket | null = null;
   private connected = false;
 
@@ -29,6 +32,7 @@ export class IPCClient {
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxReconnectAttempts = opts.maxReconnectAttempts ?? MAX_RECONNECT_ATTEMPTS;
     this.sessionId = opts.sessionId;
+    this.userId = opts.userId;
   }
 
   async connect(): Promise<void> {
@@ -106,7 +110,11 @@ export class IPCClient {
     const action = request.action as string ?? 'unknown';
     const callStart = Date.now();
     const socket = this.socket!;
-    const enriched = this.sessionId ? { ...request, _sessionId: this.sessionId } : request;
+    const enriched = {
+      ...request,
+      ...(this.sessionId ? { _sessionId: this.sessionId } : {}),
+      ...(this.userId ? { _userId: this.userId } : {}),
+    };
     const payload = Buffer.from(JSON.stringify(enriched), 'utf-8');
     const lenBuf = Buffer.alloc(4);
     lenBuf.writeUInt32BE(payload.length, 0);

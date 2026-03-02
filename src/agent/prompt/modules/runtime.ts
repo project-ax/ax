@@ -4,23 +4,6 @@ import { isBootstrapMode } from '../types.js';
 import type { PromptContext } from '../types.js';
 
 /**
- * Sanitize workspace path for display in the prompt.
- *
- * With canonical sandbox paths, the workspace is already at a clean path
- * like /workspace (Docker/bwrap/nsjail) or /tmp/.ax-mounts-xxx/workspace
- * (seatbelt/subprocess). We display it as ./workspace for simplicity.
- */
-function sanitizeWorkspacePath(fullPath: string): string {
-  // Canonical path from Docker/bwrap/nsjail
-  if (fullPath === '/workspace') return './workspace';
-  // Symlink-based path from seatbelt/subprocess
-  if (fullPath.includes('.ax-mounts-') && fullPath.endsWith('/workspace')) return './workspace';
-  // Legacy host paths (backward compat)
-  if (fullPath.includes('/workspaces/') || fullPath.includes('/ax-ws-')) return './workspace';
-  return './workspace';
-}
-
-/**
  * Format current local time as ISO 8601 with UTC offset, e.g. "2026-02-21T20:45:00-05:00".
  */
 function localISOString(now: Date = new Date()): string {
@@ -72,7 +55,7 @@ export class RuntimeModule extends BasePromptModule {
       `**Agent Type**: ${ctx.agentType}`,
       `**Sandbox**: ${ctx.sandboxType}`,
       `**Security Profile**: ${ctx.profile}`,
-      `**Workspace**: ${sanitizeWorkspacePath(ctx.workspace)}`,
+      `**Working Directory**: . (use ./scratch for working files)`,
       `**Current Time**: ${cacheStableTime()}`,
     ];
 
@@ -81,10 +64,10 @@ export class RuntimeModule extends BasePromptModule {
       lines.push(`**Agent ID**: ${ctx.agentId}`);
     }
     if (ctx.hasWorkspaceTiers) {
-      lines.push('', '### Workspace',
-        '- **Working directory** (`/scratch`): Ephemeral space. Local tools (write, read, edit) operate here by default.',
-        '- **agent** (`/agent`): Persistent shared files (read-only in sandbox). Use `workspace({ type: "write", tier: "agent" })` to write via IPC.',
-        '- **user** (`/user`): Your personal persistent files. Use `workspace({ type: "write", tier: "user" })`.',
+      lines.push('', '### Storage Tiers',
+        '- **Scratch** (`./scratch`): Session workspace. Persists between messages, lost when session ends. Use relative paths with local tools (write, read, edit, bash).',
+        '- **Agent tier** (`./agent`): Persistent shared files, mounted read-only. Read directly with local tools. To write, use `workspace({ type: "write", tier: "agent", path: "...", content: "..." })`.',
+        '- **User tier** (`./user`): Your personal persistent files, mounted read-only. Read directly with local tools. To write, use `workspace({ type: "write", tier: "user", path: "...", content: "..." })`.',
       );
     }
     if (ctx.hasGovernance) {

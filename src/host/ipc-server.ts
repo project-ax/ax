@@ -148,16 +148,22 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
 
     const actionName = envelope.data.action;
 
-    // If the agent included a _sessionId, use it to scope this request
-    // (e.g. for per-session image generation tracking).
-    // Strip _sessionId before schema validation — strictObject schemas reject unknown fields.
+    // If the agent included a _sessionId or _userId, use them to scope this request
+    // (e.g. for per-session image generation tracking, per-user workspace writes).
+    // Strip metadata fields before schema validation — strictObject schemas reject unknown fields.
     const requestSessionId = (parsed as Record<string, unknown>)._sessionId;
     if (requestSessionId !== undefined) {
       delete (parsed as Record<string, unknown>)._sessionId;
     }
-    const effectiveCtx = typeof requestSessionId === 'string'
-      ? { ...ctx, sessionId: requestSessionId }
-      : ctx;
+    const requestUserId = (parsed as Record<string, unknown>)._userId;
+    if (requestUserId !== undefined) {
+      delete (parsed as Record<string, unknown>)._userId;
+    }
+    const effectiveCtx = {
+      ...ctx,
+      ...(typeof requestSessionId === 'string' ? { sessionId: requestSessionId } : {}),
+      ...(typeof requestUserId === 'string' ? { userId: requestUserId } : {}),
+    };
 
     logger.debug('action_parsed', { action: actionName });
 

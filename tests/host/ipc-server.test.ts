@@ -167,6 +167,28 @@ describe('IPC Handler', () => {
     expect(result.ok).toBe(false);
   });
 
+  test('strips _sessionId from request and uses it for context', async () => {
+    const payload = JSON.stringify({
+      action: 'skill_list',
+      _sessionId: 'override-session',
+    });
+    // _sessionId should be stripped before schema validation (strict mode)
+    // so the request succeeds instead of being rejected for extra fields
+    const result = JSON.parse(await handle(payload, ctx));
+    expect(result.ok).toBe(true);
+  });
+
+  test('strips _userId from request and uses it for context', async () => {
+    const payload = JSON.stringify({
+      action: 'skill_list',
+      _userId: 'vinay@canopyworks.com',
+    });
+    // _userId should be stripped before schema validation (strict mode)
+    // so the request succeeds instead of being rejected for extra fields
+    const result = JSON.parse(await handle(payload, ctx));
+    expect(result.ok).toBe(true);
+  });
+
   test('forwards tools to LLM provider', async () => {
     const receivedReq: any[] = [];
     const registry = mockRegistry();

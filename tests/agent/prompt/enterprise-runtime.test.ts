@@ -49,11 +49,12 @@ describe('RuntimeModule enterprise features', () => {
     const lines = mod.render(ctx);
     const content = lines.join('\n');
 
-    expect(content).toContain('### Workspace');
-    expect(content).toContain('agent');
-    expect(content).toContain('user');
-    expect(content).toContain('/agent');
-    expect(content).toContain('/user');
+    expect(content).toContain('### Storage Tiers');
+    expect(content).toContain('Agent tier');
+    expect(content).toContain('User tier');
+    expect(content).toContain('./scratch');
+    expect(content).toContain('./agent');
+    expect(content).toContain('./user');
   });
 
   test('includes governance docs when hasGovernance is true', () => {
@@ -78,7 +79,7 @@ describe('RuntimeModule enterprise features', () => {
     const content = lines.join('\n');
 
     expect(content).toContain('**Agent ID**: main');
-    expect(content).toContain('### Workspace');
+    expect(content).toContain('### Storage Tiers');
     expect(content).toContain('### Governance');
   });
 });

@@ -56,7 +56,7 @@ describe('RuntimeModule', () => {
     expect(mod.optional).toBe(true);
   });
 
-  test('sanitizes absolute workspace path — never leaks host username', () => {
+  test('never leaks host workspace path', () => {
     const mod = new RuntimeModule();
     const text = mod.render(makeContext({
       workspace: '/Users/vpulim/.ax/data/workspaces/main/cli/default',
@@ -64,27 +64,32 @@ describe('RuntimeModule', () => {
     expect(text).not.toContain('vpulim');
     expect(text).not.toContain('/Users/');
     expect(text).not.toContain('.ax/data');
-    expect(text).toContain('./workspace');
+    expect(text).toContain('Working Directory');
+    expect(text).toContain('./scratch');
   });
 
-  test('sanitizes temp workspace path', () => {
+  test('uses static working directory label regardless of workspace path', () => {
     const mod = new RuntimeModule();
     const text = mod.render(makeContext({
       workspace: '/tmp/ax-ws-abc123',
     })).join('\n');
     expect(text).not.toContain('/tmp/');
     expect(text).not.toContain('ax-ws-');
-    expect(text).toContain('./workspace');
+    expect(text).toContain('Working Directory');
   });
 
-  test('sanitizes any unknown workspace path', () => {
+  test('uses relative paths like ./scratch, ./agent, ./user for workspace tiers', () => {
     const mod = new RuntimeModule();
     const text = mod.render(makeContext({
       workspace: '/home/someuser/random/path',
+      hasWorkspaceTiers: true,
     })).join('\n');
     expect(text).not.toContain('someuser');
     expect(text).not.toContain('/home/');
-    expect(text).toContain('./workspace');
+    expect(text).toContain('./scratch');
+    expect(text).toContain('./agent');
+    expect(text).toContain('./user');
+    expect(text).toContain('Working Directory');
   });
 
   test('renders cache-stable time as ISO 8601 with timezone offset', () => {

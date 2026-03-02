@@ -37,7 +37,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
 
         // Mount workspace (read-write) — canonical /scratch
         '--bindmount', `${config.workspace}:${CANONICAL.scratch}`,
-        '--cwd', CANONICAL.scratch,
+        '--cwd', CANONICAL.root,
 
         // Mount skills (read-only) — canonical /skills
         '--bindmount_ro', `${config.skills}:${CANONICAL.skills}`,
@@ -47,7 +47,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
 
         // Enterprise mounts — canonical paths
         ...(config.agentWorkspace ? ['--bindmount_ro', `${config.agentWorkspace}:${CANONICAL.agent}`] : []),
-        ...(config.userWorkspace ? ['--bindmount', `${config.userWorkspace}:${CANONICAL.user}`] : []),
+        ...(config.userWorkspace ? ['--bindmount_ro', `${config.userWorkspace}:${CANONICAL.user}`] : []),
 
         // Mount IPC socket directory
         '--bindmount', `${resolve(config.ipcSocket, '..')}:${resolve(config.ipcSocket, '..')}`,
@@ -66,7 +66,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
 
         // Minimal env — canonical paths so the LLM sees simple /scratch
         '--env', `PATH=${process.env.PATH ?? '/usr/bin:/usr/local/bin'}`,
-        '--env', `HOME=${CANONICAL.scratch}`,
+        '--env', `HOME=${CANONICAL.root}`,
         ...Object.entries(canonicalEnv(config)).flatMap(([k, v]) => ['--env', `${k}=${v}`]),
 
         // Command

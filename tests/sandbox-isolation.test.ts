@@ -81,8 +81,8 @@ describe('seatbelt sandbox env isolation', () => {
     // Must NOT spread process.env
     expect(envBlock).not.toContain('...process.env');
 
-    // HOME should be set to canonical workspace symlink path, not host path
-    expect(envBlock).toContain('HOME: sEnv.AX_WORKSPACE');
+    // HOME should be set to mount root (canonical workspace root), not host path
+    expect(envBlock).toContain('HOME: mountRoot');
 
     // Must use createCanonicalSymlinks and symlinkEnv
     expect(source).toContain('createCanonicalSymlinks');
@@ -195,8 +195,8 @@ describe('subprocess sandbox env leak (dev-only fallback)', () => {
 
     const env = JSON.parse(output.trim());
     expect(env.ipc).toBe('/tmp/test-ipc.sock');
-    // Canonical symlink paths: /tmp/.ax-mounts-<uuid>/scratch and /tmp/.ax-mounts-<uuid>/skills
-    expect(env.ws).toMatch(/\/tmp\/\.ax-mounts-[a-f0-9]+\/scratch$/);
+    // AX_WORKSPACE is now the mount root, AX_SKILLS is under mount root
+    expect(env.ws).toMatch(/\/tmp\/\.ax-mounts-[a-f0-9]+$/);
     expect(env.sk).toMatch(/\/tmp\/\.ax-mounts-[a-f0-9]+\/skills$/);
     } finally {
       rmSync(ws, { recursive: true, force: true });

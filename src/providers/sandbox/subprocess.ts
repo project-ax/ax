@@ -22,7 +22,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
       const [cmd, ...args] = config.command;
       // nosemgrep: javascript.lang.security.detect-child-process — sandbox provider: spawning is its purpose
       const child = spawn(cmd, args, {
-        cwd: sEnv.AX_WORKSPACE,
+        cwd: mountRoot,
         env: {
           ...process.env,
           ...sEnv,

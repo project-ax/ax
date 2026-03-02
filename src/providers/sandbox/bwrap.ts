@@ -59,7 +59,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
 
         // Enterprise mounts — canonical paths
         ...(config.agentWorkspace ? ['--ro-bind', config.agentWorkspace, CANONICAL.agent] : []),
-        ...(config.userWorkspace ? ['--bind', config.userWorkspace, CANONICAL.user] : []),
+        ...(config.userWorkspace ? ['--ro-bind', config.userWorkspace, CANONICAL.user] : []),
 
         // IPC socket directory (read-write)
         '--bind', ipcSocketDir, ipcSocketDir,
@@ -84,11 +84,11 @@ export async function create(_config: Config): Promise<SandboxProvider> {
 
         // Minimal environment — canonical paths so the LLM sees simple /scratch
         '--setenv', 'PATH', process.env.PATH ?? '/usr/bin:/usr/local/bin',
-        '--setenv', 'HOME', CANONICAL.scratch,
+        '--setenv', 'HOME', CANONICAL.root,
         ...Object.entries(canonicalEnv(config)).flatMap(([k, v]) => ['--setenv', k, v]),
 
-        // Working directory — canonical
-        '--chdir', CANONICAL.scratch,
+        // Working directory — canonical mount root
+        '--chdir', CANONICAL.root,
 
         // Command to run
         '--', cmd, ...args,

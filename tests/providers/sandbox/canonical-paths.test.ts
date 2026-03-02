@@ -30,24 +30,28 @@ function mockSandboxConfig(overrides?: Partial<SandboxConfig>): SandboxConfig {
 }
 
 describe('CANONICAL constants', () => {
-  test('scratch is /scratch (session workspace)', () => {
-    expect(CANONICAL.scratch).toBe('/scratch');
+  test('root is /workspace (mount root / CWD)', () => {
+    expect(CANONICAL.root).toBe('/workspace');
   });
 
-  test('skills is /skills (merged overlayfs mount)', () => {
-    expect(CANONICAL.skills).toBe('/skills');
+  test('scratch is /workspace/scratch (session workspace)', () => {
+    expect(CANONICAL.scratch).toBe('/workspace/scratch');
   });
 
-  test('identity is /identity (identity files)', () => {
-    expect(CANONICAL.identity).toBe('/identity');
+  test('skills is /workspace/skills (merged overlayfs mount)', () => {
+    expect(CANONICAL.skills).toBe('/workspace/skills');
   });
 
-  test('agent is /agent (agent workspace)', () => {
-    expect(CANONICAL.agent).toBe('/agent');
+  test('identity is /workspace/identity (identity files)', () => {
+    expect(CANONICAL.identity).toBe('/workspace/identity');
   });
 
-  test('user is /user (per-user persistent storage)', () => {
-    expect(CANONICAL.user).toBe('/user');
+  test('agent is /workspace/agent (agent workspace)', () => {
+    expect(CANONICAL.agent).toBe('/workspace/agent');
+  });
+
+  test('user is /workspace/user (per-user persistent storage)', () => {
+    expect(CANONICAL.user).toBe('/workspace/user');
   });
 });
 
@@ -56,8 +60,8 @@ describe('canonicalEnv', () => {
     const config = mockSandboxConfig();
     const env = canonicalEnv(config);
 
-    expect(env.AX_WORKSPACE).toBe('/scratch');
-    expect(env.AX_SKILLS).toBe('/skills');
+    expect(env.AX_WORKSPACE).toBe('/workspace');
+    expect(env.AX_SKILLS).toBe('/workspace/skills');
     expect(env.AX_IPC_SOCKET).toBe(config.ipcSocket);
   });
 
@@ -75,9 +79,9 @@ describe('canonicalEnv', () => {
       userWorkspace: '/home/alice/.ax/agents/main/users/alice/workspace',
     }));
 
-    expect(envFull.AX_AGENT_DIR).toBe('/identity');
-    expect(envFull.AX_AGENT_WORKSPACE).toBe('/agent');
-    expect(envFull.AX_USER_WORKSPACE).toBe('/user');
+    expect(envFull.AX_AGENT_DIR).toBe('/workspace/identity');
+    expect(envFull.AX_AGENT_WORKSPACE).toBe('/workspace/agent');
+    expect(envFull.AX_USER_WORKSPACE).toBe('/workspace/user');
   });
 
   test('redirects caches to /tmp', () => {
@@ -171,7 +175,7 @@ describe('symlinkEnv', () => {
 
     const env = symlinkEnv(config, mountRoot);
 
-    expect(env.AX_WORKSPACE).toBe(join(mountRoot, 'scratch'));
+    expect(env.AX_WORKSPACE).toBe(mountRoot);
     expect(env.AX_SKILLS).toBe(join(mountRoot, 'skills'));
     expect(env.AX_IPC_SOCKET).toBe(config.ipcSocket);
   });

@@ -85,10 +85,10 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         ...(config.agentDir ? ['-v', `${config.agentDir}:${CANONICAL.identity}:ro`] : []),
         // Enterprise mounts — canonical paths
         ...(config.agentWorkspace ? ['-v', `${config.agentWorkspace}:${CANONICAL.agent}:ro`] : []),
-        ...(config.userWorkspace ? ['-v', `${config.userWorkspace}:${CANONICAL.user}:rw`] : []),
+        ...(config.userWorkspace ? ['-v', `${config.userWorkspace}:${CANONICAL.user}:ro`] : []),
 
-        // Working directory — canonical
-        '-w', CANONICAL.scratch,
+        // Working directory — canonical mount root
+        '-w', CANONICAL.root,
 
         // Environment — canonical paths
         ...Object.entries(canonicalEnv(config)).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
