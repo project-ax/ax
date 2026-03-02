@@ -2,6 +2,14 @@
 
 Memory provider implementations, MemoryFS planning.
 
+## [2026-03-02 16:25] — Add LLM prompt templates for summary generation and patching (Task 7 of 10)
+
+**Task:** Implement LLM prompt templates for generating/updating category summaries and incremental CRUD patches. Adapted from memU's category_summary prompts. Pure string manipulation, no I/O.
+**What I did:** Wrote test file first (TDD) with 7 tests covering buildSummaryPrompt (category/length/items inclusion, original content passthrough), buildSummaryPromptWithRefs (ref ID formatting with [refId] and [ref: instructions), buildPatchPrompt (category/content/update formatting), and parsePatchResponse (true case, false case, malformed JSON graceful fallback). Verified failure, then implemented all four exported functions.
+**Files touched:** src/providers/memory/memoryfs/prompts.ts (new), tests/providers/memory/memoryfs/prompts.test.ts (new)
+**Outcome:** Success -- all 7 tests pass
+**Notes:** Three prompt builders: buildSummaryPrompt (merge without refs), buildSummaryPromptWithRefs (merge with [ref:ITEM_ID] citation tracking), buildPatchPrompt (incremental CRUD deciding need_update true/false). parsePatchResponse uses regex to extract JSON from LLM output and gracefully handles malformed responses by returning needUpdate: false.
+
 ## [2026-03-02 16:22] — Add regex extractor with six memory types (Task 6 of 10)
 
 **Task:** Implement regex-based memory extraction from conversation turns. Fast path (no LLM call) that outputs structured MemoryFSItem candidates with the six memory types.
