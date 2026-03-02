@@ -31,9 +31,10 @@ const _PROVIDER_MAP = {
     mock:       '../providers/image/mock.js',
   },
   memory: {
-    file:   '../providers/memory/file.js',
-    sqlite: '../providers/memory/sqlite.js',
-    memu:   '../providers/memory/memu.js',
+    file:     '../providers/memory/file.js',
+    sqlite:   '../providers/memory/sqlite.js',
+    memu:     '../providers/memory/memu.js',
+    memoryfs: '../providers/memory/memoryfs/index.js',
   },
   scanner: {
     basic:     '../providers/scanner/basic.js',
