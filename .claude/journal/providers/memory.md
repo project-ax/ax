@@ -2,6 +2,14 @@
 
 Memory provider implementations, MemoryFS planning.
 
+## [2026-03-02 16:34] — Add full lifecycle integration test (Task 10 of 10)
+
+**Task:** Create end-to-end integration test exercising the complete MemoryFS pipeline through the public MemoryProvider interface.
+**What I did:** Wrote integration.test.ts with 5 tests: full lifecycle (memorize -> query -> reinforcement), dedup (same fact twice -> one entry reinforced), write+read+delete round-trip, scope isolation, and summary file creation verification. All tests exercise the provider through its public interface with a real temp directory and SQLite database.
+**Files touched:** tests/providers/memory/memoryfs/integration.test.ts (new)
+**Outcome:** Success -- all 5 tests pass in 32ms
+**Notes:** This completes all 10 tasks in the MemoryFS v2 plan. Total: 54 tests across 8 test files. The integration test validates that extractor, content-hash, items-store, summary-io, and salience all work together correctly through the provider facade.
+
 ## [2026-03-02 16:31] — Wire MemoryFS provider with items store, memorize pipeline, and salience ranking (Tasks 2+8 of 10)
 
 **Task:** Implement the MemoryFS provider (Task 8) which wires together items store, summary I/O, extractor, content hash, and salience scoring. Also implemented the missing ItemsStore (Task 2) as a prerequisite dependency.
