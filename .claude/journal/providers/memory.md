@@ -2,6 +2,14 @@
 
 Memory provider implementations, MemoryFS planning.
 
+## [2026-03-02 16:22] — Add regex extractor with six memory types (Task 6 of 10)
+
+**Task:** Implement regex-based memory extraction from conversation turns. Fast path (no LLM call) that outputs structured MemoryFSItem candidates with the six memory types.
+**What I did:** Wrote test file first (TDD) with 6 tests covering explicit memory requests (profile), preferences (profile), action items (behavior), assistant turn filtering, 20-item cap, and field population (contentHash, scope, timestamps). Verified failure, then implemented extractByRegex function with three regex patterns and defaultCategoryForType mapping.
+**Files touched:** src/providers/memory/memoryfs/extractor.ts (new), tests/providers/memory/memoryfs/extractor.test.ts (new)
+**Outcome:** Success -- all 6 tests pass
+**Notes:** Three regex patterns: explicit memory requests (confidence 0.95), preferences (0.7), and TODO/action items (0.8). Preference regex skipped if remember regex already matched to avoid duplicates. Max 20 items per conversation. Returns Omit<MemoryFSItem, 'id'> since IDs are assigned by the store layer.
+
 ## [2026-03-02 16:19] — Add salience scoring with memU formula (Task 5 of 10)
 
 **Task:** Implement memU's salience scoring formula: similarity * log(reinforcement + 1) * exp(-0.693 * days / half_life). Pure math, no I/O.
