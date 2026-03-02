@@ -1,9 +1,10 @@
 # Providers
 
-Provider implementations: image, channel, skills, sandbox, memory, LLM.
+Provider implementations: image, channel, skills, sandbox, memory, LLM, scheduler.
 
 ## Entries
 
+- 2026-03-02 12:00 — Create plainjob scheduler implementation plan [scheduler.md](scheduler.md)
 - 2026-03-01 19:30 — Create MemoryFS implementation plan [memory.md](memory.md)
 - 2026-03-01 15:57 — Rename canonical paths: /agent->/identity, /shared->/agent [sandbox.md](sandbox.md)
 - 2026-02-27 14:30 — Create exploring-reference-repos skill [skills.md](skills.md)
