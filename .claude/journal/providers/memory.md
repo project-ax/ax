@@ -2,6 +2,14 @@
 
 Memory provider implementations, MemoryFS planning.
 
+## [2026-03-02 16:15] — Add summary file I/O with atomic writes (Task 4 of 10)
+
+**Task:** Implement read/write for category summary .md files with safePath() for path safety and atomic writes via temp-then-rename.
+**What I did:** Wrote test file first (TDD) with 9 tests covering round-trip, null for missing, overwrite, listing, underscore exclusion, categoryExists, initDefaultCategories (10 defaults), path traversal sanitization, and atomic write verification. Verified failure, then implemented writeSummary, readSummary, listCategories, categoryExists, initDefaultCategories.
+**Files touched:** src/providers/memory/memoryfs/summary-io.ts (new), tests/providers/memory/memoryfs/summary-io.test.ts (new)
+**Outcome:** Success — all 9 tests pass
+**Notes:** safePath() sanitizes traversal attempts (replaces .. and / with _) rather than throwing, so the path traversal test verifies files stay inside memoryDir rather than expecting an exception. Atomic writes use randomUUID for temp file suffix.
+
 ## [2026-03-02 16:12] — Add content hashing with type-scoped dedup and ref IDs (Task 3 of 10)
 
 **Task:** Create deterministic content hashing for deduplication matching memU's compute_content_hash, plus short ref ID builder.
