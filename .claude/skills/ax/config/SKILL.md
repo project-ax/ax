@@ -45,7 +45,24 @@ Validated by `ConfigSchema` (Zod `strictObject` -- rejects unknown keys).
 | `max_tokens` | number (256-200000) | 8192 | Max tokens for LLM calls |
 | `sandbox` | object | required | `timeout_sec` (1-3600), `memory_mb` (64-8192) |
 | `scheduler` | object | required | `active_hours`, `max_token_budget`, `heartbeat_interval_min`, optional `agent_dir` and `defaultDelivery` |
-| `history` | object | `{max_turns:50, thread_context_turns:5}` | Conversation retention settings |
+| `history` | object | see below | Conversation retention and memory recall settings |
+| `history.max_turns` | number | 50 | Max conversation turns to retain |
+| `history.thread_context_turns` | number | 5 | Turns to include from parent thread |
+| `history.summarize` | boolean | false | Enable LLM-powered history summarization |
+| `history.summarize_threshold` | number | 40 | Turn count threshold to trigger summarization |
+| `history.summarize_keep_recent` | number | 10 | Recent turns to keep unsummarized |
+| `history.memory_recall` | boolean | false | Enable semantic memory recall injection |
+| `history.memory_recall_limit` | number | 5 | Max memory items to inject per turn |
+| `history.memory_recall_scope` | string | `'*'` | Memory scope to search (wildcard for all) |
+| `history.embedding_model` | string | `'text-embedding-3-small'` | Model for embedding generation |
+| `history.embedding_dimensions` | number | 1536 | Embedding vector dimensions |
+| `webhooks` | object | optional | Inbound webhook configuration |
+| `webhooks.enabled` | boolean | false | Enable webhook endpoint |
+| `webhooks.token` | string | required if enabled | Authentication token for webhook calls |
+| `webhooks.path` | string | optional | Custom webhook URL path |
+| `webhooks.max_body_bytes` | number | optional | Max request body size |
+| `webhooks.model` | string | optional | LLM model for webhook transforms |
+| `webhooks.allowed_agent_ids` | string[] | optional | Restrict which agents webhooks can target |
 | `delegation` | object | optional | `max_concurrent` (1-10, default 3), `max_depth` (1-5, default 2) |
 
 ## Models Configuration

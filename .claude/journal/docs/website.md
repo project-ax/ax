@@ -2,6 +2,16 @@
 
 README.md updates, docs/web site updates, warning banners, GitHub Pages deployment.
 
+## [2026-03-03 12:00] — Sync ax/* skills and docs/web with codebase changes
+
+**Task:** Update all ax/* skill files and docs/web/index.html to reflect codebase changes since last documentation update
+**What I did:**
+- Updated 12 skill files across provider-llm (added DeepInfra), provider-credentials (removed encrypted, renamed env→plaintext), provider-sandbox (added bwrap), provider-memory (added memoryfs v2), provider-scheduler (added plainjob + full), provider-system (added groq image), host (added orchestration subsystem, webhooks, history summarizer, memory recall, 13 new IPC handler files), ipc (added 11 orchestration/delegation/identity actions), utils (added embedding-client, openai-compat, circuit-breaker, database, migrator), config (added history.summarize/memory_recall fields, webhooks config), testing (added acceptance tests, new test categories), persistence (added job-store, session-store)
+- Updated docs/web/index.html: provider count 43→46, test files 170→199, TS lines 10700→27600, "Encrypted Credentials"→"Secure Credentials" (encrypted provider removed), og:description updated
+**Files touched:** 12 .claude/skills/ax/ SKILL.md files, docs/web/index.html
+**Outcome:** Success — skills and docs now accurately reflect current codebase state (46 providers, 13 categories, 199 tests, ~27.6k LoC)
+**Notes:** Major additions since last update: orchestration subsystem, MemoryFS v2 (embedding-based), plainjob scheduler, DeepInfra LLM, webhook transforms, history summarization, memory recall. Encrypted credential provider was removed.
+
 ## [2026-02-28 18:00] — Move warning banner below navbar
 
 **Task:** Reposition the dev warning banner to appear below the main navigation header instead of above it

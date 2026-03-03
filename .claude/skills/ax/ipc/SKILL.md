@@ -55,6 +55,15 @@ Shared validators: `safeString(maxLen)`, `scopeName`, `uuid`, `pathSegment`.
 | Workspace   | `workspace_write_file` | `tier`, `path`, `data` (base64), `mimeType`               | `ok`                          |
 | Audit       | `audit_query`          | `filter?` (action, sessionId, since, until, limit)        | `entries`                     |
 | Delegation  | `agent_delegate`       | `task`, `context?`, `runner?`, `model?`, `maxTokens?`, `timeoutSec?` | `response`             |
+| Delegation  | `agent_collect`        | `delegationId`                                            | `response`                    |
+| Orchestration | `agent_orch_status`  | `agentId?`                                                | `status`                      |
+| Orchestration | `agent_orch_list`    | `sessionId?`                                              | `agents`                      |
+| Orchestration | `agent_orch_tree`    | `agentId?`                                                | `tree`                        |
+| Orchestration | `agent_orch_message` | `targetAgentId`, `content`                                | `ok`                          |
+| Orchestration | `agent_orch_poll`    | (none)                                                    | `messages`                    |
+| Orchestration | `agent_orch_interrupt` | `agentId`                                               | `ok`                          |
+| Orchestration | `agent_orch_timeline`| `agentId?`, `since?`                                     | `events`                      |
+| Identity    | `identity_read`        | `file`                                                    | `content`                     |
 | Identity    | `identity_write`       | `file` (SOUL.md/IDENTITY.md), `content`, `reason`, `origin` | `applied` or `queued`      |
 | Identity    | `identity_propose`     | `file`, `content`, `reason`, `origin`                     | `proposalId`                  |
 | User        | `user_write`           | `userId`, `content`, `reason`, `origin`                   | `applied` or `queued`         |

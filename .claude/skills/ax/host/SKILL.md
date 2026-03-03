@@ -20,9 +20,27 @@ The host subsystem is the trusted half of AX. It runs the HTTP server (OpenAI-co
 | `src/host/event-bus.ts` | Typed pub/sub for real-time completion observability, global + per-request listeners |
 | `src/host/router.ts` | Inbound scan + taint-wrap + canary inject; outbound scan + canary check |
 | `src/host/ipc-server.ts` | Unix socket server, IPC action dispatch, Zod validation, taint budget gate, heartbeat, event emission |
-| `src/host/ipc-handlers/image.ts` | Image generation handler, in-memory image storage per session |
+| `src/host/ipc-handlers/browser.ts` | Browser automation IPC handlers |
 | `src/host/ipc-handlers/delegation.ts` | Agent delegation with depth/concurrency limits, zombie counter prevention |
+| `src/host/ipc-handlers/governance.ts` | Proposal list/review IPC handlers |
+| `src/host/ipc-handlers/identity.ts` | Identity read/write/propose IPC handlers |
+| `src/host/ipc-handlers/image.ts` | Image generation handler, in-memory image storage per session |
+| `src/host/ipc-handlers/llm.ts` | LLM call IPC handler with event emission |
+| `src/host/ipc-handlers/memory.ts` | Memory CRUD IPC handlers |
+| `src/host/ipc-handlers/orchestration.ts` | Agent orchestration IPC handlers (status, list, tree, message, poll, interrupt, timeline) |
 | `src/host/ipc-handlers/plugin.ts` | Plugin status/list queries (host-internal actions) |
+| `src/host/ipc-handlers/scheduler.ts` | Scheduler job management IPC handlers |
+| `src/host/ipc-handlers/skills.ts` | Skill read/list/propose/import/search IPC handlers |
+| `src/host/ipc-handlers/web.ts` | Web fetch/search IPC handlers |
+| `src/host/ipc-handlers/workspace.ts` | Workspace read/write/list IPC handlers |
+| `src/host/agent-registry.ts` | Enterprise agent registry (registry.json), lifecycle management |
+| `src/host/delivery.ts` | Delivery resolution for cron/heartbeat responses (CronDelivery handling) |
+| `src/host/event-console.ts` | Real-time event display with color-coded output |
+| `src/host/history-summarizer.ts` | Recursive conversation summarization with LLM |
+| `src/host/memory-recall.ts` | Memory recall integration with embeddings for context injection |
+| `src/host/oauth.ts` | OAuth token management (pre-flight + reactive 401 retry) |
+| `src/host/server-webhooks.ts` | Inbound webhook handler with LLM-powered transforms |
+| `src/host/webhook-transform.ts` | LLM-powered webhook payload transformation |
 | `src/host/plugin-host.ts` | Plugin lifecycle manager, integrity verification, process management, IPC proxy |
 | `src/host/plugin-lock.ts` | Plugin manifest pinning, SHA-512 integrity hashing, lock file I/O |
 | `src/host/plugin-manifest.ts` | Plugin capability schema, validation, human-readable formatting |
@@ -125,6 +143,32 @@ Typed pub/sub for real-time completion observability.
 - **Limits**: maxDepth (default 2), maxConcurrent (default 3)
 - **Zombie Counter Prevention**: `activeDelegations++` before any await, decremented in finally block
 - **Config Override**: optional runner/model/maxTokens/timeoutSec passed to processCompletion
+
+## Orchestration Subsystem (src/host/orchestration/)
+
+Multi-agent orchestration for parent-child delegation with lifecycle management:
+
+- **`orchestrator.ts`** -- Main orchestration engine, coordinates agent delegation and collection
+- **`agent-loop.ts`** -- Core agent execution loop
+- **`agent-supervisor.ts`** -- Agent lifecycle supervision and recovery
+- **`agent-directory.ts`** -- Active agent registration and lookup
+- **`heartbeat-monitor.ts`** -- Liveness detection for child agents
+- **`event-store.ts`** -- Audit trail for orchestration events
+- **`types.ts`** -- Orchestration types (AgentHandle, etc.)
+
+Key IPC actions: `agent_orch_status`, `agent_orch_list`, `agent_orch_tree`, `agent_orch_message`, `agent_orch_poll`, `agent_orch_interrupt`, `agent_orch_timeline`.
+
+## History Summarization & Memory Recall
+
+- **`history-summarizer.ts`** -- Recursive conversation summarization via LLM. Enables infinite-length conversations by condensing older turns.
+- **`memory-recall.ts`** -- Semantic embedding-based memory retrieval. Injects relevant memories into conversation context via `src/utils/embedding-client.ts`.
+
+## Webhooks (server-webhooks.ts + webhook-transform.ts)
+
+- **Inbound webhooks:** `POST /v1/webhooks` endpoint for external event ingestion
+- **LLM-powered transforms:** Markdown-based transform definitions convert external payloads to agent prompts
+- **Configurable:** Optional `agentId`, `sessionKey`, `model`, `timeoutSec` fields per transform
+- **Config:** `config.webhooks` with `enabled`, `token`, `path`, `max_body_bytes`, `model`, `allowed_agent_ids`
 
 ## Router (router.ts)
 

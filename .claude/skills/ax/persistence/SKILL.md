@@ -1,6 +1,6 @@
 ---
 name: ax-persistence
-description: Use when modifying data persistence — conversation history (SQLite), message queue, file store, or SQLite wrapper utilities in conversation-store.ts, file-store.ts, db.ts, or utils/sqlite.ts
+description: Use when modifying data persistence — conversation history (SQLite), message queue, file store, job store, session store, or SQLite wrapper utilities in conversation-store.ts, file-store.ts, db.ts, job-store.ts, session-store.ts, or utils/sqlite.ts
 ---
 
 ## Overview
@@ -15,6 +15,8 @@ AX persists data in SQLite databases under `~/.ax/data/`. `ConversationStore` ho
 | `src/file-store.ts` | File metadata store (fileId -> agentName, userId, mimeType) |
 | `src/db.ts` | Message queue with status-based lifecycle (pending/processing/done/error) |
 | `src/utils/sqlite.ts` | Runtime-agnostic SQLite adapter: bun:sqlite, node:sqlite (22.5+), better-sqlite3 |
+| `src/job-store.ts` | Scheduler job persistence (cron, one-shot jobs) |
+| `src/session-store.ts` | Session/channel history tracking for delivery resolution |
 | `src/migrations/files.ts` | Files table migration |
 
 ## ConversationStore
@@ -63,6 +65,18 @@ Retention: controlled by `config.history.max_turns` (default 50) and `config.his
 | `fail` | `(id)` | Sets status = error |
 | `pending` | `()` | Returns count of pending messages |
 | `close` | `()` | Closes the database connection |
+
+## JobStore
+
+- **DB**: `~/.ax/data/job-store.db`
+- **Purpose**: Persists scheduled jobs for the `plainjob` scheduler provider
+- **Used by**: `src/providers/scheduler/plainjob.ts`
+
+## SessionStore
+
+- **DB**: `~/.ax/data/sessions.db`
+- **Purpose**: Tracks session/channel history for delivery resolution (CronDelivery routing)
+- **Used by**: `src/host/delivery.ts`
 
 ## SQLite Wrapper (`utils/sqlite.ts`)
 

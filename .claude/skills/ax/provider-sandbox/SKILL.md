@@ -1,6 +1,6 @@
 ---
 name: ax-provider-sandbox
-description: Use when modifying agent sandbox isolation -- seatbelt (macOS), nsjail (Linux), Docker, or subprocess providers in src/providers/sandbox/
+description: Use when modifying agent sandbox isolation -- seatbelt (macOS), nsjail (Linux), bwrap (Linux), Docker, or subprocess providers in src/providers/sandbox/
 ---
 
 ## Overview
@@ -31,6 +31,7 @@ Sandbox providers isolate agent processes with zero network access, no credentia
 |------------|------------------|----------------|----------------------------------------|
 | seatbelt   | `seatbelt.ts`    | macOS          | sandbox-exec with .sb policy           |
 | nsjail     | `nsjail.ts`      | Linux          | Namespaces + seccomp-bpf (production)  |
+| bwrap      | `bwrap.ts`       | Linux          | Bubblewrap containerization            |
 | docker     | `docker.ts`      | Linux / macOS  | Container, --network=none, --cap-drop=ALL, optional gVisor |
 | subprocess | `subprocess.ts`  | Any            | None -- dev-only fallback, logs warning |
 
@@ -73,5 +74,5 @@ Production sandbox. `--clone_newnet` (no network), `--clone_newuser`, `--clone_n
 - **Node.js runtime needs specific filesystem allows** -- missing any causes silent SIGABRT (exit 134).
 - **Use direct binary paths** (`node_modules/.bin/tsx`) not `npx` inside sandboxes.
 - **Always have an integration test with the real sandbox**, not just subprocess fallback.
-- **New host paths must be added to ALL providers.** SandboxConfig, seatbelt (-D param + policy rule), nsjail (--bindmount_ro), docker (-v :ro).
+- **New host paths must be added to ALL providers.** SandboxConfig, seatbelt (-D param + policy rule), nsjail (--bindmount_ro), bwrap (--ro-bind), docker (-v :ro).
 - **EPERM on kill**: tsx-wrapped agents may throw EPERM on SIGTERM/SIGKILL. `enforceTimeout()` handles this with try/catch. Don't let it propagate.

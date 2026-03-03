@@ -78,11 +78,22 @@ tests/
   e2e/
     scenarios/
       delegation-stress.test.ts    # Delegation depth/concurrency stress tests
+  acceptance/              # Feature acceptance tests (live LLM)
+    fixtures/              # Shared test fixtures
+    memoryfs-v2/           # MemoryFS v2 acceptance tests
+    plainjob-scheduler/    # PlainJob scheduler acceptance tests
+    llm-webhook-transforms/ # Webhook transform acceptance tests
+    skills-install/        # Skills installation acceptance tests
+  migrations/              # Database migration tests
   sandbox-isolation.test.ts  # Tool count assertions
   ipc-fuzz.test.ts
   conversation-store.test.ts
   conversation-store-structured.test.ts  # ContentBlock[] serialization
+  conversation-store-summary.test.ts     # History summarization tests
   config.test.ts
+  config-history.test.ts                 # History config validation
+  job-store.test.ts                      # Scheduler job persistence
+  session-store.test.ts                  # Session/channel tracking
 ```
 
 ## Test Patterns
@@ -152,6 +163,9 @@ Since the skills were created, several new test categories have been added:
 - **Provider SDK tests**: `provider-sdk/harness.test.ts`, `interfaces.test.ts`
 - **Screener tests**: `providers/screener/static.test.ts` -- 5-layer static analysis
 - **Tool catalog sync tests**: `tool-catalog-sync.test.ts` -- verifies ipc-tools.ts and mcp-server.ts stay in sync
+- **Acceptance tests**: `tests/acceptance/` -- feature-level tests against live AX server with real LLM calls. Covers MemoryFS v2, plainjob scheduler, webhook transforms, and skills installation
+- **History/memory tests**: `conversation-store-summary.test.ts`, `config-history.test.ts` -- conversation summarization and memory recall
+- **Persistence tests**: `job-store.test.ts`, `session-store.test.ts` -- scheduler jobs and session tracking
 
 ## Common Tasks
 

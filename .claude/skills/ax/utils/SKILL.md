@@ -1,6 +1,6 @@
 ---
 name: ax-utils
-description: Use when working with path validation (safePath), SQLite adapter selection, disabled provider stubs, tracing, asset resolution, or skill format utilities in src/utils/
+description: Use when working with path validation (safePath), SQLite adapter selection, disabled provider stubs, tracing, asset resolution, embedding client, OpenAI-compat helpers, or skill format utilities in src/utils/
 ---
 
 ## Overview
@@ -17,6 +17,11 @@ The utilities module provides critical cross-cutting concerns: path traversal de
 | `src/utils/tracing.ts` | OpenTelemetry SDK initialization | `initTracing()`, `shutdownTracing()`, `getTracer()`, `isTracingEnabled()` |
 | `src/utils/assets.ts` | Dev/prod mode detection, runner/template path resolution | `DEV_MODE`, `getRunnerPath()`, `getTemplatesDir()` |
 | `src/utils/retry.ts` | Retry with backoff | `retry()` |
+| `src/utils/circuit-breaker.ts` | Fault tolerance circuit breaker pattern | `CircuitBreaker` |
+| `src/utils/database.ts` | Database utilities wrapper | `openDatabase()` wrappers |
+| `src/utils/migrator.ts` | Database migration runner | `runMigrations()` |
+| `src/utils/embedding-client.ts` | Text embedding generation via OpenAI-compatible APIs | `EmbeddingClient`, `EmbeddingClientConfig` |
+| `src/utils/openai-compat.ts` | Shared OpenAI-compatible provider constants/helpers | `DEFAULT_BASE_URLS`, `envKey()`, `resolveBaseUrl()` |
 | `src/utils/manifest-generator.ts` | Skill manifest generation from parsed SKILL.md | `generateManifest()`, `hashExecutables()` |
 | `src/utils/skill-format-parser.ts` | AgentSkills SKILL.md format parser | `parseAgentSkill()` |
 
@@ -81,6 +86,25 @@ Validates an already-resolved path is within `baseDir`.
 - **`generateManifest(parsed)`** -- Creates `GeneratedManifest` from `ParsedAgentSkill` via static analysis.
 - **Static analysis**: Detects host commands (docker, git, kubectl), env vars (ALL_CAPS patterns), domains (from URLs), IPC tools, script paths.
 - **`hashExecutables(manifest, skillDir)`** -- Adds SHA-256 hashes to manifest executable entries.
+
+## Embedding Client
+
+`src/utils/embedding-client.ts`:
+
+- **`EmbeddingClient`** interface with `embed(texts)`, `dimensions`, `available` properties
+- Uses OpenAI-compatible embedding APIs (default: `text-embedding-3-small`)
+- **Compound model IDs:** Supports `provider/model` format (e.g., `openai/text-embedding-3-small`)
+- **Graceful degradation:** Returns `available: false` when API key is unavailable; callers can fall back to non-semantic search
+- Used by `src/host/memory-recall.ts` and `src/providers/memory/memoryfs/embedding-store.ts`
+
+## OpenAI-Compatible Helpers
+
+`src/utils/openai-compat.ts`:
+
+- **`DEFAULT_BASE_URLS`** -- Maps provider names to their API base URLs (OpenAI, Groq, OpenRouter, Fireworks, DeepInfra)
+- **`envKey(providerName)`** -- Returns the expected `${PROVIDER}_API_KEY` env var name
+- **`resolveBaseUrl(providerName)`** -- Resolves the correct base URL from env vars or defaults
+- Used by LLM providers (`src/providers/llm/openai.ts`) and the embedding client
 
 ## Disabled Provider
 

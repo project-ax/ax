@@ -71,6 +71,7 @@ New provider category for image generation:
 |---|---|---|
 | openai | `src/providers/image/openai-images.ts` | DALL-E via OpenAI API |
 | openrouter | `src/providers/image/openrouter.ts` | Image gen via OpenRouter |
+| groq | `src/providers/image/openai-images.ts` | Groq image gen (OpenAI-compatible) |
 | gemini | `src/providers/image/gemini.ts` | Google Gemini image gen |
 | router | `src/providers/image/router.ts` | Multi-provider routing based on `models.image` config |
 | mock | `src/providers/image/mock.ts` | Test fixture |

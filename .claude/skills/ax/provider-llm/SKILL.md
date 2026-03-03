@@ -43,7 +43,7 @@ interface LLMProvider {
 | Name | File | Description |
 |------|------|-------------|
 | Anthropic | `src/providers/llm/anthropic.ts` | Production provider using `@anthropic-ai/sdk`; OAuth-aware with proxy stub fallback; supports vision and thinking |
-| OpenAI | `src/providers/llm/openai.ts` | OpenAI-compatible provider for OpenAI, Groq, OpenRouter, Fireworks; supports reasoning/thinking and tool use |
+| OpenAI | `src/providers/llm/openai.ts` | OpenAI-compatible provider for OpenAI, Groq, OpenRouter, Fireworks, DeepInfra; supports reasoning/thinking and tool use |
 | Router | `src/providers/llm/router.ts` | Multi-model router dispatching based on task type; per-provider cooldown and fallback chains |
 | Traced | `src/providers/llm/traced.ts` | OpenTelemetry-instrumented wrapper; decorates any LLMProvider with span tracking |
 | Mock | `src/providers/llm/mock.ts` | Canned responses for testing; keyword-matched replies, fixed usage stats |
@@ -60,8 +60,8 @@ interface LLMProvider {
 
 ## OpenAI Provider
 
-- Reads `OPENAI_API_KEY` (or `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `FIREWORKS_API_KEY` for compatible providers).
-- Supports OpenAI-compatible providers via `OPENAI_BASE_URL` and related env vars.
+- Reads `OPENAI_API_KEY` (or `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `FIREWORKS_API_KEY`, `DEEPINFRA_API_KEY` for compatible providers).
+- Supports OpenAI-compatible providers via base URL resolution from `src/utils/openai-compat.ts` (shared `DEFAULT_BASE_URLS`, `envKey()`, `resolveBaseUrl()` helpers).
 - **Thinking events:** Extracts `reasoning_content` or `reasoning` from delta and yields as `{ type: 'thinking', content }` chunks.
 - **Delta casting:** Casts delta through `unknown` to safely access non-standard fields.
 - Accumulates tool call deltas by index and yields tool_use chunks on stream finish.

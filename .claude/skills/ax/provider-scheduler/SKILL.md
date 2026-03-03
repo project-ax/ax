@@ -34,10 +34,22 @@ The scheduler provider fires timed messages (heartbeats, cron jobs) into the hos
 
 ## Implementations
 
-| Provider | File        | Timers | Cron | Active Hours | Notes            |
-|----------|-------------|--------|------|--------------|------------------|
-| `cron`   | `cron.ts`   | yes    | yes  | yes          | Full scheduler   |
-| `none`   | `none.ts`   | no     | no   | no           | No-op; all stubs |
+| Provider   | File            | Timers | Cron | Active Hours | Notes                                         |
+|------------|-----------------|--------|------|--------------|-----------------------------------------------|
+| `cron`     | `cron.ts`       | yes    | yes  | yes          | Standard cron scheduler                       |
+| `full`     | `full.ts`       | yes    | yes  | yes          | Advanced scheduler variant                    |
+| `plainjob` | `plainjob.ts`   | yes    | yes  | yes          | SQLite-backed job queue with one-shot support |
+| `none`     | `none.ts`       | no     | no   | no           | No-op; all stubs                              |
+
+## PlainJob Provider
+
+- **Location:** `src/providers/scheduler/plainjob.ts`
+- **Storage:** SQLite-backed job queue (`job-store.db`) for persistence across restarts
+- **One-shot jobs:** `scheduleOnce(datetime, prompt)` for future-dated single-execution jobs
+- **Cron jobs:** Standard 5-field cron expressions, persisted to SQLite
+- **Heartbeat delivery:** Configurable via `config.scheduler.defaultDelivery`
+- **Agent filtering:** Jobs can target specific agents via `agentId`
+- **Async stop:** Graceful shutdown clears all timers and flushes pending jobs
 
 ## Cron Provider Details
 
