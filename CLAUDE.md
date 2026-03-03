@@ -19,6 +19,8 @@ npm run test:fuzz # Run fuzz tests (vitest --run tests/ipc-fuzz.test.ts)
 
 ## Architecture Overview
 
+When working on the AX codebase, invoke the `ax` skill for detailed architecture guidance, key files, common tasks, and gotchas for each subsystem. The `ax` skill covers: agent, host, cli, config, ipc, runners, utils, all provider categories, security, testing, logging, persistence, prompt-builder, and onboarding.
+
 AX uses a **provider contract pattern**. Every subsystem is a TypeScript interface with pluggable implementations. The host process (trusted, `src/host/`) communicates with agent processes (sandboxed, `src/agent/`) via IPC over Unix sockets.
 
 ### Directory Structure
@@ -38,6 +40,13 @@ AX uses a **provider contract pattern**. Every subsystem is a TypeScript interfa
 - **IPC schema validation:** Every IPC action has a Zod schema with `.strict()` mode in `src/ipc-schemas.ts`.
 - **Provider loading:** Static allowlist in `src/host/provider-map.ts` — no dynamic path construction.
 - **Each provider exports** `create(config: Config)` function.
+
+### Keeping Documentation in Sync
+
+When you change code that affects any of the following, you MUST update them as part of the same task (before committing):
+
+- **`.claude/skills/ax/` skills** — If your code changes alter architecture, key files, interfaces, common tasks, or gotchas described in a related `ax/*` skill, update that skill to match. Stale skills are worse than no skills.
+- **`docs/web/`** — If your code changes affect content reflected in the website files (`docs/web/index.html`, `docs/web/script.js`, `docs/web/styles.css`), update those files to stay accurate.
 
 ### Bug Fix Policy
 
