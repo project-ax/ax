@@ -45,6 +45,8 @@
 
 ### architecture
 
+- marked v17 renderer uses token objects, not positional args [architecture/entries.md](architecture/entries.md)
+- pi-agent-core AuthStorage now uses factory methods [architecture/entries.md](architecture/entries.md)
 - Prefer structural layout fixes over runtime workarounds [architecture/entries.md](architecture/entries.md)
 - Provider contract pattern IS the plugin framework — packaging is the missing piece [architecture/entries.md](architecture/entries.md)
 - Cross-provider imports should go through shared-types.ts, not sibling directories [architecture/entries.md](architecture/entries.md)

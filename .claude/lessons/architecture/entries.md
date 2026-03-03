@@ -1,5 +1,17 @@
 # Architecture
 
+### marked v17 renderer uses token objects, not positional args
+**Date:** 2026-03-03
+**Context:** Upgrading marked from v11 to v17 broke the custom CLI markdown renderer
+**Lesson:** marked v17 changed all renderer methods from positional arguments (e.g., `link(href, title, text)`) to token objects (e.g., `link({ href, title, tokens })`). Methods receive `this` bound to the `_Renderer` instance with `this.parser.parseInline(tokens)` for inline content and `this.parser.parse(tokens)` for block content. Critical gotcha: `list()` CANNOT pass `token.items` to `this.parser.parse()` — the parser doesn't recognize `list_item` tokens. Must iterate items manually and call `this.listitem(item)` for each.
+**Tags:** marked, markdown, renderer, migration, breaking-change
+
+### pi-agent-core AuthStorage now uses factory methods
+**Date:** 2026-03-03
+**Context:** Upgrading @mariozechner/pi-agent-core from 0.52 to 0.55 broke AuthStorage instantiation
+**Lesson:** AuthStorage constructor is now private. Use `AuthStorage.create(path)` for file-based storage, `AuthStorage.inMemory()` for tests, or `AuthStorage.fromStorage(backend)` for custom backends. The instance methods (setRuntimeApiKey, etc.) are unchanged.
+**Tags:** pi-agent-core, auth, factory-method, migration
+
 ### `command -v` is a shell builtin — execFile needs `/bin/sh`
 **Date:** 2026-03-03
 **Context:** Implementing bin-exists.ts for safe binary PATH lookup. Used `execFile('command', ['-v', name])` which fails because `command` is a POSIX shell builtin, not an external binary.
