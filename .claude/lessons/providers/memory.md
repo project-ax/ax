@@ -1,5 +1,17 @@
 # Provider Lessons: Memory
 
+### MemoryFS provider must handle missing config.history fields with defaults
+**Date:** 2026-03-03
+**Context:** Adding embedding support to MemoryFS. Tests pass minimal mock configs without `config.history` populated. Accessing `config.history.embedding_model` threw TypeError.
+**Lesson:** When the MemoryFS provider reads from config sections that may not exist in test mocks or minimal configs, always use optional chaining with nullish coalescing defaults: `config.history?.embedding_model ?? 'text-embedding-3-small'`. The config schema adds defaults when loading from YAML, but tests call `create()` with hand-crafted partial configs.
+**Tags:** memoryfs, config, testing, defaults, embedding
+
+### @dao-xyz/sqlite3-vec uses async API wrapping sync better-sqlite3
+**Date:** 2026-03-03
+**Context:** Integrating sqlite-vec for vector similarity search. The library's `createDatabase()` returns a Promise and `prepare()` is async, but the underlying operations are synchronous better-sqlite3 calls.
+**Lesson:** When using `@dao-xyz/sqlite3-vec` in Node.js: (1) `createDatabase()` is async — await it; (2) `prepare()` returns `Promise<Statement>` — await it; (3) `stmt.run()`, `stmt.get()`, `stmt.all()` are sync; (4) Float32Array values are auto-converted to Buffer for BLOB binding; (5) Use a separate database file from the existing `openDatabase()` adapter to avoid extension loading issues.
+**Tags:** sqlite-vec, better-sqlite3, embedding, vector-search, async
+
 ### Check dependency chain before implementing plan tasks — missing prereqs block you
 **Date:** 2026-03-02
 **Context:** Implementing Task 8 (MemoryFS Provider) which depends on Task 2 (ItemsStore). The ItemsStore had not been implemented yet, though the plan listed it as a prerequisite.

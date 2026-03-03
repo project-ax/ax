@@ -2,6 +2,51 @@
 
 Memory provider implementations, MemoryFS planning.
 
+## [2026-03-03 02:26] — Add embedding-based semantic search to MemoryFS
+
+**Task:** Replace keyword (LIKE) search with vector embedding similarity search for MemoryFS memory recall, using @dao-xyz/sqlite3-vec for vector storage and OpenAI embeddings API for embedding generation.
+
+**What I did:**
+- Added `@dao-xyz/sqlite3-vec` dependency for sqlite-vec virtual table support
+- Created `src/utils/embedding-client.ts` — standalone OpenAI embedding client with graceful degradation when no API key
+- Created `src/providers/memory/memoryfs/embedding-store.ts` — vec0-backed vector store with similarity search, scope filtering, backfill support
+- Extended `MemoryQuery` with optional `embedding: Float32Array` field (backward compatible)
+- Added `getByIds()` and `listIdsByScope()` to `ItemsStore` for batch lookups
+- Integrated embeddings into MemoryFS provider: write→embed, query→vector search with salience, memorize→batch embed
+- Updated `memory-recall.ts` to use embedding-based search with keyword fallback
+- Wired `EmbeddingClient` in `server-completions.ts` from config
+- Added `embedding_model` and `embedding_dimensions` config fields (defaults: text-embedding-3-small, 1536)
+- Background backfill of existing memories on provider startup
+- Wrote 31 new tests across 3 test files + updated 2 existing test files
+- Fixed pre-existing provider-map path regex that didn't support nested provider directories
+
+**Files touched:**
+- `package.json` — added @dao-xyz/sqlite3-vec
+- `src/utils/embedding-client.ts` — new
+- `src/providers/memory/memoryfs/embedding-store.ts` — new
+- `src/providers/memory/types.ts` — added embedding field to MemoryQuery
+- `src/providers/memory/memoryfs/provider.ts` — integrated embeddings
+- `src/providers/memory/memoryfs/items-store.ts` — added getByIds, listIdsByScope
+- `src/host/memory-recall.ts` — embedding search with keyword fallback
+- `src/host/server-completions.ts` — create and pass embedding client
+- `src/config.ts` — added embedding config fields
+- `src/types.ts` — added embedding config types
+- `tests/utils/embedding-client.test.ts` — new (6 tests)
+- `tests/providers/memory/memoryfs/embedding-store.test.ts` — new (10 tests)
+- `tests/host/memory-recall.test.ts` — added 5 embedding tests (15 total)
+- `tests/config-history.test.ts` — updated default assertion
+- `tests/integration/phase2.test.ts` — fixed path regex
+- `tests/host/provider-map.test.ts` — fixed path regex
+
+**Outcome:** Success. All 2144 tests pass. Memory recall now uses semantic vector search when OPENAI_API_KEY is available, with automatic fallback to keyword search when it's not.
+
+**Notes:**
+- Separate _vec.db file for vector data avoids extension compat issues with the generic SQLite adapter
+- `@dao-xyz/sqlite3-vec` wraps better-sqlite3 and auto-loads the native vec extension
+- Embedding generation is non-blocking (fire-and-forget) on write to avoid latency
+- Similarity score feeds into existing salience formula: similarity × log(reinforcement+1) × recencyDecay
+- Config is opt-in: embedding_model defaults to text-embedding-3-small, dimensions to 1536
+
 ## [2026-03-02 16:34] — Add full lifecycle integration test (Task 10 of 10)
 
 **Task:** Create end-to-end integration test exercising the complete MemoryFS pipeline through the public MemoryProvider interface.
