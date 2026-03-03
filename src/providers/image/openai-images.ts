@@ -9,23 +9,9 @@
 import type { ImageProvider, ImageGenerateRequest, ImageGenerateResult } from './types.js';
 import type { Config } from '../../types.js';
 import { getLogger } from '../../logger.js';
+import { envKey, envBaseUrl, resolveBaseUrl } from '../../utils/openai-compat.js';
 
 const logger = getLogger().child({ component: 'openai-images' });
-
-/** Default base URLs for known OpenAI-compatible providers. */
-const DEFAULT_BASE_URLS: Record<string, string> = {
-  openai: 'https://api.openai.com/v1',
-  groq: 'https://api.groq.com/openai/v1',
-  fireworks: 'https://api.fireworks.ai/inference/v1',
-};
-
-function envKey(providerName: string): string {
-  return `${providerName.toUpperCase()}_API_KEY`;
-}
-
-function envBaseUrl(providerName: string): string {
-  return `${providerName.toUpperCase()}_BASE_URL`;
-}
 
 export async function create(config: Config, providerName?: string): Promise<ImageProvider> {
   const name = providerName || 'openai';
@@ -45,8 +31,7 @@ export async function create(config: Config, providerName?: string): Promise<Ima
     };
   }
 
-  const baseUrlEnv = envBaseUrl(name);
-  const baseURL = process.env[baseUrlEnv] || DEFAULT_BASE_URLS[name] || 'https://api.openai.com/v1';
+  const baseURL = resolveBaseUrl(name);
 
   logger.debug('create', { provider: name, baseURL });
 

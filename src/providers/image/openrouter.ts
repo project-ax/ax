@@ -11,10 +11,9 @@
 import type { ImageProvider, ImageGenerateRequest, ImageGenerateResult } from './types.js';
 import type { Config } from '../../types.js';
 import { getLogger } from '../../logger.js';
+import { resolveBaseUrl } from '../../utils/openai-compat.js';
 
 const logger = getLogger().child({ component: 'openrouter-images' });
-
-const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
 
 export async function create(config: Config, providerName?: string): Promise<ImageProvider> {
   const name = providerName || 'openrouter';
@@ -33,7 +32,7 @@ export async function create(config: Config, providerName?: string): Promise<Ima
     };
   }
 
-  const baseURL = process.env.OPENROUTER_BASE_URL || DEFAULT_BASE_URL;
+  const baseURL = resolveBaseUrl('openrouter');
 
   logger.debug('create', { provider: name, baseURL });
 

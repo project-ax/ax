@@ -12,16 +12,9 @@
 
 import OpenAI from 'openai';
 import { getLogger } from '../logger.js';
+import { resolveBaseUrl } from './openai-compat.js';
 
 const logger = getLogger().child({ component: 'embedding-client' });
-
-/** Default base URLs for known OpenAI-compatible providers. */
-const DEFAULT_BASE_URLS: Record<string, string> = {
-  openai: 'https://api.openai.com/v1',
-  groq: 'https://api.groq.com/openai/v1',
-  openrouter: 'https://openrouter.ai/api/v1',
-  fireworks: 'https://api.fireworks.ai/inference/v1',
-};
 
 export interface EmbeddingClientConfig {
   /** Model ID — plain ('text-embedding-3-small') or compound ('openrouter/text-embedding-3-small'). */
@@ -75,12 +68,8 @@ export function createEmbeddingClient(config: EmbeddingClientConfig): EmbeddingC
     };
   }
 
-  // Resolve base URL: explicit config > {PROVIDER}_BASE_URL env var > known default
-  const envBaseUrlName = `${provider.toUpperCase()}_BASE_URL`;
-  const baseURL = config.baseUrl
-    ?? process.env[envBaseUrlName]
-    ?? DEFAULT_BASE_URLS[provider]
-    ?? 'https://api.openai.com/v1';
+  // Resolve base URL: explicit config > env override > known default > OpenAI fallback
+  const baseURL = config.baseUrl ?? resolveBaseUrl(provider);
   const client = new OpenAI({ apiKey, baseURL });
 
   return {

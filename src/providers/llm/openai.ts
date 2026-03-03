@@ -3,25 +3,9 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 import type { LLMProvider, ChatRequest, ChatChunk } from './types.js';
 import type { Config, ContentBlock, Message } from '../../types.js';
 import { getLogger } from '../../logger.js';
+import { envKey, envBaseUrl, resolveBaseUrl } from '../../utils/openai-compat.js';
 
 const logger = getLogger().child({ component: 'openai-compat' });
-
-/** Default base URLs for known OpenAI-compatible providers. */
-const DEFAULT_BASE_URLS: Record<string, string> = {
-  openai: 'https://api.openai.com/v1',
-  groq: 'https://api.groq.com/openai/v1',
-  openrouter: 'https://openrouter.ai/api/v1',
-  fireworks: 'https://api.fireworks.ai/inference/v1',
-};
-
-/** Derive env var names from the provider name (e.g. 'groq' -> 'GROQ_API_KEY'). */
-function envKey(providerName: string): string {
-  return `${providerName.toUpperCase()}_API_KEY`;
-}
-
-function envBaseUrl(providerName: string): string {
-  return `${providerName.toUpperCase()}_BASE_URL`;
-}
 
 // ───────────────────────────────────────────────────────
 // Message format translation (AX -> OpenAI)
@@ -122,8 +106,7 @@ export async function create(config: Config, providerName?: string): Promise<LLM
     };
   }
 
-  const baseUrlEnv = envBaseUrl(name);
-  const baseURL = process.env[baseUrlEnv] || DEFAULT_BASE_URLS[name] || 'https://api.openai.com/v1';
+  const baseURL = resolveBaseUrl(name);
 
   logger.debug('create', { provider: name, baseURL });
 
