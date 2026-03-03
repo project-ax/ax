@@ -112,6 +112,14 @@ export interface Config {
     max_concurrent?: number;
     max_depth?: number;
   };
+  webhooks?: {
+    enabled: boolean;
+    token: string;
+    path?: string;
+    max_body_bytes?: number;
+    model?: string;
+    allowed_agent_ids?: string[];
+  };
 }
 
 export interface ProviderRegistry {
