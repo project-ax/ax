@@ -1,5 +1,11 @@
 # Provider Lessons: Memory
 
+### LLM extraction must throw on parse failure for .catch() fallback to work
+**Date:** 2026-03-03
+**Context:** Wiring LLM extraction into `memorize()` with `.catch(() => extractByRegex(...))` fallback. The `extractByLLM` function initially returned `[]` on invalid JSON, which is a valid result (LLM says "nothing to remember"). The `.catch()` never fired, so regex fallback never ran when LLM returned garbage.
+**Lesson:** When a function is used in a `.catch()` fallback pattern, it must throw on actual failures (unparseable response, no JSON array) rather than silently returning an empty result. Reserve returning `[]` for the legitimate case where the LLM explicitly returns an empty array. The distinction: parseable `[]` → success (empty), unparseable garbage → throw → fallback.
+**Tags:** llm, extraction, error-handling, fallback-pattern, memoryfs
+
 ### vec0 MATCH is global — use vec_distance_l2() for scoped vector queries
 **Date:** 2026-03-03
 **Context:** PR review found that scoped similarity search did global MATCH with 3x limit then post-filtered by scope, which misses in-scope nearest neighbors when cross-scope items dominate the global top-k.
@@ -12,11 +18,17 @@
 **Lesson:** When the MemoryFS provider reads from config sections that may not exist in test mocks or minimal configs, always use optional chaining with nullish coalescing defaults: `config.history?.embedding_model ?? 'text-embedding-3-small'`. The config schema adds defaults when loading from YAML, but tests call `create()` with hand-crafted partial configs.
 **Tags:** memoryfs, config, testing, defaults, embedding
 
-### @dao-xyz/sqlite3-vec uses async API wrapping sync better-sqlite3
-**Date:** 2026-03-03
-**Context:** Integrating sqlite-vec for vector similarity search. The library's `createDatabase()` returns a Promise and `prepare()` is async, but the underlying operations are synchronous better-sqlite3 calls.
-**Lesson:** When using `@dao-xyz/sqlite3-vec` in Node.js: (1) `createDatabase()` is async — await it; (2) `prepare()` returns `Promise<Statement>` — await it; (3) `stmt.run()`, `stmt.get()`, `stmt.all()` are sync; (4) Float32Array values are auto-converted to Buffer for BLOB binding; (5) Use a separate database file from the existing `openDatabase()` adapter to avoid extension loading issues. **Import caveat:** Use `import sqliteVec from '@dao-xyz/sqlite3-vec'` (default import), NOT `import { createDatabase }` — the package's `exports["."].types` resolves to `dist/unified.d.ts` which doesn't declare `createDatabase` as a named export. The default export is typed `any`, so annotate the result: `const db: Database = await sqliteVec.createDatabase(...)`.
-**Tags:** sqlite-vec, better-sqlite3, embedding, vector-search, async, typescript-import
+### Use official sqlite-vec package, not @dao-xyz/sqlite3-vec
+**Date:** 2026-03-02
+**Context:** Replaced `@dao-xyz/sqlite3-vec` (Linux x64 only) with official `sqlite-vec` (cross-platform). The official package uses `sqliteVec.load(db)` on a `better-sqlite3` Database instance.
+**Lesson:** Use `import * as sqliteVec from 'sqlite-vec'` + `import Database from 'better-sqlite3'`. Call `sqliteVec.load(db)` after creating the Database. All operations are sync: `db.prepare(sql).get(...)`, `db.prepare(sql).run(...)`. Use `result.lastInsertRowid` from `RunResult` instead of `SELECT last_insert_rowid()`. Spread params directly (`stmt.get(a, b)`) instead of passing arrays (`stmt.get([a, b])`).
+**Tags:** sqlite-vec, better-sqlite3, embedding, vector-search, cross-platform
+
+### ESM module namespaces are non-configurable — use vi.mock with hoisted control for degradation tests
+**Date:** 2026-03-02
+**Context:** Degradation tests needed to mock `sqlite-vec`'s `load()` export to simulate extension load failure, but `vi.spyOn(module, 'load')` fails in ESM with "Cannot redefine property".
+**Lesson:** For ESM modules, use `vi.hoisted()` to create a control object + `vi.mock('module', async (importOriginal) => {...})` that wraps the real function and checks the control flag. Set the flag in tests that need the mock, reset in `afterEach`. Import the module under test with `await import(...)` after `vi.mock()`.
+**Tags:** vitest, esm, mocking, vi.mock, vi.hoisted, degradation-testing
 
 ### Check dependency chain before implementing plan tasks — missing prereqs block you
 **Date:** 2026-03-02

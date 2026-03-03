@@ -2,6 +2,28 @@
 
 Memory provider implementations, MemoryFS planning.
 
+## [2026-03-03 06:04] — Wire LLM into MemoryFS for extraction and summary generation
+
+**Task:** Connect LLM provider to MemoryFS so both `memorize()` and `write()` use LLM-powered extraction and summary generation instead of regex/bullet-append.
+**What I did:**
+- Created `llm-helpers.ts` with `collectLLMText()` (stream collector) and `llmComplete()` (text-in/text-out wrapper)
+- Added `extractByLLM()` to `extractor.ts` alongside existing `extractByRegex()` — LLM extracts structured JSON items; throws on parse failure so caller can fall back to regex
+- Modified `provider.ts`: accepts optional LLM via `CreateOptions`, `write()` now gives explicit entries `reinforcementCount: 10` (was 1) and fires LLM summary update, `memorize()` uses LLM extraction with regex fallback and LLM summary generation with bullet-append fallback
+- Added `updateCategorySummary()` helper using `buildSummaryPrompt()` from prompts.ts
+- Modified `registry.ts` to pass `tracedLlm` to memory provider (follows skills provider pattern)
+- Wrote 7 new tests for llm-helpers, 7 new tests for extractByLLM, 6 new tests for LLM-wired provider
+**Files touched:** `src/providers/memory/memoryfs/llm-helpers.ts` (new), `src/providers/memory/memoryfs/extractor.ts` (mod), `src/providers/memory/memoryfs/provider.ts` (mod), `src/host/registry.ts` (mod), `tests/providers/memory/memoryfs/llm-helpers.test.ts` (new), `tests/providers/memory/memoryfs/extractor.test.ts` (mod), `tests/providers/memory/memoryfs/provider.test.ts` (mod)
+**Outcome:** Success — 101 memoryfs tests pass, 2231 total tests pass (1 pre-existing failure in phase1.test.ts unrelated)
+**Notes:** LLM is optional — all behavior gracefully degrades to regex + bullet-append when no LLM provided. extractByLLM throws on invalid JSON (not just returns empty) so `.catch()` fallback in memorize works correctly.
+
+## [2026-03-02 23:22] — Replace @dao-xyz/sqlite3-vec with official sqlite-vec
+
+**Task:** Replace `@dao-xyz/sqlite3-vec` (Linux-only) with official `sqlite-vec` (cross-platform)
+**What I did:** Removed `@dao-xyz/sqlite3-vec` from package.json, added `sqlite-vec`. Rewrote embedding-store.ts to use `better-sqlite3` + `sqlite-vec` directly: sync `new Database()` + `sqliteVec.load(db)` instead of async `sqliteVec.createDatabase()`. Converted all internal DB operations from async to sync (spread params, use `result.lastInsertRowid` instead of `SELECT last_insert_rowid()`). Updated degradation tests to use `vi.hoisted` + `vi.mock('sqlite-vec')` pattern since ESM module namespaces are non-configurable for `vi.spyOn`.
+**Files touched:** package.json, src/providers/memory/memoryfs/embedding-store.ts, tests/providers/memory/memoryfs/embedding-store.test.ts
+**Outcome:** Success — build passes, all 14 embedding-store tests pass (including degradation), full memoryfs suite (81 tests) passes
+**Notes:** Public async API preserved — no changes needed to callers.
+
 ## [2026-03-03 03:25] — Fix TS build errors in embedding-store.ts
 
 **Task:** Fix 8 TypeScript compilation errors in embedding-store.ts after merging origin/main

@@ -58,10 +58,15 @@ export async function loadProviders(config: Config, opts?: LoadProvidersOptions)
   const skillsMod = await import(skillsModulePath);
   const skills = await skillsMod.create(config, config.providers.skills, { screener });
 
+  // Load memory provider, passing LLM for extraction + summary generation
+  const memoryModPath = resolveProviderPath('memory', config.providers.memory);
+  const memoryMod = await import(memoryModPath);
+  const memory = await memoryMod.create(config, config.providers.memory, { llm: tracedLlm });
+
   return {
     llm:         tracedLlm,
     image,
-    memory:      await loadProvider('memory', config.providers.memory, config),
+    memory,
     scanner:     await loadProvider('scanner', config.providers.scanner, config),
     channels,
     web:         await loadProvider('web', config.providers.web, config),

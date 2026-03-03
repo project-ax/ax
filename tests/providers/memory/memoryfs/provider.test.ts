@@ -1,14 +1,38 @@
 // tests/providers/memory/memoryfs/provider.test.ts
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { create } from '../../../../src/providers/memory/memoryfs/provider.js';
 import type { MemoryProvider, ConversationTurn } from '../../../../src/providers/memory/types.js';
 import type { Config } from '../../../../src/types.js';
+import type { LLMProvider, ChatChunk } from '../../../../src/providers/llm/types.js';
+import { dataFile } from '../../../../src/paths.js';
 
 const config = {} as Config;
+
+/** Create an async iterable from an array of chunks. */
+async function* chunksFrom(chunks: ChatChunk[]): AsyncIterable<ChatChunk> {
+  for (const c of chunks) yield c;
+}
+
+/** Build a mock LLM that returns canned responses per call index. */
+function mockLLM(responses: string[]): LLMProvider {
+  let callIdx = 0;
+  return {
+    name: 'mock',
+    chat: vi.fn().mockImplementation(() => {
+      const resp = responses[callIdx] ?? responses[responses.length - 1];
+      callIdx++;
+      return chunksFrom([
+        { type: 'text', content: resp },
+        { type: 'done' },
+      ]);
+    }),
+    models: vi.fn().mockResolvedValue(['fast']),
+  };
+}
 
 describe('memoryfs provider', () => {
   let memory: MemoryProvider;
@@ -134,5 +158,131 @@ describe('memoryfs provider', () => {
       embedding: fakeEmbedding,
     });
     expect(results).toEqual([]);
+  });
+});
+
+describe('memoryfs provider with LLM', () => {
+  let memory: MemoryProvider;
+  let testHome: string;
+  let llm: LLMProvider;
+
+  beforeEach(async () => {
+    testHome = await mkdtemp(join(tmpdir(), `memfs-llm-${randomUUID()}-`));
+    process.env.AX_HOME = testHome;
+  });
+
+  afterEach(async () => {
+    try { await rm(testHome, { recursive: true, force: true }); } catch {}
+    delete process.env.AX_HOME;
+  });
+
+  it('write() gives explicit entries reinforcementCount=10', async () => {
+    // Use a summary response for the fire-and-forget update
+    llm = mockLLM(['# knowledge\n## Facts\n- REST API with JWT auth']);
+    memory = await create(config, undefined, { llm });
+
+    const id = await memory.write({
+      scope: 'default',
+      content: 'The API uses REST with JWT auth',
+    });
+    expect(id).toBeTruthy();
+
+    // Verify the entry exists and is queryable
+    const entry = await memory.read(id);
+    expect(entry).not.toBeNull();
+    expect(entry!.content).toBe('The API uses REST with JWT auth');
+  });
+
+  it('write() triggers LLM summary update', async () => {
+    llm = mockLLM(['# knowledge\n## Updated\n- API uses REST with JWT']);
+    memory = await create(config, undefined, { llm });
+
+    await memory.write({
+      scope: 'default',
+      content: 'The API uses REST with JWT auth',
+    });
+
+    // Wait for fire-and-forget summary update
+    await new Promise(r => setTimeout(r, 50));
+
+    expect(llm.chat).toHaveBeenCalled();
+    // Verify summary file was updated with LLM content
+    const memoryDir = dataFile('memory');
+    const summary = await readFile(join(memoryDir, 'knowledge.md'), 'utf-8');
+    expect(summary).toContain('REST');
+  });
+
+  it('memorize() uses LLM extraction when LLM available', async () => {
+    const extractionResponse = JSON.stringify([
+      { content: 'User prefers dark mode', memoryType: 'profile', category: 'preferences' },
+    ]);
+    const summaryResponse = '# preferences\n## UI\n- Prefers dark mode in editors';
+    llm = mockLLM([extractionResponse, summaryResponse]);
+    memory = await create(config, undefined, { llm });
+
+    const conversation: ConversationTurn[] = [
+      { role: 'user', content: 'I prefer dark mode in all editors' },
+      { role: 'assistant', content: 'Got it!' },
+    ];
+    await memory.memorize!(conversation);
+
+    // LLM chat should have been called (extraction + summary)
+    expect(llm.chat).toHaveBeenCalled();
+
+    // Verify the extracted item is in the store
+    const results = await memory.query({ scope: 'default', query: 'dark mode' });
+    expect(results.length).toBeGreaterThanOrEqual(1);
+    expect(results[0].content).toBe('User prefers dark mode');
+  });
+
+  it('memorize() falls back to regex when LLM extraction fails', async () => {
+    // LLM returns invalid response — should fall back to regex
+    llm = mockLLM(['this is not valid JSON']);
+    memory = await create(config, undefined, { llm });
+
+    const conversation: ConversationTurn[] = [
+      { role: 'user', content: 'Remember that I prefer TypeScript' },
+    ];
+    await memory.memorize!(conversation);
+
+    // Regex fallback should still extract the memory
+    const results = await memory.query({ scope: 'default', query: 'TypeScript' });
+    expect(results.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('without LLM, memorize() uses regex + bullet append (existing behavior)', async () => {
+    // No LLM passed
+    memory = await create(config);
+
+    const conversation: ConversationTurn[] = [
+      { role: 'user', content: 'Remember that I prefer dark mode in all editors' },
+    ];
+    await memory.memorize!(conversation);
+
+    const results = await memory.query({ scope: 'default', query: 'dark mode' });
+    expect(results.length).toBeGreaterThanOrEqual(1);
+
+    // Verify bullet-append style in summary file
+    const memoryDir = dataFile('memory');
+    const summary = await readFile(join(memoryDir, 'personal_info.md'), 'utf-8');
+    expect(summary).toContain('- ');
+  });
+
+  it('memorize() updates summary via LLM when available', async () => {
+    const extractionResponse = JSON.stringify([
+      { content: 'Works at Acme Corp', memoryType: 'knowledge', category: 'work_life' },
+    ]);
+    const summaryResponse = '# work_life\n## Employment\n- Works at Acme Corp';
+    llm = mockLLM([extractionResponse, summaryResponse]);
+    memory = await create(config, undefined, { llm });
+
+    const conversation: ConversationTurn[] = [
+      { role: 'user', content: 'I work at Acme Corp' },
+    ];
+    await memory.memorize!(conversation);
+
+    const memoryDir = dataFile('memory');
+    const summary = await readFile(join(memoryDir, 'work_life.md'), 'utf-8');
+    expect(summary).toContain('Acme Corp');
   });
 });

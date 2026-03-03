@@ -4,17 +4,24 @@ import type { Config } from '../../../types.js';
 import type {
   MemoryProvider, MemoryEntry, MemoryQuery, ConversationTurn,
 } from '../types.js';
+import type { LLMProvider } from '../../llm/types.js';
 import { dataFile } from '../../../paths.js';
 import { ItemsStore } from './items-store.js';
 import { EmbeddingStore } from './embedding-store.js';
 import { writeSummary, readSummary, initDefaultCategories } from './summary-io.js';
-import { extractByRegex } from './extractor.js';
+import { extractByRegex, extractByLLM } from './extractor.js';
 import { computeContentHash } from './content-hash.js';
 import { salienceScore } from './salience.js';
+import { buildSummaryPrompt } from './prompts.js';
+import { llmComplete } from './llm-helpers.js';
 import { createEmbeddingClient, type EmbeddingClient } from '../../../utils/embedding-client.js';
 import { getLogger } from '../../../logger.js';
 
 const logger = getLogger().child({ component: 'memoryfs' });
+
+export interface CreateOptions {
+  llm?: LLMProvider;
+}
 
 /**
  * Generate and store an embedding for an item (fire-and-forget safe).
@@ -80,7 +87,29 @@ async function backfillEmbeddings(
   }
 }
 
-export async function create(config: Config): Promise<MemoryProvider> {
+/**
+ * Update a category summary file using LLM-generated content.
+ * Reads existing summary, merges new items via LLM prompt, writes result.
+ */
+async function updateCategorySummary(
+  llm: LLMProvider,
+  memoryDir: string,
+  category: string,
+  newItems: string[],
+): Promise<void> {
+  const existing = await readSummary(memoryDir, category) || `# ${category}\n`;
+  const prompt = buildSummaryPrompt({
+    category,
+    originalContent: existing,
+    newItems,
+    targetLength: 400,
+  });
+  const updated = await llmComplete(llm, prompt);
+  await writeSummary(memoryDir, category, updated);
+}
+
+export async function create(config: Config, _name?: string, opts?: CreateOptions): Promise<MemoryProvider> {
+  const llm = opts?.llm;
   const memoryDir = dataFile('memory');
   const dbPath = join(memoryDir, '_store.db');
   const vecDbPath = join(memoryDir, '_vec.db');
@@ -116,13 +145,14 @@ export async function create(config: Config): Promise<MemoryProvider> {
         return existing.id;
       }
 
+      // Explicit writes get reinforcement boost of 10
       const id = store.insert({
         content: entry.content,
         memoryType: 'knowledge',
         category: 'knowledge',
         contentHash,
         confidence: 1.0,
-        reinforcementCount: 1,
+        reinforcementCount: 10,
         lastReinforcedAt: now,
         createdAt: now,
         updatedAt: now,
@@ -133,6 +163,13 @@ export async function create(config: Config): Promise<MemoryProvider> {
 
       // Generate embedding (non-blocking — don't delay the write response)
       embedItem(id, entry.content, scope, embeddingStore, embeddingClient).catch(() => {});
+
+      // Update summary via LLM (fire-and-forget)
+      if (llm) {
+        updateCategorySummary(llm, memoryDir, 'knowledge', [entry.content]).catch(err =>
+          logger.warn('write_summary_update_failed', { error: (err as Error).message }),
+        );
+      }
 
       return id;
     },
@@ -250,8 +287,10 @@ export async function create(config: Config): Promise<MemoryProvider> {
       if (conversation.length === 0) return;
       const scope = 'default';
 
-      // Step 1: Extract items via regex
-      const candidates = extractByRegex(conversation, scope);
+      // Step 1: Extract items (LLM or regex fallback)
+      const candidates = llm
+        ? await extractByLLM(conversation, scope, llm).catch(() => extractByRegex(conversation, scope))
+        : extractByRegex(conversation, scope);
 
       // Step 2: Dedup/reinforce or insert, collecting new items for embedding
       const newItemsByCategory = new Map<string, string[]>();
@@ -270,12 +309,18 @@ export async function create(config: Config): Promise<MemoryProvider> {
         }
       }
 
-      // Step 3: Update category summaries (Phase 1: append bullets; later: LLM)
-      for (const [category, newContents] of newItemsByCategory) {
-        const existingSummary = await readSummary(memoryDir, category) || `# ${category}\n`;
-        const newBullets = newContents.map(c => `- ${c}`).join('\n');
-        const updated = `${existingSummary.trimEnd()}\n${newBullets}\n`;
-        await writeSummary(memoryDir, category, updated);
+      // Step 3: Update category summaries via LLM (or bullet-append fallback)
+      if (llm) {
+        for (const [category, newContents] of newItemsByCategory) {
+          await updateCategorySummary(llm, memoryDir, category, newContents);
+        }
+      } else {
+        for (const [category, newContents] of newItemsByCategory) {
+          const existingSummary = await readSummary(memoryDir, category) || `# ${category}\n`;
+          const newBullets = newContents.map(c => `- ${c}`).join('\n');
+          const updated = `${existingSummary.trimEnd()}\n${newBullets}\n`;
+          await writeSummary(memoryDir, category, updated);
+        }
       }
 
       // Step 4: Generate embeddings for new items (non-blocking batch)
