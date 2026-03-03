@@ -1,9 +1,10 @@
 # Journal Index
 
-Category-based organization of all journal entries. Total: 110 entries across 9 categories.
+Category-based organization of all journal entries. Total: 111 entries across 9 categories.
 
 ## Entries
 
+- 2026-03-03 21:45 — Fix PR #60: production dependency bumps (7 packages) [refactoring/cleanup.md](refactoring/cleanup.md)
 - 2026-03-02 22:35 — Save skills install plan feedback to file [docs/plans.md](docs/plans.md)
 - 2026-03-02 22:30 — Fix OAuth refresh token persistence bugs [config/onboarding.md](config/onboarding.md)
 - 2026-03-02 22:10 — Review skills install architecture plan [docs/plans.md](docs/plans.md)

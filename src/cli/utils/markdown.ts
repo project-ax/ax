@@ -34,56 +34,63 @@ function hljsToChalk(html: string): string {
     .replace(/<\/?[^>]+>/g, ''));
 }
 
-// marked v11 uses positional arguments for renderer methods
+// marked v17 uses token objects; renderer methods receive `this` with this.parser
+import type { Tokens } from 'marked';
 const renderer = {
-  heading(text: string, level: string | number) {
-    const depth = typeof level === 'string' ? parseInt(level, 10) : level;
+  heading(this: { parser: { parseInline(tokens: unknown[]): string } }, { tokens, depth }: Tokens.Heading) {
+    const text = this.parser.parseInline(tokens);
     const prefix = '#'.repeat(depth) + ' ';
     return '\n' + chalk.bold.cyan(prefix + text) + '\n\n';
   },
 
-  paragraph(text: string) {
-    return text + '\n\n';
+  paragraph(this: { parser: { parseInline(tokens: unknown[]): string } }, { tokens }: Tokens.Paragraph) {
+    return this.parser.parseInline(tokens) + '\n\n';
   },
 
-  strong(text: string) {
-    return chalk.bold(text);
+  strong(this: { parser: { parseInline(tokens: unknown[]): string } }, { tokens }: Tokens.Strong) {
+    return chalk.bold(this.parser.parseInline(tokens));
   },
 
-  em(text: string) {
-    return chalk.italic(text);
+  em(this: { parser: { parseInline(tokens: unknown[]): string } }, { tokens }: Tokens.Em) {
+    return chalk.italic(this.parser.parseInline(tokens));
   },
 
-  codespan(text: string) {
+  codespan({ text }: Tokens.Codespan) {
     return chalk.gray.bgBlackBright(' ' + text + ' ');
   },
 
-  code(code: string, lang: string | undefined) {
+  code({ text, lang }: Tokens.Code) {
     let highlighted: string;
     if (lang && hljs.getLanguage(lang)) {
-      const result = hljs.highlight(code, { language: lang });
+      const result = hljs.highlight(text, { language: lang });
       highlighted = hljsToChalk(result.value);
     } else {
-      highlighted = code;
+      highlighted = text;
     }
     const border = chalk.gray('\u2500'.repeat(40));
     const langLabel = lang ? chalk.gray(` ${lang} `) : '';
     return '\n' + border + langLabel + '\n' + highlighted + '\n' + border + '\n\n';
   },
 
-  list(body: string) {
+  list(this: { parser: { parse(tokens: unknown[]): string }; listitem(item: Tokens.ListItem): string }, token: Tokens.List) {
+    let body = '';
+    for (const item of token.items) {
+      body += this.listitem(item);
+    }
     return body + '\n';
   },
 
-  listitem(text: string) {
-    return '  ' + chalk.dim('\u2022') + ' ' + text + '\n';
+  listitem(this: { parser: { parse(tokens: unknown[]): string } }, item: Tokens.ListItem) {
+    return '  ' + chalk.dim('\u2022') + ' ' + this.parser.parse(item.tokens) + '\n';
   },
 
-  link(href: string, _title: string | null | undefined, text: string) {
+  link(this: { parser: { parseInline(tokens: unknown[]): string } }, { href, tokens }: Tokens.Link) {
+    const text = this.parser.parseInline(tokens);
     return chalk.blue.underline(text) + chalk.gray(' (' + href + ')');
   },
 
-  blockquote(text: string) {
+  blockquote(this: { parser: { parse(tokens: unknown[]): string } }, { tokens }: Tokens.Blockquote) {
+    const text = this.parser.parse(tokens);
     const lines = text.split('\n').map(l => chalk.gray('\u2502 ') + chalk.italic(l));
     return lines.join('\n') + '\n';
   },

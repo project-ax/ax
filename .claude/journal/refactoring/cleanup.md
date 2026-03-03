@@ -1,6 +1,14 @@
 # Refactoring: Cleanup
 
-General refactoring, stale reference cleanup, path realignment.
+General refactoring, stale reference cleanup, path realignment, dependency updates.
+
+## [2026-03-03 21:45] — Fix PR #60: production dependency bumps (7 packages)
+
+**Task:** Fix Dependabot PR #60 that bumps 7 production dependencies including 3 major version bumps (ink 5→6, marked 11→17, react 18→19)
+**What I did:** (1) Merged dependabot branch into working branch. (2) Fixed `AuthStorage` constructor change in pi-agent-core 0.55.4 — now uses `AuthStorage.create()` factory method instead of `new AuthStorage()`. (3) Rewrote `src/cli/utils/markdown.ts` renderer for marked v17 API — all methods now use token objects instead of positional args, `this.parser.parseInline(tokens)` for inline rendering, and `list()` must manually iterate items via `this.listitem()` instead of `this.parser.parse(token.items)`. (4) React 18→19 and Ink 5→6 required zero code changes.
+**Files touched:** `src/agent/runners/pi-session.ts`, `src/cli/utils/markdown.ts`, `package.json`, `package-lock.json`
+**Outcome:** Success — build clean, all 208 test files pass (2298 tests)
+**Notes:** The marked v17 `list()` renderer cannot pass `token.items` to `this.parser.parse()` because the parser doesn't recognize `list_item` tokens. Must iterate items manually and call `this.listitem(item)` for each.
 
 ## [2026-03-01 15:50] — Clean up stale scratch tier references
 

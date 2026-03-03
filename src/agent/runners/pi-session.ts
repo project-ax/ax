@@ -360,7 +360,7 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
   // Without this, both AgentSession.prompt() and the Agent loop throw
   // "No API key found for ax" because the model registry doesn't know
   // about our IPC provider. The host handles real auth — no keys in sandbox.
-  const authStorage = new AuthStorage(join(config.workspace, 'auth.json'));
+  const authStorage = AuthStorage.create(join(config.workspace, 'auth.json'));
   authStorage.setRuntimeApiKey(activeModel.provider, apiName);
 
   // Create session with in-memory manager (no persistence in sandbox)
