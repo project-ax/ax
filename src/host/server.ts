@@ -379,6 +379,11 @@ export async function createServer(
     orchestrator,
   });
 
+  // Webhook path prefix (configurable, defaults to '/webhooks/')
+  const webhookPrefix = config.webhooks?.path
+    ? (config.webhooks.path.endsWith('/') ? config.webhooks.path : config.webhooks.path + '/')
+    : '/webhooks/';
+
   // Webhook handler (optional — only if config has webhooks.enabled)
   const webhookHandler = config.webhooks?.enabled
     ? createWebhookHandler({
@@ -484,7 +489,7 @@ export async function createServer(
     const url = req.url ?? '/';
 
     // Reject new requests during shutdown (let health/models through)
-    if (draining && (url === '/v1/chat/completions' || url.startsWith('/webhooks/'))) {
+    if (draining && (url === '/v1/chat/completions' || url.startsWith(webhookPrefix))) {
       sendError(res, 503, 'Server is shutting down — not accepting new requests');
       return;
     }
@@ -543,9 +548,9 @@ export async function createServer(
       return;
     }
 
-    // Webhooks: POST /webhooks/<name>
-    if (webhookHandler && url.startsWith('/webhooks/')) {
-      const webhookName = url.slice('/webhooks/'.length).split('?')[0];
+    // Webhooks: POST <prefix><name>
+    if (webhookHandler && url.startsWith(webhookPrefix)) {
+      const webhookName = url.slice(webhookPrefix.length).split('?')[0];
       if (!webhookName) {
         sendError(res, 404, 'Not found');
         return;

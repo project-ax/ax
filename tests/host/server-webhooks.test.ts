@@ -11,6 +11,8 @@ interface SetupOpts {
   transformExists?: boolean;
   transformContent?: string;
   transformResult?: { message: string; agentId?: string } | null;
+  allowedAgentIds?: string[];
+  maxBodyBytes?: number;
   onTaint?: (sessionId: string, content: string, isTainted: boolean) => void;
   onAudit?: (entry: { action: string; webhook: string; runId?: string; ip?: string }) => void;
 }
@@ -65,6 +67,8 @@ function setup(opts: SetupOpts) {
   const deps: WebhookDeps = {
     config: {
       token: opts.token,
+      ...(opts.allowedAgentIds ? { allowedAgentIds: opts.allowedAgentIds } : {}),
+      ...(opts.maxBodyBytes != null ? { maxBodyBytes: opts.maxBodyBytes } : {}),
     },
     transform: async () => 'transformResult' in opts ? opts.transformResult! : { message: 'test message' },
     dispatch: (result, runId) => dispatched.push({ result, runId }),
@@ -246,5 +250,74 @@ describe('webhook audit logging', () => {
     const req = createMockReq({ body: '{}', headers: { authorization: 'Bearer wrong' }, remoteAddress: '10.0.0.200' }); //gitleaks:allow
     await handler(req, mockRes, 'github');
     expect(auditEntries).toContainEqual(expect.objectContaining({ action: 'webhook.auth_failed' }));
+  });
+});
+
+describe('webhook allowlist enforcement', () => {
+  test('blocks dispatch when allowlist is set but transform omits agentId', async () => {
+    const { handler, mockReq, mockRes, dispatched } = setup({
+      token: 'secret',
+      allowedAgentIds: ['agent-a', 'agent-b'],
+      transformResult: { message: 'hello' }, // no agentId
+    });
+    await handler(mockReq, mockRes, 'github');
+    expect(mockRes.statusCode).toBe(400);
+    expect(mockRes.body).toContain('not in allowed list');
+    expect(dispatched.length).toBe(0);
+  });
+
+  test('blocks dispatch when agentId is not in allowlist', async () => {
+    const { handler, mockReq, mockRes, dispatched } = setup({
+      token: 'secret',
+      allowedAgentIds: ['agent-a'],
+      transformResult: { message: 'hello', agentId: 'agent-c' },
+    });
+    await handler(mockReq, mockRes, 'github');
+    expect(mockRes.statusCode).toBe(400);
+    expect(dispatched.length).toBe(0);
+  });
+
+  test('allows dispatch when agentId is in allowlist', async () => {
+    const { handler, mockReq, mockRes, dispatched } = setup({
+      token: 'secret',
+      allowedAgentIds: ['agent-a'],
+      transformResult: { message: 'hello', agentId: 'agent-a' },
+    });
+    await handler(mockReq, mockRes, 'github');
+    expect(mockRes.statusCode).toBe(202);
+    expect(dispatched.length).toBe(1);
+  });
+
+  test('skips allowlist check when no allowlist is configured', async () => {
+    const { handler, mockReq, mockRes, dispatched } = setup({
+      token: 'secret',
+      transformResult: { message: 'hello' }, // no agentId, no allowlist
+    });
+    await handler(mockReq, mockRes, 'github');
+    expect(mockRes.statusCode).toBe(202);
+    expect(dispatched.length).toBe(1);
+  });
+});
+
+describe('webhook body size limit', () => {
+  test('rejects payload exceeding configured max_body_bytes', async () => {
+    const { handler, mockRes } = setup({
+      token: 'secret',
+      maxBodyBytes: 64,
+    });
+    const bigBody = JSON.stringify({ data: 'x'.repeat(100) });
+    const req = createMockReq({ body: bigBody, headers: { authorization: 'Bearer secret' } }); //gitleaks:allow
+    await handler(req, mockRes, 'github');
+    expect(mockRes.statusCode).toBe(413);
+  });
+
+  test('accepts payload within configured max_body_bytes', async () => {
+    const { handler, mockRes } = setup({
+      token: 'secret',
+      maxBodyBytes: 1024,
+    });
+    const req = createMockReq({ body: '{"ok":true}', headers: { authorization: 'Bearer secret' } }); //gitleaks:allow
+    await handler(req, mockRes, 'github');
+    expect(mockRes.statusCode).not.toBe(413);
   });
 });

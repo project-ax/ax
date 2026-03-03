@@ -152,10 +152,11 @@ export function createWebhookHandler(deps: WebhookDeps) {
     }
     resetRateLimit(clientIp);
 
-    // Body parsing
+    // Body parsing (respect per-webhook max_body_bytes, default 256KB)
+    const maxBody = config.maxBodyBytes ?? 256 * 1024;
     let body: string;
     try {
-      body = await readBody(req);
+      body = await readBody(req, maxBody);
     } catch {
       sendError(res, 413, 'Payload too large');
       return;
@@ -205,10 +206,14 @@ export function createWebhookHandler(deps: WebhookDeps) {
       return;
     }
 
-    // Agent ID allowlist check
-    if (result.agentId && config.allowedAgentIds) {
-      if (!config.allowedAgentIds.includes(result.agentId)) {
-        sendError(res, 400, `agentId "${result.agentId}" is not in allowed list`);
+    // Agent ID allowlist check — when an allowlist is configured, the
+    // transform MUST return an agentId that appears in the list. If omitted,
+    // dispatch would fall back to the server default agent which may not be
+    // in the allowlist, so we block that path too.
+    if (config.allowedAgentIds) {
+      if (!result.agentId || !config.allowedAgentIds.includes(result.agentId)) {
+        const id = result.agentId ?? '(none)';
+        sendError(res, 400, `agentId "${id}" is not in allowed list`);
         return;
       }
     }
