@@ -347,7 +347,7 @@ webhooks:
     expect(config.webhooks).toBeUndefined();
   });
 
-  test('accepts config with optional skillScreener', async () => {
+  test('accepts config with optional screener', async () => {
     const { writeFileSync, rmSync } = await import('node:fs');
     const tmpPath = resolve(import.meta.dirname, '../ax-test-screener.yaml');
     writeFileSync(tmpPath, `
@@ -363,7 +363,7 @@ providers:
   audit: file
   sandbox: subprocess
   scheduler: none
-  skillScreener: static
+  screener: static
 sandbox:
   timeout_sec: 120
   memory_mb: 512
@@ -374,7 +374,7 @@ scheduler:
 `);
     try {
       const config = loadConfig(tmpPath);
-      expect(config.providers.skillScreener).toBe('static');
+      expect(config.providers.screener).toBe('static');
     } finally {
       rmSync(tmpPath);
     }

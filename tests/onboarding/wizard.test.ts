@@ -144,9 +144,9 @@ describe('Onboarding Wizard', () => {
     expect(config.providers.channels).toEqual(['cli', 'slack']);
   });
 
-  // ── skillScreener only on profiles that support it ──
+  // ── screener only on profiles that support it ──
 
-  test('paranoid profile omits skillScreener', async () => {
+  test('paranoid profile omits screener', async () => {
     const dir = setup();
     await runOnboarding({
       outputDir: dir,
@@ -154,10 +154,10 @@ describe('Onboarding Wizard', () => {
     });
 
     const config = parseYaml(readFileSync(join(dir, 'ax.yaml'), 'utf-8'));
-    expect(config.providers.skillScreener).toBeUndefined();
+    expect(config.providers.screener).toBeUndefined();
   });
 
-  test('balanced profile includes skillScreener', async () => {
+  test('balanced profile includes screener', async () => {
     const dir = setup();
     await runOnboarding({
       outputDir: dir,
@@ -165,7 +165,7 @@ describe('Onboarding Wizard', () => {
     });
 
     const config = parseYaml(readFileSync(join(dir, 'ax.yaml'), 'utf-8'));
-    expect(config.providers.skillScreener).toBe('static');
+    expect(config.providers.screener).toBe('static');
   });
 
   // ── Invalid profile ──

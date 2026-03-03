@@ -78,7 +78,7 @@ export interface Config {
     audit: AuditProviderName;
     sandbox: SandboxProviderName;
     scheduler: SchedulerProviderName;
-    skillScreener?: string;
+    screener?: string;
   };
   channel_config?: Record<string, Partial<ChannelAccessConfig>>;
   sandbox: {
@@ -135,5 +135,5 @@ export interface ProviderRegistry {
   audit: AuditProvider;
   sandbox: SandboxProvider;
   scheduler: SchedulerProvider;
-  skillScreener?: SkillScreenerProvider;
+  screener?: SkillScreenerProvider;
 }

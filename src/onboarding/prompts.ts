@@ -27,7 +27,7 @@ export interface ProfileDefaults {
   audit: string;
   sandbox: string;
   scheduler: string;
-  skillScreener?: string;
+  screener?: string;
   timeoutSec: number;
   memoryMb: number;
 }
@@ -60,7 +60,7 @@ export const PROFILE_DEFAULTS: Record<string, ProfileDefaults> = {
     audit: 'sqlite',
     sandbox: defaultSandbox,
     scheduler: 'full',
-    skillScreener: 'static',
+    screener: 'static',
     timeoutSec: 120,
     memoryMb: 512,
   },
@@ -75,7 +75,7 @@ export const PROFILE_DEFAULTS: Record<string, ProfileDefaults> = {
     audit: 'sqlite',
     sandbox: defaultSandbox,
     scheduler: 'full',
-    skillScreener: 'static',
+    screener: 'static',
     timeoutSec: 300,
     memoryMb: 1024,
   },

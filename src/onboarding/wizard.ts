@@ -52,7 +52,7 @@ export async function runOnboarding(opts: OnboardingOptions): Promise<void> {
   // Ensure output directory exists
   mkdirSync(outputDir, { recursive: true });
 
-  // Build providers object — only include skillScreener if the profile defines one
+  // Build providers object — only include screener if the profile defines one
   const providers: Record<string, unknown> = {
     memory: defaults.memory,
     scanner: defaults.scanner,
@@ -66,8 +66,8 @@ export async function runOnboarding(opts: OnboardingOptions): Promise<void> {
     scheduler: defaults.scheduler,
   };
 
-  if (defaults.skillScreener) {
-    providers.skillScreener = defaults.skillScreener;
+  if (defaults.screener) {
+    providers.screener = defaults.screener;
   }
 
   // Build channel_config for selected channels

@@ -59,7 +59,7 @@ const ConfigSchema = z.strictObject({
     audit: providerEnum('audit'),
     sandbox: providerEnum('sandbox'),
     scheduler: providerEnum('scheduler'),
-    skillScreener: z.string().optional(),
+    screener: z.string().optional(),
   }),
   channel_config: z.record(z.string(), ChannelAccessConfigSchema).optional(),
   max_tokens: z.number().int().min(256).max(200_000).optional().default(8192),

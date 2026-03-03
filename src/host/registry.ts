@@ -42,14 +42,14 @@ export async function loadProviders(config: Config, opts?: LoadProvidersOptions)
     : undefined;
 
   // Load screener first so it can be injected into the skills provider
-  const skillScreener = config.providers.skillScreener
-    ? await loadProvider('screener', config.providers.skillScreener, config)
+  const screener = config.providers.screener
+    ? await loadProvider('screener', config.providers.screener, config)
     : undefined;
 
   // Load skills provider, passing screener as an option
   const skillsModulePath = resolveProviderPath('skills', config.providers.skills);
   const skillsMod = await import(skillsModulePath);
-  const skills = await skillsMod.create(config, config.providers.skills, { screener: skillScreener });
+  const skills = await skillsMod.create(config, config.providers.skills, { screener });
 
   return {
     llm:         tracedLlm,
@@ -64,7 +64,7 @@ export async function loadProviders(config: Config, opts?: LoadProvidersOptions)
     audit:       await loadProvider('audit', config.providers.audit, config),
     sandbox:     await loadProvider('sandbox', config.providers.sandbox, config),
     scheduler:   await loadProvider('scheduler', config.providers.scheduler, config),
-    skillScreener,
+    screener,
   };
 }
 

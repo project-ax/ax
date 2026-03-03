@@ -40,10 +40,10 @@ export function createSkillsHandlers(providers: ProviderRegistry) {
 
       // 3. Screen
       let screenResult;
-      if (providers.skillScreener?.screenExtended) {
-        screenResult = await providers.skillScreener.screenExtended(skillMd, parsed.permissions);
-      } else if (providers.skillScreener) {
-        const basic = await providers.skillScreener.screen(skillMd, parsed.permissions);
+      if (providers.screener?.screenExtended) {
+        screenResult = await providers.screener.screenExtended(skillMd, parsed.permissions);
+      } else if (providers.screener) {
+        const basic = await providers.screener.screen(skillMd, parsed.permissions);
         screenResult = {
           verdict: basic.allowed ? 'APPROVE' as const : 'REJECT' as const,
           score: basic.allowed ? 0 : 1,
