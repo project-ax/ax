@@ -22,9 +22,15 @@ models:
 providers:
   memory: memoryfs
   audit: sqlite
-  credentials: env
+  credentials: plaintext
   sandbox: seatbelt
   screener: static
+  scheduler: none
+  browser: none
+  skills: readonly
+  channels: []
+  web: none
+  scanner: basic
 
 # ── History / Memory / Embeddings ───────────────────────────
 history:
@@ -36,12 +42,19 @@ history:
   memory_recall: true
   memory_recall_limit: 5
   memory_recall_scope: "*"
-  # Compound provider/model format — uses {PROVIDER}_API_KEY from .env.test.
-  # Examples: openai/text-embedding-3-small, openrouter/openai/text-embedding-3-small
-  embedding_model: openai/text-embedding-3-small
-  embedding_dimensions: 1536
+  embedding_model: deepinfra/Qwen/Qwen3-Embedding-0.6B
+  embedding_dimensions: 1024
 
 # ── Sandbox ─────────────────────────────────────────────────
 sandbox:
   timeout_sec: 120
   memory_mb: 512
+
+# ── Scheduler ────────────────────────────────────────────────
+scheduler:
+  active_hours:
+    start: "07:00"
+    end: "23:00"
+    timezone: America/New_York
+  max_token_budget: 4096
+  heartbeat_interval_min: 30
