@@ -104,6 +104,9 @@ export interface Config {
     summarize: boolean;
     summarize_threshold: number;
     summarize_keep_recent: number;
+    memory_recall: boolean;
+    memory_recall_limit: number;
+    memory_recall_scope: string;
   };
   delegation?: {
     max_concurrent?: number;

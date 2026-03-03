@@ -4,6 +4,7 @@ Host process work: server, router, IPC handlers, event console, event bus, deleg
 
 ## Entries
 
+- 2026-03-02 19:40 — Add long-term memory recall injection into conversation history [memory-recall.md](memory-recall.md)
 - 2026-03-02 23:40 — Implement persistent chat history summarization for infinite-length conversations [history-summarizer.md](history-summarizer.md)
 - 2026-03-02 12:45 — Add HTTP bootstrap admin claiming to handleCompletions [server.md](server.md)
 - 2026-03-01 16:11 — Add context metrics to event console logs [event-console.md](event-console.md)
