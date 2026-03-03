@@ -2,6 +2,23 @@
 
 Configuration wizard, model selection, API key flow, task-type model routing.
 
+## [2026-03-03 22:50] — Improve first-time setup experience
+
+**Task:** Audit and improve the first-time user experience — welcome banner, post-setup guidance, startup banner, server-not-running errors, `ax init` alias, API key preflight check
+**What I did:**
+1. Updated `ASCII_WELCOME` in prompts.ts with personality (crab emoji, time estimate, warmer tone)
+2. Added post-setup "What's next" banner to configure.ts showing `ax serve` / `ax chat` commands in a box
+3. Added startup banner to `ax serve` showing socket path, profile, and how to connect
+4. Added `ax init` as alias for `ax configure` in the CLI router (fixes broken website hero CTA)
+5. Added API key preflight check before server start — warns if no env var found for the configured provider
+6. Added socket existence check in `ax chat` and `ax send` — clear error instead of cryptic ECONNREFUSED
+7. Exposed `socketPath` getter on AxServer interface for startup banner
+8. Updated website `docs/web/index.html` to use `ax init` in the Get Started code block
+9. Added tests: init alias routing, banner content assertions
+**Files touched:** src/onboarding/prompts.ts, src/onboarding/configure.ts, src/cli/index.ts, src/cli/chat.ts, src/cli/send.ts, src/host/server.ts, docs/web/index.html, tests/cli/index.test.ts, tests/onboarding/configure.test.ts
+**Outcome:** Success — 2301 tests pass, no regressions
+**Notes:** The AxServer interface change (adding `socketPath` getter) is backward-compatible since all consumers go through `createServer()`. The preflight check only checks env vars — keychain/OAuth credentials are harder to validate at startup and are left for runtime diagnosis.
+
 ## [2026-03-02 22:30] — Fix OAuth refresh token persistence bugs
 
 **Task:** OAuth `invalid_grant` error persists even after re-authenticating via `ax configure`

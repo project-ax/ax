@@ -1,4 +1,5 @@
 // src/cli/send.ts
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Writable } from 'node:stream';
 import { Agent } from 'undici';
@@ -164,6 +165,14 @@ export async function runSend(args: string[]): Promise<void> {
   const resolvedSessionId = sessionId
     ? (sessionId.includes(':') ? sessionId : composeSessionId('main', 'cli', sessionId))
     : undefined; // no session (ephemeral)
+
+  // Check if the server socket exists before trying to connect
+  const resolvedSocket = socketPath ?? join(axHome(), 'ax.sock');
+  if (!existsSync(resolvedSocket)) {
+    console.error('\n  AX server isn\'t running.');
+    console.error('  Start it first with: ax serve\n');
+    process.exit(1);
+  }
 
   const client = createSendClient({
     message,

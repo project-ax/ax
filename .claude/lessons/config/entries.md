@@ -24,6 +24,12 @@
 **Lesson:** When multiple credential sources exist (shell env, `.env` file, credential provider), the credential provider must be the authoritative source. Don't skip `provider.get()` just because `process.env` already has a value — the provider's store may have a fresher value. The provider itself falls back to `process.env` for keys not in its store, so shell exports still work naturally. Also: any code path that refreshes OAuth tokens (including reactive 401 retry) must persist the new tokens via the credential provider, not just update `process.env`, because OAuth servers commonly rotate refresh tokens. Finally: load the credential provider and seed `process.env` BEFORE loading other providers that read tokens at creation time (e.g. Slack channel provider reads `process.env.SLACK_BOT_TOKEN` in its `create()` function).
 **Tags:** oauth, credentials, dotenv, token-refresh, persistence, precedence, loading-order
 
+### Check socket existence before connecting — better error than ECONNREFUSED
+**Date:** 2026-03-03
+**Context:** `ax chat` and `ax send` threw raw ECONNREFUSED errors when the server wasn't running. The error diagnosis in errors.ts caught this pattern but the message was generic.
+**Lesson:** For CLI commands that connect to the Unix socket, check `existsSync(socketPath)` before attempting connection. The socket file only exists while the server is running (it's cleaned up on stop), so its absence is a reliable signal. This gives a much better first-run experience than a generic socket error.
+**Tags:** cli, chat, send, socket, error-handling, onboarding
+
 ### New path helpers must handle colon-separated session IDs
 **Date:** 2026-02-22
 **Context:** `scratchDir()` used `validatePathSegment()` (alphanumeric/dash/underscore only), but channel session IDs like `test:thread:C02:2000.0001` contain colons and dots

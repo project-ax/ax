@@ -5,6 +5,19 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { buildInquirerDefaults } from '../../src/onboarding/configure.js';
 import { runOnboarding, loadExistingConfig } from '../../src/onboarding/wizard.js';
+import { ASCII_WELCOME, RECONFIGURE_HEADER } from '../../src/onboarding/prompts.js';
+
+describe('Onboarding banners', () => {
+  test('ASCII_WELCOME contains crab and time estimate', () => {
+    expect(ASCII_WELCOME).toContain('🦀');
+    expect(ASCII_WELCOME).toContain('AX');
+    expect(ASCII_WELCOME).toContain('30 seconds');
+  });
+
+  test('RECONFIGURE_HEADER contains crab', () => {
+    expect(RECONFIGURE_HEADER).toContain('🦀');
+  });
+});
 
 describe('Configure UI Helpers', () => {
   let tmpDir: string;

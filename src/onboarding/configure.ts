@@ -379,12 +379,22 @@ export async function runConfigure(outputDir: string): Promise<void> {
     },
   });
 
-  console.log(`\n  Config written to ${outputDir}/ax.yaml`);
-  console.log(`  ${authMethod === 'oauth' ? 'OAuth tokens' : 'API key'} written to ${outputDir}/.env`);
+  console.log(`\n  ✓ Config written to ${outputDir}/ax.yaml`);
+  console.log(`  ✓ ${authMethod === 'oauth' ? 'OAuth tokens' : 'API key'} written to ${outputDir}/.env`);
 
   if (!skipSkills && installSkills.length > 0) {
-    console.log(`  Skill install queue: ${installSkills.join(', ')}`);
+    console.log(`  ✓ Skill install queue: ${installSkills.join(', ')}`);
   }
 
+  console.log('');
+  console.log('  ┌──────────────────────────────────────────────┐');
+  console.log('  │  What\'s next:                                │');
+  console.log('  │                                              │');
+  console.log('  │    ax serve       Start the server            │');
+  console.log('  │    ax chat        Chat with your agent        │');
+  console.log('  │                                              │');
+  console.log('  │  Or just run `ax serve` — we\'ll prompt you   │');
+  console.log('  │  through the rest.                           │');
+  console.log('  └──────────────────────────────────────────────┘');
   console.log('');
 }

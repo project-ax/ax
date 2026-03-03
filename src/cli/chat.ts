@@ -1,6 +1,7 @@
 // src/cli/chat.ts
 import React from 'react';
 import { render } from 'ink';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { Agent } from 'undici';
 import { axHome, composeSessionId } from '../paths.js';
@@ -75,6 +76,14 @@ export async function runChat(args: string[]): Promise<void> {
   const sessionId = sessionName
     ? (sessionName.includes(':') ? sessionName : composeSessionId('main', 'cli', sessionName))
     : undefined; // falls back to default in createChatClient
+
+  // Check if the server socket exists before trying to connect
+  const resolvedSocket = socketPath ?? join(axHome(), 'ax.sock');
+  if (!existsSync(resolvedSocket)) {
+    console.error('\n  AX server isn\'t running.');
+    console.error('  Start it first with: ax serve\n');
+    process.exit(1);
+  }
 
   const client = createChatClient({ socketPath, noStream, sessionId });
   await client.start();

@@ -35,6 +35,7 @@ export async function routeCommand(
       if (handlers.send) await handlers.send(args.slice(1));
       break;
     case 'configure':
+    case 'init':
       if (handlers.configure) await handlers.configure();
       break;
     case 'bootstrap':
@@ -58,6 +59,7 @@ Usage:
   ax chat [options]      Start interactive chat client
   ax send <message>      Send a single message
   ax configure           Run configuration wizard
+  ax init                Alias for configure
   ax bootstrap [agent]   Reset agent identity and re-run bootstrap
   ax plugin <command>    Manage third-party provider plugins
 
@@ -112,7 +114,7 @@ export async function main(): Promise<void> {
     return;
   }
 
-  const knownCommands = new Set(['serve', 'chat', 'send', 'configure', 'bootstrap', 'plugin', 'help']);
+  const knownCommands = new Set(['serve', 'chat', 'send', 'configure', 'init', 'bootstrap', 'plugin', 'help']);
   let command: string;
   let restArgs: string[];
 
@@ -202,7 +204,7 @@ async function runServe(args: string[]): Promise<void> {
     const { runConfigure } = await import('../onboarding/configure.js');
     await runConfigure(axHome());
     await loadDotEnv();
-    logger.info('setup_complete', { message: 'Setup complete! Starting AX...' });
+    console.log('  Setup complete — starting the server...\n');
   }
 
   // Load config and create server
@@ -213,9 +215,17 @@ async function runServe(args: string[]): Promise<void> {
   let config = loadConfig(configPath);
   logger.debug('config_loaded', { profile: config.profile });
 
+  // Pre-flight: warn if no API key is set
+  await runPreflight(config, logger);
+
   const serverOpts = { socketPath, port, daemon, verbose, json: jsonOutput };
   let server = await createServer(config, serverOpts);
   await server.start();
+
+  // Startup banner (skip in daemon mode — no human watching)
+  if (!daemon) {
+    printStartupBanner(server.socketPath, config.profile, server.tcpAddress);
+  }
 
   // Set up hot reload on config changes
   const { setupConfigReload } = await import('./reload.js');
@@ -243,6 +253,54 @@ async function runServe(args: string[]): Promise<void> {
   if (daemon) {
     logger.info('daemon_mode');
     process.disconnect?.();
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// Startup Helpers
+// ═══════════════════════════════════════════════════════
+
+function printStartupBanner(
+  socket: string,
+  profile: string,
+  tcp: { host: string; port: number } | null,
+): void {
+  const lines = [
+    '',
+    '  🦀  AX is running',
+    '',
+    `  Socket:  ${socket}`,
+  ];
+  if (tcp) {
+    lines.push(`  TCP:     http://${tcp.host}:${tcp.port}`);
+  }
+  lines.push(`  Profile: ${profile}`);
+  lines.push('');
+  lines.push('  → Open a new terminal and run: ax chat');
+  lines.push('  → Press Ctrl+C to stop');
+  lines.push('');
+  console.log(lines.join('\n'));
+}
+
+async function runPreflight(
+  config: import('../types.js').Config,
+  logger: ReturnType<typeof import('../logger.js').getLogger>,
+): Promise<void> {
+  // Check that the configured LLM provider has an API key available.
+  // We only check env vars here — keychain/OAuth are harder to validate at startup.
+  const model = config.model?.default ?? '';
+  const provider = model.split('/')[0];
+  if (!provider) return;
+
+  const envVar = `${provider.toUpperCase()}_API_KEY`;
+  const hasKey = !!process.env[envVar] || !!process.env.ANTHROPIC_API_KEY;
+
+  if (!hasKey) {
+    logger.warn('preflight_no_api_key', {
+      message: `No ${envVar} found in environment. LLM calls will fail.`,
+    });
+    console.log(`\n  ⚠  No ${envVar} found. LLM calls will fail until it's set.`);
+    console.log(`     Run \`ax configure\` to set it, or export ${envVar} in your shell.\n`);
   }
 }
 

@@ -4,6 +4,7 @@ Configuration, paths, environment, onboarding wizard, model routing.
 
 ## Entries
 
+- 2026-03-03 22:50 — Improve first-time setup experience [onboarding.md](onboarding.md)
 - 2026-02-26 03:35 — Add image model selection to ax configure [onboarding.md](onboarding.md)
 - 2026-02-26 03:27 — Make models.default optional for claude-code agents [onboarding.md](onboarding.md)
 - 2026-02-26 02:15 — Organize models by task type [onboarding.md](onboarding.md)

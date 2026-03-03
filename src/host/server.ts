@@ -61,6 +61,8 @@ export interface ServerOptions {
 
 export interface AxServer {
   listening: boolean;
+  /** The Unix socket path the server listens on. */
+  socketPath: string;
   /** TCP address when --port is used (null otherwise). */
   tcpAddress: { host: string; port: number } | null;
   start(): Promise<void>;
@@ -1005,6 +1007,7 @@ export async function createServer(
 
   return {
     get listening() { return listening; },
+    get socketPath() { return socketPath; },
     get tcpAddress() {
       if (!tcpServer) return null;
       const addr = tcpServer.address();

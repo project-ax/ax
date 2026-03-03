@@ -183,10 +183,12 @@ export const PROVIDER_CHOICES = {
 } as const;
 
 export const ASCII_WELCOME = `
-   Welcome to Project AX!
+  🦀  Welcome to AX
 
-   The security-first personal AI agent.
-   Let's get you set up.
+  Security-first personal AI agent.
+  We're about to ask a few questions — nothing scary.
+
+  (Takes about 30 seconds. We timed it.)
 `;
 
 export const RECONFIGURE_HEADER = `

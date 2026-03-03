@@ -38,4 +38,10 @@ describe('CLI Router', () => {
     await routeCommand(['unknown'], { help: mockHelp });
     expect(mockHelp).toHaveBeenCalledOnce();
   });
+
+  it('should route init as alias for configure', async () => {
+    const mockConfigure = vi.fn();
+    await routeCommand(['init'], { configure: mockConfigure });
+    expect(mockConfigure).toHaveBeenCalledOnce();
+  });
 });
