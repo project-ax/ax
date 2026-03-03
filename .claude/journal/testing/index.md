@@ -4,6 +4,7 @@ Test infrastructure, integration tests, E2E framework, migration tests.
 
 ## Entries
 
+- 2026-03-03 11:30 — Add acceptance test skill and tests/acceptance/ directory [acceptance.md](acceptance.md)
 - 2026-03-01 21:20 — Fix CI unhandled ENOENT in phase1.test.ts [integration.md](integration.md)
 - 2026-02-27 02:35 — Fix flaky integration smoke tests [integration.md](integration.md)
 - 2026-02-22 21:00 — E2E test framework: expanded coverage for missing scenarios [e2e.md](e2e.md)
