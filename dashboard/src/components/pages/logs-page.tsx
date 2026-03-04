@@ -7,6 +7,7 @@ import {
   CheckCircle,
   XCircle,
   Clock,
+  ShieldAlert,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useApi } from '../../hooks/use-api';
@@ -37,28 +38,28 @@ function ResultBadge({ result }: { result: string }) {
     case 'ok':
       return (
         <span className="badge-green">
-          <CheckCircle size={12} className="mr-1" />
+          <CheckCircle size={12} />
           ok
         </span>
       );
     case 'error':
       return (
         <span className="badge-red">
-          <XCircle size={12} className="mr-1" />
+          <XCircle size={12} />
           error
         </span>
       );
     case 'blocked':
       return (
         <span className="badge-yellow">
-          <AlertTriangle size={12} className="mr-1" />
+          <ShieldAlert size={12} />
           blocked
         </span>
       );
     case 'timeout':
       return (
         <span className="badge-yellow">
-          <Clock size={12} className="mr-1" />
+          <Clock size={12} />
           timeout
         </span>
       );
@@ -104,13 +105,13 @@ export default function LogsPage() {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
-        <AlertTriangle size={40} className="text-red-400 mb-4" />
-        <h2 className="text-lg font-semibold text-zinc-100 mb-2">
+        <AlertTriangle size={40} className="text-rose mb-4" />
+        <h2 className="text-lg font-semibold text-foreground mb-2">
           Failed to load audit logs
         </h2>
-        <p className="text-sm text-zinc-400 mb-4">{error.message}</p>
+        <p className="text-[13px] text-muted-foreground mb-4">{error.message}</p>
         <button onClick={refresh} className="btn-primary">
-          <RefreshCw size={14} className="inline mr-2" />
+          <RefreshCw size={14} />
           Retry
         </button>
       </div>
@@ -118,18 +119,18 @@ export default function LogsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Page header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-end justify-between animate-fade-in-up">
         <div>
-          <h2 className="text-xl font-bold text-zinc-100">Audit Logs</h2>
-          <p className="text-sm text-zinc-500">
+          <h2 className="text-2xl font-semibold tracking-tight text-foreground">Audit Logs</h2>
+          <p className="mt-1 text-[13px] text-muted-foreground">
             System activity and event history
           </p>
         </div>
         <button
           onClick={refresh}
-          className="btn-secondary flex items-center gap-2 text-sm"
+          className="btn-secondary flex items-center gap-2 text-[13px]"
         >
           <RefreshCw size={14} />
           Refresh
@@ -137,13 +138,13 @@ export default function LogsPage() {
       </div>
 
       {/* Filter bar */}
-      <div className="card">
+      <div className="card animate-fade-in-up" style={{ animationDelay: '80ms' }}>
         <div className="p-4">
           <div className="flex flex-wrap gap-3">
             <select
               value={action}
               onChange={(e) => setAction(e.target.value)}
-              className="select text-sm"
+              className="select text-[13px]"
             >
               {ACTION_TYPES.map(({ value, label }) => (
                 <option key={value} value={value}>
@@ -155,7 +156,7 @@ export default function LogsPage() {
             <select
               value={result}
               onChange={(e) => setResult(e.target.value)}
-              className="select text-sm"
+              className="select text-[13px]"
             >
               {RESULT_TYPES.map(({ value, label }) => (
                 <option key={value} value={value}>
@@ -167,14 +168,14 @@ export default function LogsPage() {
             <div className="relative flex-1 min-w-[200px]">
               <Search
                 size={14}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
               />
               <input
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search actions, sessions..."
-                className="input w-full pl-9 text-sm"
+                className="input w-full pl-9 text-[13px]"
               />
             </div>
           </div>
@@ -182,16 +183,16 @@ export default function LogsPage() {
       </div>
 
       {/* Logs table */}
-      <div className="card">
+      <div className="card animate-fade-in-up" style={{ animationDelay: '160ms' }}>
         <div className="card-header flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <FileText size={16} className="text-amber-500" />
-            <h3 className="text-sm font-semibold text-zinc-100">
+            <FileText size={16} className="text-amber" strokeWidth={1.8} />
+            <h3 className="text-[14px] font-semibold tracking-tight text-foreground">
               Log Entries
             </h3>
           </div>
           {entries && (
-            <span className="text-xs text-zinc-500">
+            <span className="text-[11px] font-medium text-muted-foreground">
               {entries.length} entries
             </span>
           )}
@@ -204,58 +205,58 @@ export default function LogsPage() {
               ))}
             </div>
           ) : !entries || entries.length === 0 ? (
-            <div className="text-center py-12 text-sm text-zinc-500">
+            <div className="text-center py-12 text-[13px] text-muted-foreground">
               {action || result || search
                 ? 'No entries match your filters'
                 : 'No audit entries recorded yet'}
             </div>
           ) : (
-            <table className="w-full text-sm">
+            <table className="w-full text-[13px]">
               <thead>
-                <tr className="border-b border-zinc-800 text-left">
-                  <th className="px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                <tr className="border-b border-border/50 text-left">
+                  <th className="px-6 py-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
                     Timestamp
                   </th>
-                  <th className="px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                  <th className="px-6 py-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
                     Action
                   </th>
-                  <th className="px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                  <th className="px-6 py-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
                     Session
                   </th>
-                  <th className="px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                  <th className="px-6 py-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
                     Result
                   </th>
-                  <th className="px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wide text-right">
+                  <th className="px-6 py-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide text-right">
                     Duration
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-800/50">
+              <tbody className="divide-y divide-border/30">
                 {entries.map((entry, i) => (
                   <tr
                     key={`${entry.timestamp}-${i}`}
-                    className="hover:bg-zinc-800/30 transition-colors"
+                    className="hover:bg-foreground/[0.02] transition-colors"
                   >
-                    <td className="px-4 py-3 text-zinc-400 whitespace-nowrap">
+                    <td className="px-6 py-3 text-muted-foreground whitespace-nowrap">
                       <div className="flex items-center gap-1.5">
-                        <Clock size={12} className="text-zinc-600" />
+                        <Clock size={12} className="text-muted-foreground/50" />
                         {formatTimestamp(entry.timestamp)}
                       </div>
                     </td>
-                    <td className="px-4 py-3">
-                      <span className="font-mono text-zinc-300">
+                    <td className="px-6 py-3">
+                      <span className="font-mono text-foreground/70">
                         {entry.action}
                       </span>
                     </td>
-                    <td className="px-4 py-3">
-                      <span className="font-mono text-xs text-zinc-500">
+                    <td className="px-6 py-3">
+                      <span className="font-mono text-[11px] text-muted-foreground/50">
                         {entry.sessionId.slice(0, 12)}...
                       </span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-6 py-3">
                       <ResultBadge result={entry.result} />
                     </td>
-                    <td className="px-4 py-3 text-right text-zinc-400 tabular-nums">
+                    <td className="px-6 py-3 text-right text-muted-foreground tabular-nums">
                       {entry.durationMs}ms
                     </td>
                   </tr>
@@ -267,11 +268,11 @@ export default function LogsPage() {
 
         {/* Load more */}
         {entries && entries.length >= limit && (
-          <div className="p-4 border-t border-zinc-800 text-center">
+          <div className="p-4 border-t border-border/30 text-center">
             <button
               onClick={handleLoadMore}
               disabled={loading}
-              className="btn-secondary text-sm"
+              className="btn-secondary text-[13px]"
             >
               {loading ? 'Loading...' : 'Load More'}
             </button>

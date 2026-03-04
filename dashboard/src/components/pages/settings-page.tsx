@@ -35,11 +35,11 @@ function ConfigSection({
     return (
       <div className="card">
         <div className="card-header flex items-center gap-2">
-          <Icon size={16} className="text-amber-500" />
-          <h3 className="text-sm font-semibold text-zinc-100">{title}</h3>
+          <Icon size={16} className="text-amber" strokeWidth={1.8} />
+          <h3 className="text-[14px] font-semibold tracking-tight text-foreground">{title}</h3>
         </div>
         <div className="card-body">
-          <p className="text-sm text-zinc-500">No configuration set</p>
+          <p className="text-[13px] text-muted-foreground">No configuration set</p>
         </div>
       </div>
     );
@@ -48,18 +48,18 @@ function ConfigSection({
   return (
     <div className="card">
       <div className="card-header flex items-center gap-2">
-        <Icon size={16} className="text-amber-500" />
-        <h3 className="text-sm font-semibold text-zinc-100">{title}</h3>
+        <Icon size={16} className="text-amber" strokeWidth={1.8} />
+        <h3 className="text-[14px] font-semibold tracking-tight text-foreground">{title}</h3>
       </div>
       <div className="card-body">
         <div className="space-y-2">
           {Object.entries(data).map(([key, value]) => (
             <div
               key={key}
-              className="flex items-start justify-between py-1.5 border-b border-zinc-800/50 last:border-0"
+              className="flex items-start justify-between py-1.5 border-b border-border/30 last:border-0"
             >
-              <span className="text-sm text-zinc-400 font-mono">{key}</span>
-              <span className="text-sm text-zinc-300 text-right ml-4 break-all">
+              <span className="text-[13px] text-muted-foreground font-mono">{key}</span>
+              <span className="text-[13px] text-foreground/70 text-right ml-4 break-all">
                 {typeof value === 'object' && value !== null
                   ? JSON.stringify(value, null, 0)
                   : String(value ?? '--')}
@@ -98,13 +98,13 @@ export default function SettingsPage() {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
-        <AlertTriangle size={40} className="text-red-400 mb-4" />
-        <h2 className="text-lg font-semibold text-zinc-100 mb-2">
+        <AlertTriangle size={40} className="text-rose mb-4" />
+        <h2 className="text-lg font-semibold text-foreground mb-2">
           Failed to load settings
         </h2>
-        <p className="text-sm text-zinc-400 mb-4">{error.message}</p>
+        <p className="text-[13px] text-muted-foreground mb-4">{error.message}</p>
         <button onClick={handleRefresh} className="btn-primary">
-          <RefreshCw size={14} className="inline mr-2" />
+          <RefreshCw size={14} />
           Retry
         </button>
       </div>
@@ -112,18 +112,18 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Page header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-end justify-between animate-fade-in-up">
         <div>
-          <h2 className="text-xl font-bold text-zinc-100">Settings</h2>
-          <p className="text-sm text-zinc-500">
+          <h2 className="text-2xl font-semibold tracking-tight text-foreground">Settings</h2>
+          <p className="mt-1 text-[13px] text-muted-foreground">
             Server configuration (read-only)
           </p>
         </div>
         <button
           onClick={handleRefresh}
-          className="btn-secondary flex items-center gap-2 text-sm"
+          className="btn-secondary flex items-center gap-2 text-[13px]"
         >
           <RefreshCw size={14} />
           Refresh
@@ -131,17 +131,21 @@ export default function SettingsPage() {
       </div>
 
       {/* Notice */}
-      <div className="card border-amber-500/20">
+      <div
+        className="card border-amber/20 animate-fade-in-up"
+        style={{ animationDelay: '80ms' }}
+      >
         <div className="p-4 flex items-start gap-3">
           <AlertTriangle
             size={18}
-            className="text-amber-500 shrink-0 mt-0.5"
+            className="text-amber shrink-0 mt-0.5"
+            strokeWidth={1.8}
           />
           <div>
-            <p className="text-sm text-zinc-300">
+            <p className="text-[13px] text-foreground/70">
               Configuration is read-only in the dashboard. To make changes, edit
               your{' '}
-              <code className="px-1.5 py-0.5 rounded bg-zinc-800 text-amber-400 text-xs font-mono">
+              <code className="px-1.5 py-0.5 rounded-md bg-foreground/[0.04] text-amber text-[11px] font-mono">
                 ax.yaml
               </code>{' '}
               file and restart the server.
@@ -151,10 +155,10 @@ export default function SettingsPage() {
       </div>
 
       {/* Server info */}
-      <div className="card">
+      <div className="card animate-fade-in-up" style={{ animationDelay: '160ms' }}>
         <div className="card-header flex items-center gap-2">
-          <Server size={16} className="text-amber-500" />
-          <h3 className="text-sm font-semibold text-zinc-100">
+          <Server size={16} className="text-amber" strokeWidth={1.8} />
+          <h3 className="text-[14px] font-semibold tracking-tight text-foreground">
             Server Information
           </h3>
         </div>
@@ -167,46 +171,46 @@ export default function SettingsPage() {
             </div>
           ) : status ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="flex items-center gap-3 p-3 rounded bg-zinc-800/50">
-                <div className="p-1.5 rounded bg-zinc-700">
-                  <Server size={14} className="text-zinc-400" />
+              <div className="flex items-center gap-3 p-3 rounded-lg border border-border/30 bg-foreground/[0.02]">
+                <div className="flex h-7 w-7 items-center justify-center rounded-md bg-foreground/[0.04]">
+                  <Server size={14} className="text-muted-foreground" strokeWidth={1.8} />
                 </div>
                 <div>
-                  <p className="text-xs text-zinc-500">Status</p>
-                  <p className="text-sm font-medium text-zinc-200">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium">Status</p>
+                  <p className="text-[13px] font-medium text-foreground">
                     {status.status}
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-3 p-3 rounded bg-zinc-800/50">
-                <div className="p-1.5 rounded bg-zinc-700">
-                  <Clock size={14} className="text-zinc-400" />
+              <div className="flex items-center gap-3 p-3 rounded-lg border border-border/30 bg-foreground/[0.02]">
+                <div className="flex h-7 w-7 items-center justify-center rounded-md bg-foreground/[0.04]">
+                  <Clock size={14} className="text-muted-foreground" strokeWidth={1.8} />
                 </div>
                 <div>
-                  <p className="text-xs text-zinc-500">Uptime</p>
-                  <p className="text-sm font-medium text-zinc-200">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium">Uptime</p>
+                  <p className="text-[13px] font-medium text-foreground">
                     {formatUptime(status.uptime)}
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-3 p-3 rounded bg-zinc-800/50">
-                <div className="p-1.5 rounded bg-zinc-700">
-                  <Shield size={14} className="text-zinc-400" />
+              <div className="flex items-center gap-3 p-3 rounded-lg border border-border/30 bg-foreground/[0.02]">
+                <div className="flex h-7 w-7 items-center justify-center rounded-md bg-foreground/[0.04]">
+                  <Shield size={14} className="text-muted-foreground" strokeWidth={1.8} />
                 </div>
                 <div>
-                  <p className="text-xs text-zinc-500">Security Profile</p>
-                  <p className="text-sm font-medium text-zinc-200 capitalize">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium">Security Profile</p>
+                  <p className="text-[13px] font-medium text-foreground capitalize">
                     {status.profile}
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-3 p-3 rounded bg-zinc-800/50">
-                <div className="p-1.5 rounded bg-zinc-700">
-                  <Terminal size={14} className="text-zinc-400" />
+              <div className="flex items-center gap-3 p-3 rounded-lg border border-border/30 bg-foreground/[0.02]">
+                <div className="flex h-7 w-7 items-center justify-center rounded-md bg-foreground/[0.04]">
+                  <Terminal size={14} className="text-muted-foreground" strokeWidth={1.8} />
                 </div>
                 <div>
-                  <p className="text-xs text-zinc-500">Agents</p>
-                  <p className="text-sm font-medium text-zinc-200">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium">Agents</p>
+                  <p className="text-[13px] font-medium text-foreground">
                     {status.agents.active} active / {status.agents.total} total
                   </p>
                 </div>
@@ -225,32 +229,40 @@ export default function SettingsPage() {
         </div>
       ) : config ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <ConfigSection
-            title="Security Profile"
-            icon={Shield}
-            data={{ profile: config.profile }}
-          />
-          <ConfigSection
-            title="Providers"
-            icon={Key}
-            data={
-              config.providers as Record<string, unknown> | undefined
-            }
-          />
-          <ConfigSection
-            title="Sandbox"
-            icon={Terminal}
-            data={
-              config.sandbox as Record<string, unknown> | undefined
-            }
-          />
-          <ConfigSection
-            title="Scheduler"
-            icon={Clock}
-            data={
-              config.scheduler as Record<string, unknown> | undefined
-            }
-          />
+          <div className="animate-fade-in-up" style={{ animationDelay: '240ms' }}>
+            <ConfigSection
+              title="Security Profile"
+              icon={Shield}
+              data={{ profile: config.profile }}
+            />
+          </div>
+          <div className="animate-fade-in-up" style={{ animationDelay: '320ms' }}>
+            <ConfigSection
+              title="Providers"
+              icon={Key}
+              data={
+                config.providers as Record<string, unknown> | undefined
+              }
+            />
+          </div>
+          <div className="animate-fade-in-up" style={{ animationDelay: '400ms' }}>
+            <ConfigSection
+              title="Sandbox"
+              icon={Terminal}
+              data={
+                config.sandbox as Record<string, unknown> | undefined
+              }
+            />
+          </div>
+          <div className="animate-fade-in-up" style={{ animationDelay: '480ms' }}>
+            <ConfigSection
+              title="Scheduler"
+              icon={Clock}
+              data={
+                config.scheduler as Record<string, unknown> | undefined
+              }
+            />
+          </div>
         </div>
       ) : null}
     </div>

@@ -61,10 +61,10 @@ function AgentDetail({
   return (
     <div className="card">
       <div className="card-header flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-zinc-100">Agent Details</h3>
+        <h3 className="text-[14px] font-semibold tracking-tight text-foreground">Agent Details</h3>
         <button
           onClick={onClose}
-          className="text-zinc-500 hover:text-zinc-300 transition-colors"
+          className="text-muted-foreground hover:text-foreground transition-colors"
         >
           <XCircle size={18} />
         </button>
@@ -73,55 +73,55 @@ function AgentDetail({
         {/* Identity */}
         <div>
           <div className="flex items-center gap-2 mb-2">
-            <Terminal size={16} className="text-amber-500" />
-            <h4 className="font-medium text-zinc-200">{agent.name}</h4>
+            <Terminal size={16} className="text-amber" />
+            <h4 className="font-medium text-foreground">{agent.name}</h4>
             <StatusBadge status={killed ? 'stopped' : agent.status} />
           </div>
           {agent.description && (
-            <p className="text-sm text-zinc-400">{agent.description}</p>
+            <p className="text-[13px] text-muted-foreground">{agent.description}</p>
           )}
         </div>
 
         {/* Metadata grid */}
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div>
-            <p className="text-zinc-500 text-xs uppercase tracking-wide mb-0.5">
+            <p className="text-muted-foreground text-[10px] uppercase tracking-wide font-medium mb-0.5">
               ID
             </p>
-            <p className="text-zinc-300 font-mono text-xs break-all">
+            <p className="text-foreground/70 font-mono text-[11px] break-all">
               {agent.id}
             </p>
           </div>
           <div>
-            <p className="text-zinc-500 text-xs uppercase tracking-wide mb-0.5">
+            <p className="text-muted-foreground text-[10px] uppercase tracking-wide font-medium mb-0.5">
               Type
             </p>
-            <p className="text-zinc-300">{agent.agentType}</p>
+            <p className="text-foreground/70 text-[13px]">{agent.agentType}</p>
           </div>
           <div>
-            <p className="text-zinc-500 text-xs uppercase tracking-wide mb-0.5">
+            <p className="text-muted-foreground text-[10px] uppercase tracking-wide font-medium mb-0.5">
               Created By
             </p>
-            <p className="text-zinc-300">{agent.createdBy}</p>
+            <p className="text-foreground/70 text-[13px]">{agent.createdBy}</p>
           </div>
           <div>
-            <p className="text-zinc-500 text-xs uppercase tracking-wide mb-0.5">
+            <p className="text-muted-foreground text-[10px] uppercase tracking-wide font-medium mb-0.5">
               Created At
             </p>
-            <p className="text-zinc-300">{formatDate(agent.createdAt)}</p>
+            <p className="text-foreground/70 text-[13px]">{formatDate(agent.createdAt)}</p>
           </div>
           <div>
-            <p className="text-zinc-500 text-xs uppercase tracking-wide mb-0.5">
+            <p className="text-muted-foreground text-[10px] uppercase tracking-wide font-medium mb-0.5">
               Updated At
             </p>
-            <p className="text-zinc-300">{formatDate(agent.updatedAt)}</p>
+            <p className="text-foreground/70 text-[13px]">{formatDate(agent.updatedAt)}</p>
           </div>
           {agent.parentId && (
             <div>
-              <p className="text-zinc-500 text-xs uppercase tracking-wide mb-0.5">
+              <p className="text-muted-foreground text-[10px] uppercase tracking-wide font-medium mb-0.5">
                 Parent ID
               </p>
-              <p className="text-zinc-300 font-mono text-xs break-all">
+              <p className="text-foreground/70 font-mono text-[11px] break-all">
                 {agent.parentId}
               </p>
             </div>
@@ -131,7 +131,7 @@ function AgentDetail({
         {/* Capabilities */}
         {agent.capabilities.length > 0 && (
           <div>
-            <p className="text-zinc-500 text-xs uppercase tracking-wide mb-1.5">
+            <p className="text-muted-foreground text-[10px] uppercase tracking-wide font-medium mb-1.5">
               Capabilities
             </p>
             <div className="flex flex-wrap gap-1.5">
@@ -147,24 +147,24 @@ function AgentDetail({
         {/* Children */}
         {agent.children && agent.children.length > 0 && (
           <div>
-            <p className="text-zinc-500 text-xs uppercase tracking-wide mb-1.5">
+            <p className="text-muted-foreground text-[10px] uppercase tracking-wide font-medium mb-1.5">
               Child Agents ({agent.children.length})
             </p>
             <div className="space-y-1.5">
               {agent.children.map((child) => (
                 <div
                   key={child.id}
-                  className="flex items-center justify-between p-2 rounded bg-zinc-800/50 text-sm"
+                  className="flex items-center justify-between p-2 rounded-lg border border-border/30 bg-foreground/[0.02] text-[13px]"
                 >
                   <div className="flex items-center gap-2">
                     <div
                       className={`w-1.5 h-1.5 rounded-full ${
                         child.status === 'running'
-                          ? 'bg-green-400'
-                          : 'bg-zinc-500'
+                          ? 'bg-emerald animate-pulse-live'
+                          : 'bg-muted-foreground/50'
                       }`}
                     />
-                    <span className="text-zinc-300">{child.name}</span>
+                    <span className="text-foreground/70">{child.name}</span>
                   </div>
                   <StatusBadge status={child.status} />
                 </div>
@@ -175,17 +175,17 @@ function AgentDetail({
 
         {/* Kill button */}
         {(agent.status === 'running' || agent.status === 'idle') && !killed && (
-          <div className="pt-2 border-t border-zinc-800">
+          <div className="pt-2 border-t border-border/30">
             {killError && (
-              <div className="flex items-center gap-2 p-2 mb-3 rounded bg-red-500/10 border border-red-500/20">
-                <AlertTriangle size={14} className="text-red-400 shrink-0" />
-                <p className="text-sm text-red-400">{killError}</p>
+              <div className="flex items-center gap-2 p-2 mb-3 rounded-lg bg-rose/5 border border-rose/15">
+                <AlertTriangle size={14} className="text-rose shrink-0" />
+                <p className="text-[13px] text-rose">{killError}</p>
               </div>
             )}
             <button
               onClick={handleKill}
               disabled={killing}
-              className="btn-danger w-full flex items-center justify-center gap-2 text-sm"
+              className="btn-danger w-full flex items-center justify-center gap-2 text-[13px]"
             >
               {killing ? (
                 <>
@@ -203,9 +203,9 @@ function AgentDetail({
         )}
 
         {killed && (
-          <div className="flex items-center gap-2 p-3 rounded bg-green-500/10 border border-green-500/20">
-            <CheckCircle size={14} className="text-green-400 shrink-0" />
-            <p className="text-sm text-green-400">
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-emerald/5 border border-emerald/15">
+            <CheckCircle size={14} className="text-emerald shrink-0" />
+            <p className="text-[13px] text-emerald">
               Agent killed successfully. Refresh to update the list.
             </p>
           </div>
@@ -239,13 +239,13 @@ export default function AgentsPage() {
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
-        <AlertTriangle size={40} className="text-red-400 mb-4" />
-        <h2 className="text-lg font-semibold text-zinc-100 mb-2">
+        <AlertTriangle size={40} className="text-rose mb-4" />
+        <h2 className="text-lg font-semibold text-foreground mb-2">
           Failed to load agents
         </h2>
-        <p className="text-sm text-zinc-400 mb-4">{error.message}</p>
+        <p className="text-[13px] text-muted-foreground mb-4">{error.message}</p>
         <button onClick={refresh} className="btn-primary">
-          <RefreshCw size={14} className="inline mr-2" />
+          <RefreshCw size={14} />
           Retry
         </button>
       </div>
@@ -253,18 +253,18 @@ export default function AgentsPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Page header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-end justify-between animate-fade-in-up">
         <div>
-          <h2 className="text-xl font-bold text-zinc-100">Agents</h2>
-          <p className="text-sm text-zinc-500">
+          <h2 className="text-2xl font-semibold tracking-tight text-foreground">Agents</h2>
+          <p className="mt-1 text-[13px] text-muted-foreground">
             Manage and monitor running agents
           </p>
         </div>
         <button
           onClick={refresh}
-          className="btn-secondary flex items-center gap-2 text-sm"
+          className="btn-secondary flex items-center gap-2 text-[13px]"
         >
           <RefreshCw size={14} />
           Refresh
@@ -274,16 +274,16 @@ export default function AgentsPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Agent list */}
         <div className="lg:col-span-2">
-          <div className="card">
+          <div className="card animate-fade-in-up" style={{ animationDelay: '80ms' }}>
             <div className="card-header flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Users size={16} className="text-amber-500" />
-                <h3 className="text-sm font-semibold text-zinc-100">
+                <Users size={16} className="text-amber" strokeWidth={1.8} />
+                <h3 className="text-[14px] font-semibold tracking-tight text-foreground">
                   All Agents
                 </h3>
               </div>
               {agents && (
-                <span className="text-xs text-zinc-500">
+                <span className="text-[11px] font-medium text-muted-foreground">
                   {agents.length} total
                 </span>
               )}
@@ -296,71 +296,71 @@ export default function AgentsPage() {
                   ))}
                 </div>
               ) : !agents || agents.length === 0 ? (
-                <div className="text-center py-12 text-sm text-zinc-500">
+                <div className="text-center py-12 text-[13px] text-muted-foreground">
                   No agents registered
                 </div>
               ) : (
-                <table className="w-full text-sm">
+                <table className="w-full text-[13px]">
                   <thead>
-                    <tr className="border-b border-zinc-800 text-left">
-                      <th className="px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                    <tr className="border-b border-border/50 text-left">
+                      <th className="px-6 py-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
                         Name
                       </th>
-                      <th className="px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                      <th className="px-6 py-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
                         Type
                       </th>
-                      <th className="px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                      <th className="px-6 py-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
                         Status
                       </th>
-                      <th className="px-4 py-3 text-xs font-medium text-zinc-500 uppercase tracking-wide">
+                      <th className="px-6 py-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
                         Created
                       </th>
-                      <th className="px-4 py-3" />
+                      <th className="px-6 py-3" />
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-zinc-800/50">
+                  <tbody className="divide-y divide-border/30">
                     {agents.map((agent) => (
                       <tr
                         key={agent.id}
                         onClick={() => setSelectedId(agent.id)}
                         className={`cursor-pointer transition-colors ${
                           selectedId === agent.id
-                            ? 'bg-zinc-800/70'
-                            : 'hover:bg-zinc-800/30'
+                            ? 'bg-foreground/[0.04]'
+                            : 'hover:bg-foreground/[0.02]'
                         }`}
                       >
-                        <td className="px-4 py-3">
+                        <td className="px-6 py-3">
                           <div className="flex items-center gap-2">
                             <div
-                              className={`w-2 h-2 rounded-full shrink-0 ${
+                              className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                                 agent.status === 'running'
-                                  ? 'bg-green-400'
+                                  ? 'bg-emerald animate-pulse-live'
                                   : agent.status === 'error'
-                                    ? 'bg-red-400'
-                                    : 'bg-zinc-500'
+                                    ? 'bg-rose'
+                                    : 'bg-muted-foreground/50'
                               }`}
                             />
-                            <span className="font-medium text-zinc-200">
+                            <span className="font-medium text-foreground">
                               {agent.name}
                             </span>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-zinc-400">
+                        <td className="px-6 py-3 text-muted-foreground">
                           {agent.agentType}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-6 py-3">
                           <StatusBadge status={agent.status} />
                         </td>
-                        <td className="px-4 py-3 text-zinc-500">
+                        <td className="px-6 py-3 text-muted-foreground">
                           <div className="flex items-center gap-1.5">
-                            <Clock size={12} />
+                            <Clock size={12} className="text-muted-foreground/50" />
                             {formatDate(agent.createdAt)}
                           </div>
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-6 py-3">
                           <ChevronRight
                             size={14}
-                            className="text-zinc-600"
+                            className="text-muted-foreground/30"
                           />
                         </td>
                       </tr>
@@ -373,7 +373,7 @@ export default function AgentsPage() {
         </div>
 
         {/* Detail panel */}
-        <div>
+        <div className="animate-fade-in-up" style={{ animationDelay: '160ms' }}>
           {selectedAgent ? (
             <AgentDetail
               agent={selectedAgent}
@@ -383,8 +383,8 @@ export default function AgentsPage() {
           ) : (
             <div className="card">
               <div className="card-body text-center py-12">
-                <Users size={32} className="text-zinc-700 mx-auto mb-3" />
-                <p className="text-sm text-zinc-500">
+                <Users size={32} className="text-muted-foreground/30 mx-auto mb-3" />
+                <p className="text-[13px] text-muted-foreground">
                   Select an agent to view details
                 </p>
               </div>

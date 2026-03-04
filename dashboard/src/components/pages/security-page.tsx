@@ -6,6 +6,9 @@ import {
   XCircle,
   Eye,
   Activity,
+  ShieldCheck,
+  ShieldAlert,
+  ShieldX,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useApi } from '../../hooks/use-api';
@@ -26,22 +29,28 @@ function formatTimestamp(ts: string): string {
 function ProfileCard({ profile }: { profile: string }) {
   const configs: Record<
     string,
-    { color: string; description: string; icon: typeof Shield }
+    { color: string; border: string; bg: string; description: string; icon: typeof Shield }
   > = {
     paranoid: {
-      color: 'text-red-400 bg-red-500/10 border-red-500/20',
+      color: 'text-rose',
+      border: 'border-rose/15',
+      bg: 'bg-rose/5',
       description:
         'Maximum security. Every operation is scrutinized. No network access for agents. All content is taint-tagged.',
       icon: Shield,
     },
     balanced: {
-      color: 'text-amber-400 bg-amber-500/10 border-amber-500/20',
+      color: 'text-amber',
+      border: 'border-amber/15',
+      bg: 'bg-amber/5',
       description:
         'Reasonable defaults. Network restricted to allowlisted domains. Content tainting enabled for external sources.',
       icon: Eye,
     },
     yolo: {
-      color: 'text-green-400 bg-green-500/10 border-green-500/20',
+      color: 'text-emerald',
+      border: 'border-emerald/15',
+      bg: 'bg-emerald/5',
       description:
         'Minimal restrictions. Use only in trusted development environments. Not recommended for production.',
       icon: Activity,
@@ -52,22 +61,20 @@ function ProfileCard({ profile }: { profile: string }) {
   const Icon = config.icon;
 
   return (
-    <div className={`card border ${config.color.split(' ')[2]}`}>
-      <div className="p-4">
+    <div className={`card ${config.border}`}>
+      <div className="p-5">
         <div className="flex items-center gap-3 mb-3">
-          <div
-            className={`p-2 rounded-md ${config.color.split(' ')[1]}`}
-          >
-            <Icon size={20} className={config.color.split(' ')[0]} />
+          <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${config.bg}`}>
+            <Icon size={18} className={config.color} strokeWidth={1.8} />
           </div>
           <div>
-            <h3 className="font-semibold text-zinc-100 capitalize">
+            <h3 className="font-semibold text-foreground capitalize">
               {profile}
             </h3>
-            <p className="text-xs text-zinc-500">Active Security Profile</p>
+            <p className="text-[11px] text-muted-foreground">Active Security Profile</p>
           </div>
         </div>
-        <p className="text-sm text-zinc-400">{config.description}</p>
+        <p className="text-[13px] text-muted-foreground leading-relaxed">{config.description}</p>
       </div>
     </div>
   );
@@ -75,24 +82,26 @@ function ProfileCard({ profile }: { profile: string }) {
 
 function ThreatEntry({ entry }: { entry: AuditEntry }) {
   return (
-    <div className="flex items-start gap-3 p-3 rounded-md bg-zinc-800/50 hover:bg-zinc-800 transition-colors">
-      <div className="p-1.5 rounded bg-red-500/10 shrink-0 mt-0.5">
-        <AlertTriangle size={14} className="text-red-400" />
+    <div className="group flex items-start gap-3 rounded-lg border border-rose/15 bg-rose/5 p-3 transition-colors hover:bg-foreground/[0.02]">
+      <div className="mt-0.5 shrink-0">
+        <ShieldX className="h-3.5 w-3.5 text-rose" strokeWidth={2} />
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <p className="text-sm font-medium text-zinc-200 truncate">
+          <p className="text-[12px] font-medium text-foreground/90 truncate">
             {entry.action}
           </p>
-          <span className="text-xs text-zinc-500 shrink-0">
+          <span className="text-[11px] text-muted-foreground shrink-0">
             {formatTimestamp(entry.timestamp)}
           </span>
         </div>
-        <p className="text-xs text-zinc-500 mt-0.5">
-          Session: {entry.sessionId.slice(0, 12)}...
-        </p>
+        <div className="mt-1 flex items-center gap-2">
+          <span className="text-[10px] font-mono text-muted-foreground/40">
+            {entry.sessionId.slice(0, 12)}...
+          </span>
+        </div>
         {entry.args && Object.keys(entry.args).length > 0 && (
-          <div className="mt-1.5 p-2 rounded bg-zinc-900 font-mono text-xs text-zinc-400 break-all">
+          <div className="mt-1.5 p-2 rounded-lg bg-background font-mono text-[11px] text-muted-foreground/60 break-all">
             {JSON.stringify(entry.args, null, 0).slice(0, 200)}
             {JSON.stringify(entry.args).length > 200 && '...'}
           </div>
@@ -131,13 +140,13 @@ export default function SecurityPage() {
   if (statusError) {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center">
-        <AlertTriangle size={40} className="text-red-400 mb-4" />
-        <h2 className="text-lg font-semibold text-zinc-100 mb-2">
+        <AlertTriangle size={40} className="text-rose mb-4" />
+        <h2 className="text-lg font-semibold text-foreground mb-2">
           Failed to load security data
         </h2>
-        <p className="text-sm text-zinc-400 mb-4">{statusError.message}</p>
+        <p className="text-[13px] text-muted-foreground mb-4">{statusError.message}</p>
         <button onClick={refreshStatus} className="btn-primary">
-          <RefreshCw size={14} className="inline mr-2" />
+          <RefreshCw size={14} />
           Retry
         </button>
       </div>
@@ -145,18 +154,18 @@ export default function SecurityPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {/* Page header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-end justify-between animate-fade-in-up">
         <div>
-          <h2 className="text-xl font-bold text-zinc-100">Security</h2>
-          <p className="text-sm text-zinc-500">
+          <h2 className="text-2xl font-semibold tracking-tight text-foreground">Security</h2>
+          <p className="mt-1 text-[13px] text-muted-foreground">
             Security profile, scans, and threat monitoring
           </p>
         </div>
         <button
           onClick={refreshStatus}
-          className="btn-secondary flex items-center gap-2 text-sm"
+          className="btn-secondary flex items-center gap-2 text-[13px]"
         >
           <RefreshCw size={14} />
           Refresh
@@ -164,68 +173,76 @@ export default function SecurityPage() {
       </div>
 
       {/* Security profile */}
-      {statusLoading ? (
-        <div className="skeleton h-28 w-full" />
-      ) : status ? (
-        <ProfileCard profile={status.profile} />
-      ) : null}
+      <div className="animate-fade-in-up" style={{ animationDelay: '80ms' }}>
+        {statusLoading ? (
+          <div className="skeleton h-28 w-full" />
+        ) : status ? (
+          <ProfileCard profile={status.profile} />
+        ) : null}
+      </div>
 
       {/* Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="card">
-          <div className="p-4 flex items-center gap-3">
-            <div className="p-2 rounded-md bg-zinc-800">
-              <Eye size={18} className="text-amber-500" />
+        <div className="card animate-fade-in-up" style={{ animationDelay: '160ms' }}>
+          <div className="p-5">
+            <div className="flex items-start justify-between">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber/8">
+                <Eye size={16} className="text-amber" strokeWidth={1.8} />
+              </div>
             </div>
-            <div>
-              <p className="text-xs text-zinc-500 uppercase tracking-wide">
-                Scans
-              </p>
+            <div className="mt-4">
               {scansLoading ? (
-                <div className="skeleton h-6 w-12 mt-1" />
+                <div className="skeleton h-8 w-12" />
               ) : (
-                <p className="text-xl font-semibold text-zinc-100">
+                <span className="text-[28px] font-semibold leading-none tracking-tight text-foreground">
                   {scanEvents?.length ?? 0}
-                </p>
+                </span>
               )}
+            </div>
+            <div className="mt-1.5">
+              <span className="text-[12px] font-medium text-muted-foreground">Scans</span>
             </div>
           </div>
         </div>
-        <div className="card">
-          <div className="p-4 flex items-center gap-3">
-            <div className="p-2 rounded-md bg-zinc-800">
-              <AlertTriangle size={18} className="text-red-400" />
+        <div className="card animate-fade-in-up" style={{ animationDelay: '240ms' }}>
+          <div className="p-5">
+            <div className="flex items-start justify-between">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-rose/8">
+                <AlertTriangle size={16} className="text-rose" strokeWidth={1.8} />
+              </div>
             </div>
-            <div>
-              <p className="text-xs text-zinc-500 uppercase tracking-wide">
-                Blocked
-              </p>
+            <div className="mt-4">
               {blockedLoading ? (
-                <div className="skeleton h-6 w-12 mt-1" />
+                <div className="skeleton h-8 w-12" />
               ) : (
-                <p className="text-xl font-semibold text-zinc-100">
+                <span className="text-[28px] font-semibold leading-none tracking-tight text-foreground">
                   {blockedEvents?.length ?? 0}
-                </p>
+                </span>
               )}
+            </div>
+            <div className="mt-1.5">
+              <span className="text-[12px] font-medium text-muted-foreground">Blocked</span>
             </div>
           </div>
         </div>
-        <div className="card">
-          <div className="p-4 flex items-center gap-3">
-            <div className="p-2 rounded-md bg-zinc-800">
-              <CheckCircle size={18} className="text-green-400" />
+        <div className="card animate-fade-in-up" style={{ animationDelay: '320ms' }}>
+          <div className="p-5">
+            <div className="flex items-start justify-between">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald/8">
+                <CheckCircle size={16} className="text-emerald" strokeWidth={1.8} />
+              </div>
             </div>
-            <div>
-              <p className="text-xs text-zinc-500 uppercase tracking-wide">
-                Clean Scans
-              </p>
+            <div className="mt-4">
               {scansLoading ? (
-                <div className="skeleton h-6 w-12 mt-1" />
+                <div className="skeleton h-8 w-12" />
               ) : (
-                <p className="text-xl font-semibold text-zinc-100">
+                <span className="text-[28px] font-semibold leading-none tracking-tight text-foreground">
                   {scanEvents?.filter((e) => e.result === 'ok').length ?? 0}
-                </p>
+                </span>
               )}
+            </div>
+            <div className="mt-1.5">
+              <span className="text-[12px] font-medium text-muted-foreground">Clean Scans</span>
             </div>
           </div>
         </div>
@@ -233,16 +250,16 @@ export default function SecurityPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Threat patterns (blocked events) */}
-        <div className="card">
+        <div className="card animate-fade-in-up" style={{ animationDelay: '400ms' }}>
           <div className="card-header flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <AlertTriangle size={16} className="text-red-400" />
-              <h3 className="text-sm font-semibold text-zinc-100">
+              <ShieldAlert size={16} className="text-rose" strokeWidth={1.8} />
+              <h3 className="text-[14px] font-semibold tracking-tight text-foreground">
                 Threat Patterns
               </h3>
             </div>
             {blockedEvents && (
-              <span className="text-xs text-zinc-500">
+              <span className="text-[11px] font-mono text-rose/60">
                 {blockedEvents.length} blocked
               </span>
             )}
@@ -256,11 +273,11 @@ export default function SecurityPage() {
               </div>
             ) : !blockedEvents || blockedEvents.length === 0 ? (
               <div className="text-center py-8">
-                <CheckCircle
+                <ShieldCheck
                   size={32}
-                  className="text-green-500/50 mx-auto mb-3"
+                  className="text-emerald/50 mx-auto mb-3"
                 />
-                <p className="text-sm text-zinc-500">
+                <p className="text-[13px] text-muted-foreground">
                   No threats detected. The nervous crab approves.
                 </p>
               </div>
@@ -278,17 +295,17 @@ export default function SecurityPage() {
         </div>
 
         {/* Security scan events */}
-        <div className="card">
+        <div className="card animate-fade-in-up" style={{ animationDelay: '480ms' }}>
           <div className="card-header flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Eye size={16} className="text-amber-500" />
-              <h3 className="text-sm font-semibold text-zinc-100">
+              <Eye size={16} className="text-amber" strokeWidth={1.8} />
+              <h3 className="text-[14px] font-semibold tracking-tight text-foreground">
                 Security Scans
               </h3>
             </div>
             {scanEvents && (
-              <span className="text-xs text-zinc-500">
-                {scanEvents.length} scans
+              <span className="text-[11px] font-mono text-emerald/60">
+                {scanEvents.filter((e) => e.result === 'ok').length} pass
               </span>
             )}
           </div>
@@ -300,47 +317,49 @@ export default function SecurityPage() {
                 ))}
               </div>
             ) : !scanEvents || scanEvents.length === 0 ? (
-              <div className="text-center py-8 text-sm text-zinc-500">
+              <div className="text-center py-8 text-[13px] text-muted-foreground">
                 No security scans recorded yet
               </div>
             ) : (
-              <div className="space-y-1">
-                {scanEvents.slice(0, 20).map((entry, i) => (
-                  <div
-                    key={`${entry.timestamp}-${i}`}
-                    className="flex items-center justify-between py-2 px-2 rounded hover:bg-zinc-800/50 transition-colors"
-                  >
-                    <div className="flex items-center gap-3">
-                      {entry.result === 'ok' ? (
-                        <CheckCircle
-                          size={14}
-                          className="text-green-400 shrink-0"
-                        />
-                      ) : (
-                        <XCircle
-                          size={14}
-                          className="text-red-400 shrink-0"
-                        />
-                      )}
-                      <div>
-                        <p className="text-sm text-zinc-300 font-mono">
-                          {entry.action}
-                        </p>
-                        <p className="text-xs text-zinc-600">
-                          {entry.sessionId.slice(0, 8)}...
-                        </p>
+              <div className="space-y-1.5">
+                {scanEvents.slice(0, 20).map((entry, i) => {
+                  const isPass = entry.result === 'ok';
+                  return (
+                    <div
+                      key={`${entry.timestamp}-${i}`}
+                      className={`group flex items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-foreground/[0.02] ${
+                        isPass
+                          ? 'border-emerald/15 bg-emerald/5'
+                          : 'border-rose/15 bg-rose/5'
+                      }`}
+                    >
+                      <div className="mt-0.5 shrink-0">
+                        {isPass ? (
+                          <ShieldCheck className="h-3.5 w-3.5 text-emerald" strokeWidth={2} />
+                        ) : (
+                          <ShieldX className="h-3.5 w-3.5 text-rose" strokeWidth={2} />
+                        )}
                       </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs text-zinc-500">
+                      <div className="min-w-0 flex-1">
+                        <span className="text-[12px] font-medium text-foreground/90">
+                          {entry.action}
+                        </span>
+                        <div className="mt-1 flex items-center gap-2">
+                          <span className="text-[10px] font-mono text-muted-foreground/40">
+                            {entry.sessionId.slice(0, 8)}...
+                          </span>
+                          <span className="text-[10px] text-muted-foreground/20">|</span>
+                          <span className="text-[10px] text-muted-foreground/40">
+                            {entry.durationMs}ms
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-[11px] text-muted-foreground shrink-0">
                         {formatTimestamp(entry.timestamp)}
-                      </p>
-                      <p className="text-xs text-zinc-600">
-                        {entry.durationMs}ms
-                      </p>
+                      </span>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

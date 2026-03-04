@@ -6,6 +6,8 @@ import {
   FileText,
   Settings,
   LogOut,
+  Hexagon,
+  ChevronRight,
 } from 'lucide-react';
 import { getToken, clearToken, apiFetch } from './lib/api';
 import type { SetupStatus } from './lib/types';
@@ -90,9 +92,9 @@ export default function App() {
   if (checkingSetup) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="flex items-center gap-3 text-zinc-400">
-          <div className="w-5 h-5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-          <span>Connecting to AX...</span>
+        <div className="flex items-center gap-3 text-muted-foreground">
+          <div className="w-5 h-5 border-2 border-amber border-t-transparent rounded-full animate-spin" />
+          <span className="text-[13px]">Connecting to AX...</span>
         </div>
       </div>
     );
@@ -111,48 +113,66 @@ export default function App() {
   return (
     <div className="min-h-screen flex">
       {/* Sidebar */}
-      <aside className="w-60 bg-zinc-900 border-r border-zinc-800 flex flex-col">
+      <aside className="flex h-screen w-[220px] flex-col border-r border-border/50 bg-sidebar">
         {/* Logo */}
-        <div className="px-4 py-5 border-b border-zinc-800">
-          <div className="flex items-center gap-2">
-            <span className="text-2xl" role="img" aria-label="crab">
-              🦀
+        <div className="flex h-16 items-center gap-3 px-6">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber/10">
+            <Hexagon className="h-4 w-4 text-amber" strokeWidth={2.5} />
+          </div>
+          <div>
+            <span className="text-[15px] font-semibold tracking-tight text-foreground">
+              ax
             </span>
-            <div>
-              <h1 className="text-lg font-bold text-zinc-100 tracking-tight">
-                AX
-              </h1>
-              <p className="text-xs text-zinc-500">Admin Dashboard</p>
-            </div>
+            <span className="ml-1 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+              admin
+            </span>
           </div>
         </div>
 
+        <div className="h-px bg-border/30" />
+
         {/* Navigation */}
-        <nav className="flex-1 px-2 py-3 space-y-1">
-          {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => setActivePage(id)}
-              className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium transition-colors duration-150
-                ${
-                  activePage === id
-                    ? 'bg-zinc-800 text-amber-500'
-                    : 'text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/50'
-                }`}
-            >
-              <Icon size={18} />
-              {label}
-            </button>
-          ))}
+        <nav className="flex-1 px-3 py-4">
+          <ul className="space-y-1">
+            {NAV_ITEMS.map(({ id, label, icon: Icon }) => (
+              <li key={id}>
+                <button
+                  onClick={() => setActivePage(id)}
+                  className={`group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium transition-all duration-150
+                    ${
+                      activePage === id
+                        ? 'bg-foreground/[0.06] text-foreground'
+                        : 'text-muted-foreground hover:bg-foreground/[0.03] hover:text-foreground/80'
+                    }`}
+                >
+                  <Icon
+                    size={16}
+                    strokeWidth={1.8}
+                    className={
+                      activePage === id
+                        ? 'text-amber'
+                        : 'text-muted-foreground group-hover:text-foreground/60'
+                    }
+                  />
+                  {label}
+                  {activePage === id && (
+                    <ChevronRight className="ml-auto h-3 w-3 text-muted-foreground/50" />
+                  )}
+                </button>
+              </li>
+            ))}
+          </ul>
         </nav>
 
-        {/* Logout */}
-        <div className="px-2 py-3 border-t border-zinc-800">
+        <div className="h-px bg-border/30" />
+
+        {/* Bottom section */}
+        <div className="px-3 py-4">
           <button
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-medium text-zinc-400 hover:text-red-400 hover:bg-zinc-800/50 transition-colors duration-150"
+            className="group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium text-muted-foreground hover:text-rose hover:bg-foreground/[0.03] transition-all duration-150"
           >
-            <LogOut size={18} />
+            <LogOut size={16} strokeWidth={1.8} />
             Logout
           </button>
         </div>
@@ -160,12 +180,14 @@ export default function App() {
 
       {/* Main content */}
       <main className="flex-1 overflow-auto">
-        <div className="p-6 max-w-7xl mx-auto">
-          {activePage === 'overview' && <OverviewPage />}
-          {activePage === 'agents' && <AgentsPage />}
-          {activePage === 'security' && <SecurityPage />}
-          {activePage === 'logs' && <LogsPage />}
-          {activePage === 'settings' && <SettingsPage />}
+        <div className="noise-bg min-h-full">
+          <div className="mx-auto max-w-[1400px] px-8 py-6">
+            {activePage === 'overview' && <OverviewPage />}
+            {activePage === 'agents' && <AgentsPage />}
+            {activePage === 'security' && <SecurityPage />}
+            {activePage === 'logs' && <LogsPage />}
+            {activePage === 'settings' && <SettingsPage />}
+          </div>
         </div>
       </main>
     </div>
