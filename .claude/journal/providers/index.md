@@ -4,6 +4,7 @@ Provider implementations: image, channel, skills, sandbox, memory, LLM.
 
 ## Entries
 
+- 2026-03-04 18:45 — Implement EventBusProvider interface + InProcess implementation [eventbus.md](eventbus.md)
 - 2026-03-04 18:30 — Implement StorageProvider interface + SQLite implementation [storage.md](storage.md)
 - 2026-03-03 03:25 — Fix TS build errors in embedding-store.ts [memory.md](memory.md)
 - 2026-03-03 03:00 — Fix 3 PR review issues in embedding search [memory.md](memory.md)

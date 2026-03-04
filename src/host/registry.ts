@@ -66,6 +66,9 @@ export async function loadProviders(config: Config, opts?: LoadProvidersOptions)
   // Load storage provider (wraps MessageQueue, ConversationStore, SessionStore, DocumentStore)
   const storage = await loadProvider('storage', config.providers.storage, config);
 
+  // Load eventbus provider (in-process pub/sub; Phase 2 adds NATS for k8s)
+  const eventbus = await loadProvider('eventbus', config.providers.eventbus, config);
+
   return {
     llm:         tracedLlm,
     image,
@@ -80,6 +83,7 @@ export async function loadProviders(config: Config, opts?: LoadProvidersOptions)
     sandbox:     await loadProvider('sandbox', config.providers.sandbox, config),
     scheduler:   await loadProvider('scheduler', config.providers.scheduler, config),
     storage,
+    eventbus,
     screener,
   };
 }

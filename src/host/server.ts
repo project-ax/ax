@@ -25,7 +25,7 @@ import { TaintBudget, thresholdForProfile } from './taint-budget.js';
 import { getLogger } from '../logger.js';
 import { resolveDelivery } from './delivery.js';
 import { templatesDir as resolveTemplatesDir, seedSkillsDir as resolveSeedSkillsDir } from '../utils/assets.js';
-import { createEventBus, type EventBus } from './event-bus.js';
+import type { EventBus } from './event-bus.js';
 import { attachEventConsole, attachJsonEventConsole } from './event-console.js';
 import { createOrchestrator, type Orchestrator } from './orchestration/orchestrator.js';
 
@@ -136,8 +136,15 @@ export async function createServer(
   // Initialize OpenTelemetry tracing (no-op when OTEL_EXPORTER_OTLP_ENDPOINT is unset)
   await initTracing();
 
-  // Create event bus early so startup events can be emitted
-  const eventBus = createEventBus();
+  // Load providers (credential provider is loaded first inside loadProviders
+  // so process.env is seeded before channel providers read tokens).
+  logger.debug('loading_providers');
+  const providers = await loadProviders(config);
+  logger.debug('providers_loaded');
+
+  // Use the eventbus provider (loaded by registry alongside other providers).
+  // The provider implements the EventBus interface — no direct createEventBus() call needed.
+  const eventBus: EventBus = providers.eventbus;
 
   const usePrettyEvents = (process.stdout.isTTY ?? false) && !opts.verbose && !opts.json;
   if (usePrettyEvents) {
@@ -148,13 +155,6 @@ export async function createServer(
 
   eventBus.emit({ type: 'server.config', requestId: 'system', timestamp: Date.now(),
     data: { profile: config.profile } });
-
-  // Load providers (credential provider is loaded first inside loadProviders
-  // so process.env is seeded before channel providers read tokens).
-  logger.debug('loading_providers');
-  const providers = await loadProviders(config);
-  logger.debug('providers_loaded');
-
   eventBus.emit({ type: 'server.providers', requestId: 'system', timestamp: Date.now(), data: {} });
 
   // Inject additional channel providers (e.g. for testing)
@@ -1023,6 +1023,11 @@ export async function createServer(
     // Stop IPC server
     try { ipcServer.close(); } catch {
       logger.debug('ipc_server_close_failed');
+    }
+
+    // Close event bus provider
+    try { providers.eventbus.close(); } catch {
+      logger.debug('eventbus_close_failed');
     }
 
     // Close DBs — storage provider handles messages, conversations, sessions
