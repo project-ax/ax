@@ -143,8 +143,9 @@ export function createAdminHandler(deps: AdminDeps) {
     logger.info('admin_token_generated', {
       message: 'Admin token auto-generated (printed once):',
     });
-    // eslint-disable-next-line no-console
-    console.log(`\n  Admin Token: ${deps.config.admin.token}\n`);
+    logger.info('admin_token_value', {
+      token: deps.config.admin.token,
+    });
   }
 
   const token = deps.config.admin.token!;
