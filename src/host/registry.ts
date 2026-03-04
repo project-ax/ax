@@ -63,6 +63,9 @@ export async function loadProviders(config: Config, opts?: LoadProvidersOptions)
   const memoryMod = await import(memoryModPath);
   const memory = await memoryMod.create(config, config.providers.memory, { llm: tracedLlm });
 
+  // Load storage provider (wraps MessageQueue, ConversationStore, SessionStore, DocumentStore)
+  const storage = await loadProvider('storage', config.providers.storage, config);
+
   return {
     llm:         tracedLlm,
     image,
@@ -76,6 +79,7 @@ export async function loadProviders(config: Config, opts?: LoadProvidersOptions)
     audit:       await loadProvider('audit', config.providers.audit, config),
     sandbox:     await loadProvider('sandbox', config.providers.sandbox, config),
     scheduler:   await loadProvider('scheduler', config.providers.scheduler, config),
+    storage,
     screener,
   };
 }

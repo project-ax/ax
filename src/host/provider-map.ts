@@ -86,6 +86,9 @@ const _PROVIDER_MAP = {
     static: '../providers/screener/static.js',
     none:   '../providers/screener/none.js',
   },
+  storage: {
+    sqlite: '../providers/storage/sqlite.js',
+  },
 } as const;
 
 // Re-export with the same name and looser type for backwards compatibility.
@@ -117,6 +120,7 @@ export type AuditProviderName      = keyof ProviderMapType['audit'];
 export type SandboxProviderName    = keyof ProviderMapType['sandbox'];
 export type SchedulerProviderName  = keyof ProviderMapType['scheduler'];
 export type ScreenerProviderName   = keyof ProviderMapType['screener'];
+export type StorageProviderName    = keyof ProviderMapType['storage'];
 
 /** Union of all provider names for a given kind. */
 export type ProviderNameFor<K extends ProviderKind> = keyof ProviderMapType[K];

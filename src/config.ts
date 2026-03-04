@@ -59,6 +59,7 @@ const ConfigSchema = z.strictObject({
     audit: providerEnum('audit'),
     sandbox: providerEnum('sandbox'),
     scheduler: providerEnum('scheduler'),
+    storage: providerEnum('storage').optional().default('sqlite'),
     screener: z.string().optional(),
   }),
   channel_config: z.record(z.string(), ChannelAccessConfigSchema).optional(),

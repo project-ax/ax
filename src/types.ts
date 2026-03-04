@@ -12,11 +12,12 @@ import type { SkillStoreProvider, SkillScreenerProvider } from './providers/skil
 import type { AuditProvider } from './providers/audit/types.js';
 import type { SandboxProvider } from './providers/sandbox/types.js';
 import type { SchedulerProvider, CronDelivery } from './providers/scheduler/types.js';
+import type { StorageProvider } from './providers/storage/types.js';
 import type {
   MemoryProviderName, ScannerProviderName, ChannelProviderName,
   WebProviderName, BrowserProviderName, CredentialProviderName,
   SkillsProviderName, AuditProviderName, SandboxProviderName,
-  SchedulerProviderName,
+  SchedulerProviderName, StorageProviderName,
 } from './host/provider-map.js';
 
 /** Allowed image MIME types (matches Anthropic vision API). */
@@ -78,6 +79,7 @@ export interface Config {
     audit: AuditProviderName;
     sandbox: SandboxProviderName;
     scheduler: SchedulerProviderName;
+    storage: StorageProviderName;
     screener?: string;
   };
   channel_config?: Record<string, Partial<ChannelAccessConfig>>;
@@ -142,5 +144,6 @@ export interface ProviderRegistry {
   audit: AuditProvider;
   sandbox: SandboxProvider;
   scheduler: SchedulerProvider;
+  storage: StorageProvider;
   screener?: SkillScreenerProvider;
 }

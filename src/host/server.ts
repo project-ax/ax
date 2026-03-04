@@ -18,14 +18,11 @@ import { randomUUID } from 'node:crypto';
 import { axHome, dataDir, dataFile, isValidSessionId, agentDir as agentDirPath, agentIdentityDir, agentIdentityFilesDir, agentSkillsDir } from '../paths.js';
 import type { Config, ProviderRegistry } from '../types.js';
 import type { InboundMessage } from '../providers/channel/types.js';
-import { ConversationStore } from '../conversation-store.js';
 import { loadProviders } from './registry.js';
-import { MessageQueue } from '../db.js';
 import { createRouter } from './router.js';
 import { createIPCHandler, createIPCServer, type DelegateRequest, type IPCContext } from './ipc-server.js';
 import { TaintBudget, thresholdForProfile } from './taint-budget.js';
 import { getLogger } from '../logger.js';
-import { SessionStore } from '../session-store.js';
 import { resolveDelivery } from './delivery.js';
 import { templatesDir as resolveTemplatesDir, seedSkillsDir as resolveSeedSkillsDir } from '../utils/assets.js';
 import { createEventBus, type EventBus } from './event-bus.js';
@@ -165,11 +162,12 @@ export async function createServer(
     providers.channels.push(...opts.channels);
   }
 
-  // Initialize DB + Conversation Store + Taint Budget + Router + IPC
+  // Initialize storage + Taint Budget + Router + IPC
+  // The storage provider wraps MessageQueue, ConversationStore, and SessionStore.
   mkdirSync(dataDir(), { recursive: true });
-  const db = await MessageQueue.create(dataFile('messages.db'));
-  const conversationStore = await ConversationStore.create();
-  const sessionStore = await SessionStore.create();
+  const db = providers.storage.messages;
+  const conversationStore = providers.storage.conversations;
+  const sessionStore = providers.storage.sessions;
   const fileStore = await FileStore.create();
   const taintBudget = new TaintBudget({
     threshold: thresholdForProfile(config.profile),
@@ -1027,15 +1025,9 @@ export async function createServer(
       logger.debug('ipc_server_close_failed');
     }
 
-    // Close DBs
-    try { db.close(); } catch {
-      logger.debug('db_close_failed');
-    }
-    try { conversationStore.close(); } catch {
-      logger.debug('conversation_store_close_failed');
-    }
-    try { sessionStore.close(); } catch {
-      logger.debug('session_store_close_failed');
+    // Close DBs — storage provider handles messages, conversations, sessions
+    try { providers.storage.close(); } catch {
+      logger.debug('storage_close_failed');
     }
     try { fileStore.close(); } catch {
       logger.debug('file_store_close_failed');
