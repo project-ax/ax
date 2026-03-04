@@ -1,166 +1,182 @@
-# Improving the First-Time Setup Experience
+# Web Admin UI & CLI Chat Removal
 
-## Current State
+## Direction
 
-The onboarding *infrastructure* is solid — there's an interactive wizard (`ax configure`), profile-based defaults, credential handling, and auto-trigger on first `ax serve`. But the *experience* has sharp edges that would trip up someone trying to get AX running for the first time.
+AX is an enterprise cloud product. The primary interfaces are:
+- **Channels** (Slack, etc.) for agent interaction
+- **Web admin UI** for setup, monitoring, and management
+- **HTTP API** (OpenAI-compatible) for programmatic access
+- **`ax send`** for scripting/CI
 
-Here's what a new user encounters today:
+CLI chat (`ax chat`) is removed. The Ink/React TUI was a dev convenience
+that doesn't fit the enterprise deployment model.
 
-1. Website says `npx ax init` — **that command doesn't exist**
-2. README says `npm start` — works, but the wizard output is plain and gives no indication of what to do next
-3. After configure finishes: `Config written to ~/.ax/ax.yaml` — then silence. User stares at a running server with no idea how to talk to it
-4. Need to open a *second terminal* and run `ax chat` — but nobody told them that
-5. No validation that the API key actually works before the server starts accepting messages
-6. Generic error if API key is wrong — diagnosed at LLM call time, not startup
-7. Welcome banner is four lines of plain text with no personality (where's the crab?)
+## Phase 1: Remove CLI Chat + Add Admin API Skeleton
 
-## Proposed Changes (Priority Order)
+### Step 1: Remove `ax chat`
 
-### 1. Post-Setup "What's Next" Banner (HIGH — biggest impact, smallest effort)
+**Files to delete:**
+- `src/cli/chat.ts`
+- `src/cli/components/App.tsx`
+- `src/cli/components/MessageList.tsx`
+- `src/cli/components/InputBox.tsx`
+- `src/cli/components/StatusBar.tsx`
+- `src/cli/components/ThinkingIndicator.tsx`
+- `src/cli/components/Message.tsx`
+- `tests/cli/chat.test.ts`
+- `tests/cli/components/App.test.tsx`
+- `tests/cli/components/MessageList.test.tsx`
+- `tests/cli/components/InputBox.test.tsx`
+- `tests/cli/components/ThinkingIndicator.test.tsx`
+- `tests/cli/components/Message.test.tsx`
 
-**File:** `src/onboarding/configure.ts`
+**Files to modify:**
+- `src/cli/index.ts` — Remove chat command from router, help text
+- `tests/cli/index.test.ts` — Remove chat routing test
+- `src/onboarding/configure.ts` — Update "What's next" box (no more `ax chat`)
+- `src/cli/index.ts` — Update startup banner (no more "run: ax chat")
+- `docs/web/index.html` — Update Get Started section
+- `README.md` — Update Quick Start
+- `package.json` — Remove `chat` script, remove `ink`/`react`/`ink-text-input` deps
 
-After writing config, show a clear next-steps banner:
-
+**Update startup banner to:**
 ```
-  ✓ Config written to ~/.ax/ax.yaml
-  ✓ API key written to ~/.ax/.env
+  🦀  AX is running
 
-  ┌─────────────────────────────────────────────┐
-  │  What's next:                               │
-  │                                             │
-  │  1. ax serve     Start the server           │
-  │  2. ax chat      Chat with your agent       │
-  │                                             │
-  │  Or just run `ax serve` — it's already      │
-  │  starting if this was your first run.       │
-  └─────────────────────────────────────────────┘
-```
-
-When triggered from first-run auto-setup (inside `runServe`), show a different message:
-
-```
-  Server is running! Open a new terminal and run:
-
-    ax chat
-```
-
-### 2. Startup Banner for `ax serve` (HIGH)
-
-**File:** `src/cli/index.ts` (after `server.start()`)
-
-When the server starts, print a clear status banner showing:
-- What socket/port it's listening on
-- How to connect (`ax chat` or `ax send`)
-- Where logs are going
-- How to stop it (`Ctrl+C`)
-
-Something like:
-
-```
-  🦀 AX is running
-
-  Socket: ~/.ax/ax.sock
-  Logs:   ~/.ax/data/ax.log
+  Socket:  ~/.ax/ax.sock
+  Admin:   http://127.0.0.1:8080/admin
   Profile: balanced
 
-  → Open a new terminal and run: ax chat
   → Press Ctrl+C to stop
 ```
 
-### 3. API Key Pre-Flight Check (HIGH)
-
-**File:** `src/cli/index.ts` or new `src/cli/preflight.ts`
-
-Before starting the server, do a minimal validation:
-- Check that the credential provider can resolve an API key (non-empty)
-- Optionally: make a tiny API call (list models or a 1-token completion) to verify the key works
-- If it fails, show a clear message: "Your API key doesn't seem to work. Run `ax configure` to update it."
-
-This catches the #1 first-time failure mode: typo in the API key, or forgetting to set it entirely.
-
-### 4. Better Welcome Banner (MEDIUM)
-
-**File:** `src/onboarding/prompts.ts`
-
-The current `ASCII_WELCOME` is:
+**Update post-setup box to:**
 ```
-   Welcome to Project AX!
-
-   The security-first personal AI agent.
-   Let's get you set up.
+  ┌──────────────────────────────────────────────┐
+  │  What's next:                                │
+  │                                              │
+  │    ax serve       Start the server           │
+  │                                              │
+  │  Admin dashboard opens automatically at      │
+  │  http://127.0.0.1:8080/admin                 │
+  └──────────────────────────────────────────────┘
 ```
 
-It should have more personality (per the voice guidelines) and set expectations:
+### Step 2: Add admin API endpoints
+
+**New file:** `src/host/server-admin.ts`
+
+Admin API routes served under `/admin/api/`:
 
 ```
-   🦀 Welcome to AX
-
-   Security-first personal AI agent.
-   We're about to ask you a few questions — nothing scary.
-
-   (Takes about 30 seconds. We timed it.)
+GET  /admin/api/status          → Server health, uptime, profile, agent count
+GET  /admin/api/agents          → List all agents with state, session, activity
+GET  /admin/api/agents/:id      → Single agent detail + delegation tree
+POST /admin/api/agents/:id/kill → Terminate an agent
+GET  /admin/api/audit           → Query audit log (?action=&since=&until=&limit=)
+GET  /admin/api/sessions        → List sessions grouped by user
+GET  /admin/api/config          → Current config (credentials redacted)
+GET  /admin/api/events          → SSE stream (reuse existing /v1/events logic)
 ```
 
-### 5. `ax init` Command Alias (MEDIUM — fixes broken website promise)
+**Authentication:** Bearer token required on all `/admin/*` routes.
+- Token configured in `ax.yaml` under `admin.token` or generated on first run
+- Timing-safe comparison via `timingSafeEqual()`
+- Rate-limited auth failures (reuse webhook rate limiter pattern)
 
-**File:** `src/cli/index.ts`
+**Wire into server.ts:**
+```typescript
+// In handleRequest(), before the default 404:
+if (pathname.startsWith('/admin/')) {
+  await handleAdmin(req, res, pathname, { orchestrator, providers, config, eventBus });
+  return;
+}
+```
 
-The website hero CTA says `npx ax init`. We should either:
-- **(a)** Add `init` as an alias for `configure` in the command router
-- **(b)** Update the website to say `ax configure`
+### Step 3: Add admin web UI (static SPA)
 
-Option (a) is better — `init` is what people expect from a CLI tool, and it's a one-line change to the router.
+**New directory:** `src/admin-ui/`
 
-### 6. Smarter `ax chat` When Server Isn't Running (MEDIUM)
+Minimal, zero-dependency frontend (vanilla HTML/CSS/JS — same approach as
+`docs/web/`). No React, no build step, no bundler. Served as static files
+from the AX process.
 
-**File:** `src/cli/chat.ts`
+**Pages:**
+1. **Dashboard** (`/admin`) — Agent count, server status, recent events feed
+2. **Agents** (`/admin/agents`) — Table of all agents with state, controls
+3. **Audit** (`/admin/audit`) — Searchable audit log with filters
+4. **Config** (`/admin/config`) — Read-only config view (edit via ax.yaml)
+5. **Setup** (`/admin/setup`) — Web-based onboarding wizard (replaces CLI wizard as primary)
 
-Currently if you run `ax chat` without `ax serve`, you get `ECONNREFUSED`. Instead:
-- Detect the missing server
-- Show: "AX server isn't running. Start it first with: `ax serve`"
-- Or even better: offer to auto-start the server in the background
+**Static file serving:** New handler in `src/host/server-admin.ts`:
+```typescript
+// GET /admin → serve index.html
+// GET /admin/styles.css → serve styles.css
+// etc.
+```
 
-### 7. Config Validation Error Messages (LOW)
+Files are bundled with the package (read from `src/admin-ui/` at dev time,
+from dist at runtime).
 
-**File:** `src/config.ts`
+### Step 4: Config changes
 
-When `ax.yaml` has a validation error, the Zod error message is raw and technical. Wrap it with a user-friendly message that:
-- Says which field is wrong
-- Shows the valid options
-- Points to `ax configure` as the fix
+**Modified:** `src/config.ts`, `src/types.ts`
 
-### 8. `ax doctor` Command (LOW — nice-to-have)
+```typescript
+admin?: {
+  enabled: boolean;     // default: true
+  token?: string;       // bearer token; auto-generated if not set
+  port?: number;        // default: same as main server (TCP required)
+};
+```
 
-**Files:** `src/cli/index.ts`, new `src/cli/doctor.ts`
+When admin UI is enabled and no `--port` is specified, automatically listen
+on TCP port 8080 in addition to the Unix socket.
 
-A diagnostic command that checks:
-- Node.js version
-- Config file exists and is valid
-- API key is set and works
-- Socket file is writable
-- Sandbox backend is available
-- Required dependencies are installed
+### Step 5: Web-based onboarding
 
-Prints a checklist with ✓/✗ for each item. Useful for debugging and support.
+**New:** `src/admin-ui/setup.html` + `src/host/server-admin.ts` setup endpoints
 
-## What NOT to Change
+```
+GET  /admin/api/setup/status    → { configured: boolean, profile?: string }
+POST /admin/api/setup/configure → Accept onboarding answers, write config
+```
 
-- The wizard flow itself is good — profile → agent → auth → model → channels is logical
-- The profile defaults are sensible
-- The reconfigure flow (pre-filling from existing config) works well
-- Hot-reload is a nice feature, don't touch it
+On first run (no `ax.yaml`):
+1. Server starts with minimal defaults
+2. Opens browser to `http://127.0.0.1:8080/admin/setup`
+3. Web wizard collects: profile, agent type, auth, model, channels
+4. POSTs to `/admin/api/setup/configure`
+5. Server hot-reloads config
+6. Redirects to dashboard
+
+The CLI `ax configure` still works for headless/SSH setups.
+
+## Phase 2 (Follow-up)
+
+- Credential management UI (add/rotate API keys)
+- Conversation viewer (browse chat history by session)
+- Real-time event timeline with filtering
+- Multi-agent deployment management
+- K8s deployment manifests + Helm chart
 
 ## Implementation Order
 
-If we're doing this in one pass:
+1. Remove CLI chat (delete files, update references)
+2. Add admin API skeleton (`server-admin.ts`)
+3. Add bearer token auth
+4. Build admin UI pages (dashboard, agents, audit)
+5. Add web-based onboarding
+6. Tests for all of the above
+7. Update docs, README, website
 
-1. **Welcome banner** (prompts.ts) — 5 min
-2. **Post-setup next steps** (configure.ts) — 15 min
-3. **Startup banner** (cli/index.ts) — 15 min
-4. **`init` alias** (cli/index.ts) — 5 min
-5. **API key pre-flight** (cli/index.ts or preflight.ts) — 30 min
-6. **Smarter `ax chat` error** (cli/chat.ts) — 15 min
-7. **Tests for all the above** — 30 min
+## Dependencies to Remove
 
-Items 7 and 8 from the list above (config validation messages and `ax doctor`) are good follow-ups but not critical for the first-time experience.
+After removing CLI chat:
+- `ink` (React terminal UI framework)
+- `react` (used only by Ink components)
+- `ink-text-input` (chat input component)
+- `@types/react` (if present)
+
+These are substantial dependencies — removing them shrinks the install
+footprint and removes the React dependency entirely.
