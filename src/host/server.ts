@@ -888,7 +888,7 @@ export async function createServer(
       data: {
         socket: socketPath,
         ...(tcpBound ? { port: tcpPort } : {}),
-        ...(adminHandler && tcpBound ? { admin: `http://127.0.0.1:${tcpPort}/admin` } : {}),
+        ...(adminHandler && tcpBound ? { admin: `http://127.0.0.1:${tcpPort}/admin?token=${config.admin.token}` } : {}),
       } });
 
     // Start scheduler

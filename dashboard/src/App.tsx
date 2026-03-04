@@ -9,7 +9,7 @@ import {
   Hexagon,
   ChevronRight,
 } from 'lucide-react';
-import { getToken, clearToken, apiFetch } from './lib/api';
+import { getToken, setToken, clearToken, apiFetch } from './lib/api';
 import type { SetupStatus } from './lib/types';
 import LoginPage from './components/pages/login-page';
 import SetupPage from './components/pages/setup-page';
@@ -30,7 +30,21 @@ const NAV_ITEMS: { id: Page; label: string; icon: typeof Shield }[] = [
 ];
 
 export default function App() {
-  const [authenticated, setAuthenticated] = useState(!!getToken());
+  const [authenticated, setAuthenticated] = useState(() => {
+    // Check for token in URL query param (e.g. ?token=xxx)
+    const params = new URLSearchParams(window.location.search);
+    const urlToken = params.get('token');
+    if (urlToken) {
+      setToken(urlToken);
+      // Strip token from URL to avoid leaking it in browser history
+      params.delete('token');
+      const clean = params.toString();
+      const newUrl = window.location.pathname + (clean ? `?${clean}` : '') + window.location.hash;
+      window.history.replaceState({}, '', newUrl);
+      return true;
+    }
+    return !!getToken();
+  });
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
   const [activePage, setActivePage] = useState<Page>('overview');
   const [checkingSetup, setCheckingSetup] = useState(true);

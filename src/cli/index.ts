@@ -71,9 +71,8 @@ Send Options:
   --json                 Output full OpenAI JSON response
 
 Admin Dashboard:
-  The admin dashboard opens automatically at http://127.0.0.1:8080/admin
-  when the server starts. Authenticate with the token from your console
-  output or ax.yaml.
+  The admin dashboard URL (with token) is printed when the server starts.
+  Just click the URL to open the dashboard — no separate login needed.
 
 Examples:
   ax serve --daemon
