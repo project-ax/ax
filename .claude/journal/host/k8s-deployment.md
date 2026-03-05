@@ -1,5 +1,13 @@
 # K8s Deployment Journal
 
+## [2026-03-05 07:00] — Add NATS JetStream stream init hook job
+
+**Task:** Create Helm template for NATS JetStream stream initialization as a post-install/post-upgrade hook
+**What I did:** Created nats-stream-init-job.yaml template that uses natsio/nats-box to create 5 JetStream streams (SESSIONS, TASKS, RESULTS, EVENTS, IPC) with correct retention policies, TTLs, and replication. Job waits for NATS readiness, runs as a Helm hook with hook-succeeded cleanup.
+**Files touched:** charts/ax/templates/nats-stream-init-job.yaml (created)
+**Outcome:** Success — helm template renders correctly with proper NATS URL from ax.natsUrl helper
+**Notes:** Each stream has specific retention (work vs limits), max-age, and subject patterns matching the existing k8s/nats-cluster.yaml Job. Conditional on .Values.nats.enabled.
+
 ## [2026-03-05 06:15] — Add agent runtime deployment and RBAC Helm templates
 
 **Task:** Create Helm templates for the agent-runtime component: Deployment, ServiceAccount, Role, and RoleBinding

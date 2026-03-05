@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ax.fullname" . }}-agent-runtime
+  namespace: {{ include "ax.namespace" . }}
+  labels:
+    {{- include "ax.componentLabels" (dict "component" "agent-runtime" "context" $) | nindent 4 }}
+    ax.io/plane: conversation
+spec:
+  replicas: {{ .Values.agentRuntime.replicas }}
+  selector:
+    matchLabels:
+      {{- include "ax.selectorLabels" (dict "component" "agent-runtime" "context" $) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ax.selectorLabels" (dict "component" "agent-runtime" "context" $) | nindent 8 }}
+        ax.io/plane: conversation
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap-ax-config.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "ax.fullname" . }}-agent-runtime
+      containers:
+        - name: agent-runtime
+          image: {{ include "ax.image" (dict "image" .Values.agentRuntime.image "global" .Values.global "context" $) }}
+          command: {{ .Values.agentRuntime.command | toJson }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.agentRuntime.ports.metrics }}
+              protocol: TCP
+          env:
+            - name: AX_CONFIG_PATH
+              value: "/etc/ax/ax.yaml"
+            - name: NATS_URL
+              value: {{ include "ax.natsUrl" . | quote }}
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ax.databaseSecretRef" . }}
+                  key: {{ .Values.postgresql.external.secretKey | default "url" }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.apiCredentials.existingSecret }}
+                  key: {{ .Values.apiCredentials.anthropicApiKeyKey }}
+            - name: K8S_NAMESPACE
+              value: {{ include "ax.namespace" . | quote }}
+            - name: K8S_POD_IMAGE
+              value: {{ include "ax.image" (dict "image" .Values.sandbox.image "global" .Values.global "context" $) | quote }}
+            {{- with .Values.agentRuntime.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.agentRuntime.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.agentRuntime.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: ax-config
+              mountPath: /etc/ax
+              readOnly: true
+      terminationGracePeriodSeconds: {{ .Values.agentRuntime.terminationGracePeriodSeconds }}
+      volumes:
+        - name: ax-config
+          configMap:
+            name: {{ include "ax.fullname" . }}-config

@@ -1,0 +1,92 @@
+{{- if .Values.nats.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "ax.fullname" . }}-nats-stream-init
+  namespace: {{ include "ax.namespace" . }}
+  labels:
+    {{- include "ax.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        {{- include "ax.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: init
+          image: natsio/nats-box:latest
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              NATS_URL={{ include "ax.natsUrl" . | quote }}
+
+              # Wait for NATS to be ready
+              until nats --server=$NATS_URL server ping 2>/dev/null; do
+                echo "Waiting for NATS..."
+                sleep 2
+              done
+
+              # Session dispatch stream
+              nats --server=$NATS_URL stream add SESSIONS \
+                --subjects="session.request.*" \
+                --retention=work \
+                --max-age=5m \
+                --max-msgs=10000 \
+                --discard=old \
+                --storage=memory \
+                --replicas=3 \
+                --ack || true
+
+              # Sandbox task dispatch stream
+              nats --server=$NATS_URL stream add TASKS \
+                --subjects="tasks.sandbox.*" \
+                --retention=work \
+                --max-age=10m \
+                --max-msgs=10000 \
+                --discard=old \
+                --storage=memory \
+                --replicas=3 \
+                --ack || true
+
+              # Results stream (keyed by requestId)
+              nats --server=$NATS_URL stream add RESULTS \
+                --subjects="results.*" \
+                --retention=limits \
+                --max-age=30m \
+                --max-msgs-per-subject=1 \
+                --discard=old \
+                --storage=memory \
+                --replicas=3 \
+                --ack || true
+
+              # Event streaming (EventBus over NATS)
+              nats --server=$NATS_URL stream add EVENTS \
+                --subjects="events.>" \
+                --retention=limits \
+                --max-age=5m \
+                --max-msgs=100000 \
+                --discard=old \
+                --storage=memory \
+                --replicas=3 \
+                --ack || true
+
+              # IPC callbacks (sandbox-to-host)
+              nats --server=$NATS_URL stream add IPC \
+                --subjects="ipc.>" \
+                --retention=work \
+                --max-age=10m \
+                --max-msgs=10000 \
+                --discard=old \
+                --storage=memory \
+                --replicas=3 \
+                --ack || true
+
+              echo "All streams created successfully"
+{{- end }}
