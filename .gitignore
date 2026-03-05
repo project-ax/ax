@@ -33,6 +33,10 @@ Thumbs.db
 # Mutable identity files (live in ~/.ax/agents/ at runtime)
 # The repo templates/ directory only has default templates
 
+# Helm subchart dependencies (downloaded by helm dependency update)
+charts/*/charts/
+charts/*/Chart.lock
+
 # Logs / crashes
 *.log
 npm-debug.log*

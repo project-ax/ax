@@ -1,9 +1,10 @@
 # Journal Index
 
-Category-based organization of all journal entries. Total: 111 entries across 9 categories.
+Category-based organization of all journal entries. Total: 112 entries across 10 categories.
 
 ## Entries
 
+- 2026-03-05 05:30 — Helm Chart + FluxCD GitOps Implementation [infrastructure/helm-fluxcd.md](infrastructure/helm-fluxcd.md)
 - 2026-03-05 08:00 — Add FluxCD sources, base kustomization, and SOPS config [host/k8s-deployment.md](host/k8s-deployment.md)
 - 2026-03-05 07:00 — Add NATS JetStream stream init hook job [host/k8s-deployment.md](host/k8s-deployment.md)
 - 2026-03-05 06:15 — Add agent runtime deployment and RBAC Helm templates [host/k8s-deployment.md](host/k8s-deployment.md)

@@ -15,6 +15,12 @@
 
 ## Entries
 
+### infrastructure
+
+- Helm subchart dependencies should be gitignored [infrastructure/entries.md](infrastructure/entries.md)
+- ConfigMap-mounted config reuses loadConfig() via AX_CONFIG_PATH [infrastructure/entries.md](infrastructure/entries.md)
+- Security contexts must stay hardcoded in k8s-client.ts [infrastructure/entries.md](infrastructure/entries.md)
+
 ### testing
 
 - Sandbox providers use source-level test assertions (read source, check patterns) [testing/patterns.md](testing/patterns.md)
