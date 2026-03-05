@@ -17,20 +17,21 @@ models:
     - openrouter/google/gemini-3-flash-preview
 
 # ── Providers ───────────────────────────────────────────────
-# Minimal set — no channels, no scheduler, no browser.
-# Only what the tests actually need.
+# Local environment providers — compare with ax-k8s.yaml for k8s differences.
 providers:
   memory: memoryfs
   audit: sqlite
   credentials: plaintext
   sandbox: seatbelt
   screener: static
-  scheduler: none
+  scheduler: plainjob
   browser: none
-  skills: readonly
+  skills: git
   channels: []
   web: none
   scanner: basic
+  storage: sqlite
+  eventbus: inprocess
 
 # ── History / Memory / Embeddings ───────────────────────────
 history:

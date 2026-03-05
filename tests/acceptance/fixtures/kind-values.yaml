@@ -1,0 +1,51 @@
+# Kind cluster overrides for feature-level acceptance tests
+#
+# Simplified version of k8s-agent-compute/kind-values.yaml.
+# Feature tests only need a running AX server accessible via HTTP,
+# not the full host -> NATS -> agent-runtime pipeline. We deploy a
+# single-pod AX server with NATS for eventbus and k8s-pod sandbox.
+#
+# Agent-runtime and pool-controller are disabled — feature tests
+# use single-process mode where the host spawns agent pods directly.
+
+namespace:
+  create: false
+  name: ax-acceptance
+
+host:
+  replicas: 1
+  image:
+    repository: ax/host
+    tag: test
+  resources:
+    requests: { cpu: "500m", memory: "1Gi" }
+    limits: { cpu: "1", memory: "2Gi" }
+
+# Disable agent-runtime and pool-controller — feature tests use single-process mode
+agentRuntime:
+  enabled: false
+poolController:
+  enabled: false
+
+sandbox:
+  runtimeClass: ""   # no gVisor on kind
+
+nats:
+  enabled: true
+  config:
+    cluster:
+      enabled: false
+    jetstream:
+      enabled: true
+      memoryStore:
+        enabled: true
+        maxSize: 256Mi
+
+networkPolicies:
+  enabled: false   # simpler for feature tests
+
+apiCredentials:
+  existingSecret: "ax-api-credentials"
+  envVars:
+    OPENROUTER_API_KEY: "openrouter-api-key"
+    DEEPINFRA_API_KEY: "deepinfra-api-key"

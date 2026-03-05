@@ -1,0 +1,60 @@
+# K8s acceptance test configuration
+#
+# This config is rendered into a ConfigMap for feature-level acceptance tests
+# running on a kind cluster. Compare with ax.yaml (local) — differences are:
+#   sandbox:    k8s-pod   (vs seatbelt)
+#   eventbus:   nats      (vs inprocess)
+#   storage:    sqlite    (keeps things simple — postgresql is tested by k8s-agent-compute)
+#
+# Credentials are injected via Kubernetes secret (ax-api-credentials).
+
+agent: pi-coding-agent
+profile: yolo
+
+# -- Models ---------------------------------------------------------------
+models:
+  default:
+    - openrouter/google/gemini-3-flash-preview
+
+# -- Providers -------------------------------------------------------------
+providers:
+  memory: memoryfs
+  audit: sqlite
+  credentials: env
+  sandbox: k8s-pod
+  screener: static
+  scheduler: plainjob
+  browser: none
+  skills: git
+  channels: []
+  web: none
+  scanner: basic
+  storage: sqlite
+  eventbus: nats
+
+# -- History / Memory / Embeddings -----------------------------------------
+history:
+  max_turns: 50
+  thread_context_turns: 5
+  summarize: false
+  summarize_threshold: 40
+  summarize_keep_recent: 10
+  memory_recall: true
+  memory_recall_limit: 5
+  memory_recall_scope: "*"
+  embedding_model: deepinfra/Qwen/Qwen3-Embedding-0.6B
+  embedding_dimensions: 1024
+
+# -- Sandbox ---------------------------------------------------------------
+sandbox:
+  timeout_sec: 120
+  memory_mb: 512
+
+# -- Scheduler -------------------------------------------------------------
+scheduler:
+  active_hours:
+    start: "07:00"
+    end: "23:00"
+    timezone: America/New_York
+  max_token_budget: 4096
+  heartbeat_interval_min: 30

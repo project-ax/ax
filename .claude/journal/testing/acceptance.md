@@ -2,6 +2,19 @@
 
 Acceptance test skill and framework for validating features against plan design goals.
 
+## [2026-03-05 18:30] — Add dual-environment (local + k8s) support to acceptance test skill
+
+**Task:** Extend the acceptance-test skill so the same BT/IT test plans run against both local and k8s (kind) environments
+**What I did:** Created k8s fixture config and Helm overrides, updated local fixture with explicit provider fields, rewrote SKILL.md Phase 3 with environment selection, k8s setup/teardown, dual send/check abstractions, environment-specific results files, and added new provider source paths to Phase 4
+**Files touched:**
+- `tests/acceptance/fixtures/ax-k8s.yaml` (created — k8s-pod sandbox, nats eventbus, sqlite storage)
+- `tests/acceptance/fixtures/kind-values.yaml` (created — simplified single-pod Helm overrides for kind)
+- `tests/acceptance/fixtures/ax.yaml` (updated — added storage, eventbus, changed skills to git, scheduler to plainjob)
+- `.claude/skills/acceptance-test/SKILL.md` (major update — environment selection, k8s lifecycle, provider comparison table, dual send/check commands, separate results files, environment field in fix list)
+- `tests/acceptance/README.md` (rewritten — documents both environments, k8s setup, log tailing, directory structure)
+**Outcome:** Success — all fixtures valid YAML, skill covers both flows end-to-end
+**Notes:** K8s fixture uses `agentRuntime.enabled: false` and `poolController.enabled: false` since feature tests only need a single-process AX server, not the full 3-tier architecture. This is simpler and faster to deploy than k8s-agent-compute's setup.
+
 ## [2026-03-05 16:45] — Re-run skipped integration tests for k8s agent compute (IT-1/2/3/4/6)
 
 **Task:** Re-run 5 integration tests that were skipped due to missing LLM API key

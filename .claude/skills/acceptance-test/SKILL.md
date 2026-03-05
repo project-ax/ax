@@ -9,6 +9,12 @@ AX features were implemented from plan documents, and many have bugs, gaps, or d
 
 This skill walks you through a 5-phase workflow: pick a feature, design tests from the plan's acceptance criteria, run them live, analyze failures, and produce a fix list.
 
+Tests can run against two environments:
+- **Local** — AX server on the host machine (seatbelt sandbox, inprocess eventbus)
+- **K8s** — AX server deployed to a kind cluster (k8s-pod sandbox, NATS eventbus)
+
+The same test plans work for both environments. Only the send commands and side-effect checks differ.
+
 ## When to use this skill
 
 - A feature was implemented from a plan and you want to verify it actually works end-to-end
@@ -202,28 +208,58 @@ Write all test cases to `tests/acceptance/<feature-name>/test-plan.md` with this
 
 ## Phase 3: Test Execution
 
-### Test isolation: use a temporary AX_HOME
+### Environment selection
 
-**CRITICAL**: Never run acceptance tests against the user's real `~/.ax` directory. Always create an isolated temporary home so tests don't pollute real data.
+After the test plan is approved, **ask the user** which environment(s) to test against:
 
-#### Test fixtures
+| Option | Description |
+|--------|-------------|
+| **Local only** (default) | Run against a local AX server with seatbelt sandbox, inprocess eventbus, sqlite storage |
+| **K8s only** | Deploy to a kind cluster with k8s-pod sandbox, NATS eventbus, sqlite storage |
+| **Both** | Run local first, then k8s — produces separate results files for comparison |
+
+Structural tests are environment-independent and only run once regardless of environment selection.
+
+### Test fixtures
 
 Acceptance tests use dedicated config, identity, and credentials files — never the user's `~/.ax`:
 
 | File | Purpose |
 |------|---------|
-| `tests/acceptance/fixtures/ax.yaml` | Test config — models, providers, embedding settings, memory recall |
+| `tests/acceptance/fixtures/ax.yaml` | Local test config — seatbelt sandbox, inprocess eventbus, sqlite storage |
+| `tests/acceptance/fixtures/ax-k8s.yaml` | K8s test config — k8s-pod sandbox, nats eventbus, sqlite storage |
+| `tests/acceptance/fixtures/kind-values.yaml` | Helm overrides for kind cluster — simplified single-pod deployment |
 | `tests/acceptance/fixtures/IDENTITY.md` | Deterministic agent identity (neutral, concise, no emojis) |
 | `tests/acceptance/fixtures/SOUL.md` | Deterministic agent personality (predictable, factual) |
 | `.env.test` (project root) | API keys for tests — copy from `tests/acceptance/fixtures/.env.test.example` |
 
-Edit `fixtures/ax.yaml` to change which models the tests use (default LLM, embedding model, etc.) without affecting the user's real `~/.ax/ax.yaml`.
+Edit `fixtures/ax.yaml` (local) or `fixtures/ax-k8s.yaml` (k8s) to change which models/providers the tests use.
 
 Credentials live in `.env.test` in the project root (gitignored). Copy the example file and fill in your keys:
 ```bash
 cp tests/acceptance/fixtures/.env.test.example .env.test
 # Edit .env.test with your API keys
 ```
+
+### Provider comparison
+
+| Provider | Local (`ax.yaml`) | K8s (`ax-k8s.yaml`) |
+|----------|-------------------|---------------------|
+| sandbox | seatbelt | k8s-pod |
+| eventbus | inprocess | nats |
+| storage | sqlite | sqlite |
+| memory | memoryfs | memoryfs |
+| audit | sqlite | sqlite |
+| credentials | plaintext | env |
+| skills | git | git |
+| scheduler | plainjob | plainjob |
+| screener | static | static |
+
+---
+
+### Local environment setup
+
+**CRITICAL**: Never run acceptance tests against the user's real `~/.ax` directory. Always create an isolated temporary home so tests don't pollute real data.
 
 #### Setup
 
@@ -252,7 +288,7 @@ rm -f "$TEST_HOME/agents/main/agent/BOOTSTRAP.md"
 
 All subsequent commands in the test session MUST set `AX_HOME=$TEST_HOME`. The test home path should be stored and reused throughout the entire test run.
 
-### Server management
+#### Server management
 
 Before running behavioral or integration tests, start the AX server in the isolated test home:
 
@@ -281,6 +317,94 @@ If the server fails to start, check `$TEST_HOME/data/ax.log` and `$TEST_HOME/ser
 tail -f /tmp/ax-acceptance-*/data/ax.log
 ```
 
+#### Cleanup
+
+```bash
+pkill -f "tsx src/cli/index.ts serve" 2>/dev/null
+# Optionally keep for debugging:
+# rm -rf "$TEST_HOME"
+```
+
+---
+
+### K8s environment setup
+
+Deploy AX to a kind cluster for testing with k8s-native providers (k8s-pod sandbox, NATS eventbus).
+
+#### Prerequisites
+
+- `kind` CLI installed
+- `kubectl` CLI installed
+- `helm` CLI installed
+- `docker` running
+- `.env.test` with API keys at project root
+
+#### Setup
+
+```bash
+# 1. Create kind cluster (if not exists)
+kind create cluster --name ax-acceptance --config - <<'EOF'
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+  - role: worker
+EOF
+
+# 2. Build and load AX image
+docker build -t ax/host:test -f container/Dockerfile .
+kind load docker-image ax/host:test --name ax-acceptance
+
+# 3. Create namespace and secrets
+kubectl create namespace ax-acceptance
+kubectl -n ax-acceptance create secret generic ax-api-credentials \
+  --from-literal=openrouter-api-key="$(grep OPENROUTER_API_KEY .env.test | cut -d= -f2-)" \
+  --from-literal=deepinfra-api-key="$(grep DEEPINFRA_API_KEY .env.test | cut -d= -f2-)"
+
+# 4. Deploy via Helm
+helm dependency update charts/ax
+helm install ax charts/ax -n ax-acceptance \
+  -f tests/acceptance/fixtures/kind-values.yaml
+
+# 5. Wait for pods to be ready
+kubectl -n ax-acceptance wait --for=condition=Ready pod \
+  -l app.kubernetes.io/component=host --timeout=120s
+
+# 6. Install test identity (copy into running pod)
+HOST_POD=$(kubectl -n ax-acceptance get pod \
+  -l app.kubernetes.io/component=host \
+  -o jsonpath='{.items[0].metadata.name}')
+FIXTURES="tests/acceptance/fixtures"
+kubectl -n ax-acceptance cp \
+  "$FIXTURES/IDENTITY.md" "$HOST_POD:/home/agent/.ax/agents/main/agent/identity/IDENTITY.md"
+kubectl -n ax-acceptance cp \
+  "$FIXTURES/SOUL.md" "$HOST_POD:/home/agent/.ax/agents/main/agent/identity/SOUL.md"
+
+# 7. Port-forward for test access
+kubectl -n ax-acceptance port-forward svc/ax-host 18080:8080 &
+PF_PID=$!
+
+# 8. Health check
+sleep 3
+curl -sf http://localhost:18080/health && echo "K8S_SERVER_READY"
+```
+
+If the health check fails, check pod logs:
+```bash
+kubectl -n ax-acceptance logs -f "$HOST_POD"
+```
+
+#### Teardown
+
+```bash
+kill $PF_PID 2>/dev/null
+helm uninstall ax -n ax-acceptance
+kubectl delete namespace ax-acceptance
+kind delete cluster --name ax-acceptance
+```
+
+---
+
 ### Session ID format
 
 AX requires session IDs with **3 or more colon-separated segments**. Two-segment IDs like `acceptance:bt1` will be rejected. Always use at least 3 segments:
@@ -300,7 +424,36 @@ Execute directly using file reads and grep. For each structural test:
 2. Check for the expected patterns, interfaces, exports
 3. Record **PASS** or **FAIL** with evidence (the actual content found or not found)
 
-Structural tests can be run in parallel via subagents since they only read source files and don't touch the server.
+Structural tests are environment-independent — run them once regardless of which environment is selected. They can be run in parallel via subagents since they only read source files and don't touch the server.
+
+### Sending messages
+
+Use the correct send command for the target environment:
+
+| Environment | Send command |
+|-------------|-------------|
+| **Local** | `AX_HOME="$TEST_HOME" NODE_NO_WARNINGS=1 tsx src/cli/index.ts send --no-stream --session "$SESSION" "$MESSAGE"` |
+| **K8s** | `curl -sf http://localhost:18080/v1/chat/completions -H "Content-Type: application/json" -d '{"model":"agent:main","messages":[{"role":"user","content":"'"$MESSAGE"'"}],"stream":false,"session_id":"'"$SESSION"'"}'` |
+
+For k8s, extract the response text from the JSON:
+```bash
+curl -sf http://localhost:18080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"agent:main","messages":[{"role":"user","content":"'"$MESSAGE"'"}],"stream":false,"session_id":"'"$SESSION"'"}' \
+  | jq -r '.choices[0].message.content'
+```
+
+### Checking side effects
+
+Use the correct commands for the target environment:
+
+| Check | Local | K8s |
+|-------|-------|-----|
+| Memory DB | `sqlite3 "$TEST_HOME/data/memory/_store.db" "..."` | `kubectl -n ax-acceptance exec $HOST_POD -- sqlite3 /home/agent/.ax/data/memory/_store.db "..."` |
+| Embedding DB | `sqlite3 "$TEST_HOME/data/memory/_vec.db" "..."` | `kubectl -n ax-acceptance exec $HOST_POD -- sqlite3 /home/agent/.ax/data/memory/_vec.db "..."` |
+| Audit DB | `sqlite3 "$TEST_HOME/data/audit.db" "..."` | `kubectl -n ax-acceptance exec $HOST_POD -- sqlite3 /home/agent/.ax/data/audit.db "..."` |
+| Memory files | `cat "$TEST_HOME/data/memory/preferences.md"` | `kubectl -n ax-acceptance exec $HOST_POD -- cat /home/agent/.ax/data/memory/preferences.md` |
+| Logs | `tail -f "$TEST_HOME/data/ax.log"` | `kubectl -n ax-acceptance logs -f $HOST_POD` |
 
 ### Running behavioral tests
 
@@ -308,17 +461,9 @@ Structural tests can be run in parallel via subagents since they only read sourc
 
 For each behavioral test:
 1. Complete any setup steps
-2. Send each message using `ax send` with the isolated test home:
-   ```bash
-   AX_HOME="$TEST_HOME" NODE_NO_WARNINGS=1 tsx src/cli/index.ts send \
-     --no-stream --session "acceptance:<feature>:<test-id>" "<message>"
-   ```
+2. Send each message using the appropriate send command for the environment (see "Sending messages" above)
 3. Capture the response
-4. Check the structural side effects:
-   - Read any files that should have been created/modified
-   - Check the audit log: `sqlite3 "$TEST_HOME/data/audit.db" "SELECT ..."`
-   - Check memory store: `sqlite3 "$TEST_HOME/data/memory/_store.db" "SELECT ..."`
-   - Check embedding store: `sqlite3 "$TEST_HOME/data/memory/_vec.db" "SELECT ..."`
+4. Check the structural side effects using the appropriate commands for the environment (see "Checking side effects" above)
 5. Evaluate behavioral expectations using judgment (not exact string matching)
 6. Record PASS or FAIL with evidence
 
@@ -328,22 +473,20 @@ Run integration tests SEQUENTIALLY for the same shared-DB reasons.
 
 For each integration test:
 1. Complete setup
-2. Execute the sequence step by step, using a **persistent session ID** so conversation state carries over:
-   ```bash
-   SESSION="acceptance:<feature>:it1"
-   AX_HOME="$TEST_HOME" NODE_NO_WARNINGS=1 tsx src/cli/index.ts send \
-     --no-stream --session "$SESSION" "<step 1 message>"
-   # verify step 1
-   AX_HOME="$TEST_HOME" NODE_NO_WARNINGS=1 tsx src/cli/index.ts send \
-     --no-stream --session "$SESSION" "<step 2 message>"
-   # verify step 2
-   ```
+2. Execute the sequence step by step, using a **persistent session ID** so conversation state carries over
 3. After all steps, verify the expected final state
 4. Record PASS or FAIL with evidence
 
 ### Recording results
 
-Write results to `tests/acceptance/<feature-name>/results.md`:
+Write results to environment-specific files:
+
+- **Local:** `tests/acceptance/<feature-name>/results-local.md`
+- **K8s:** `tests/acceptance/<feature-name>/results-k8s.md`
+
+If running in only one environment, you may use just `results.md` (without the suffix).
+
+Use this format:
 
 ```markdown
 # Acceptance Test Results: <Feature Name>
@@ -351,6 +494,7 @@ Write results to `tests/acceptance/<feature-name>/results.md`:
 **Date run:** <YYYY-MM-DD HH:MM>
 **Server version:** <git commit hash>
 **LLM provider:** <provider and model used>
+**Environment:** <Local (seatbelt sandbox, inprocess eventbus, sqlite storage) | K8s/kind (k8s-pod sandbox, nats eventbus, sqlite storage)>
 
 ## Summary
 
@@ -401,6 +545,8 @@ For each failing test, perform root cause analysis:
 
 5. **Identify fix location**: Specific file(s) and function(s) that need to change
 
+6. **Note environment**: Which environment(s) the failure occurred in (Local, K8s, or Both). Environment-specific failures may indicate provider implementation gaps rather than feature bugs.
+
 ### Key source paths by feature
 
 Use these to quickly find the relevant code when tracing failures:
@@ -416,7 +562,7 @@ Use these to quickly find the relevant code when tracing failures:
 | Skills | `src/providers/skills/git.ts`, `src/providers/skills/readonly.ts`, `src/host/ipc-handlers/skills.ts` |
 | Memory | `src/providers/memory/file.ts`, `src/providers/memory/sqlite.ts`, `src/providers/memory/memu.ts` |
 | LLM Providers | `src/providers/llm/anthropic.ts`, `src/providers/llm/openai.ts`, `src/providers/llm/router.ts` |
-| Sandbox | `src/providers/sandbox/seatbelt.ts`, `src/providers/sandbox/bwrap.ts`, `src/providers/sandbox/subprocess.ts` |
+| Sandbox | `src/providers/sandbox/seatbelt.ts`, `src/providers/sandbox/bwrap.ts`, `src/providers/sandbox/subprocess.ts`, `src/providers/sandbox/k8s-pod.ts` |
 | Channels | `src/providers/channel/cli.ts`, `src/providers/channel/slack.ts` |
 | Security | `src/host/taint-budget.ts`, `src/utils/safe-path.ts`, `src/host/provider-map.ts` |
 | Credentials | `src/providers/credentials/env.ts`, `src/providers/credentials/encrypted.ts` |
@@ -430,6 +576,11 @@ Use these to quickly find the relevant code when tracing failures:
 | Onboarding | `src/onboarding/`, `src/cli/bootstrap.ts` |
 | Plugins | `src/host/plugin-host.ts` |
 | Screener | `src/providers/screener/static.ts` |
+| Storage | `src/providers/storage/sqlite.ts`, `src/providers/storage/postgresql.ts`, `src/providers/storage/types.ts` |
+| EventBus | `src/providers/eventbus/inprocess.ts`, `src/providers/eventbus/nats.ts`, `src/providers/eventbus/types.ts` |
+| K8s Sandbox | `src/providers/sandbox/k8s-pod.ts` |
+| Pool Controller | `src/pool-controller/main.ts` |
+| Agent Runtime | `src/container/agent-runner.ts` |
 
 ## Phase 5: Fix List
 
@@ -445,6 +596,7 @@ Create a prioritized list of fixes and save to `tests/acceptance/<feature-name>/
 
 ### FIX-1: <short description>
 **Test:** <test ID that caught this>
+**Environment:** <Local / K8s / Both>
 **Root cause:** <Missing/Incomplete/Incorrect/Integration gap/Design flaw>
 **Location:** `<file>:<function or line range>`
 **What's wrong:** <concise description>
@@ -479,22 +631,15 @@ Also add each fix to the **TaskCreate tool** so they're tracked in the current s
 4. Design test cases (structural first, then behavioral, then integration)
 5. Save test plan to tests/acceptance/<feature>/test-plan.md
 6. Present test plan for user review
-7. Ensure server is running (auto-start if needed)
-8. Execute tests one by one, recording results
-9. Save results to tests/acceptance/<feature>/results.md
-10. For failures: trace to source, classify root cause and severity
-11. Save fix list to tests/acceptance/<feature>/fixes.md
-12. Add fixes to TaskCreate for tracking
-```
-
-### Cleanup
-
-After all tests are complete, stop the server and optionally remove the temp home:
-
-```bash
-pkill -f "tsx src/cli/index.ts serve" 2>/dev/null
-# Optionally keep for debugging:
-# rm -rf "$TEST_HOME"
+7. Ask which environment(s) to test: Local (default), K8s, or Both
+8. Set up the selected environment(s)
+9. Execute structural tests (environment-independent, run once)
+10. Execute behavioral/integration tests sequentially in each environment
+11. Save results to tests/acceptance/<feature>/results-local.md and/or results-k8s.md
+12. For failures: trace to source, classify root cause, severity, and environment
+13. Save fix list to tests/acceptance/<feature>/fixes.md
+14. Add fixes to TaskCreate for tracking
+15. Tear down k8s environment if used
 ```
 
 ## Tips
@@ -503,7 +648,9 @@ pkill -f "tsx src/cli/index.ts serve" 2>/dev/null
 - **Start with structural tests.** They're fast, deterministic, and catch the most common gaps (missing implementations, broken wiring). If structural tests show a feature isn't wired up, skip behavioral tests for that feature — they'll obviously fail.
 - **Run behavioral/integration tests sequentially.** They share a SQLite database. Parallel execution causes assertion failures from DB contention.
 - **Use fresh sessions.** Each test run should use a unique session ID with 3+ colon-separated segments (e.g., `acceptance:feature:bt1`) to avoid pollution from prior conversations.
-- **Check audit logs.** The audit log (`$TEST_HOME/data/audit.db`) is the best ground truth for what the server actually did during a request. If a behavioral test is ambiguous, the audit log tells you exactly which IPC actions fired.
+- **Check audit logs.** The audit log (`$TEST_HOME/data/audit.db` or via `kubectl exec`) is the best ground truth for what the server actually did during a request. If a behavioral test is ambiguous, the audit log tells you exactly which IPC actions fired.
 - **Don't chase LLM wording.** The agent might phrase things differently each time. Focus on: did it call the right tools? Did the right data end up in the right place? Did it avoid doing the wrong thing?
 - **One feature at a time.** Don't try to test everything in one session. Pick a feature, run its tests, fix the issues, then move on.
-- **Tail logs for debugging.** Run `tail -f $TEST_HOME/data/ax.log` in another terminal to watch server activity in real time. The server must be started with `LOG_SYNC=1` for logs to flush immediately (without it, pino buffers ~4KB before writing).
+- **Tail logs for debugging.** Local: `tail -f $TEST_HOME/data/ax.log` (server must be started with `LOG_SYNC=1`). K8s: `kubectl -n ax-acceptance logs -f $HOST_POD`.
+- **Compare environments.** When running both, look for environment-specific failures. A test that passes locally but fails on k8s likely indicates a provider-level bug (e.g., NATS eventbus doesn't fire the same events as inprocess). A test that fails in both points to a feature-level bug.
+- **K8s is optional.** Most features should be validated locally first. Use k8s testing when you specifically want to verify that k8s-native providers (k8s-pod sandbox, NATS eventbus) behave identically to their local counterparts.
