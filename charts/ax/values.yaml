@@ -1,0 +1,234 @@
+# AX Helm Chart — values.yaml
+# Single source of truth for AX configuration.
+
+nameOverride: ""
+fullnameOverride: ""
+
+namespace:
+  create: true
+  name: ax
+
+global:
+  imageRegistry: ""
+
+# ─── AX Configuration ────────────────────────────────────────────
+# This entire block is rendered as ax.yaml and mounted into every pod.
+# It reuses the existing loadConfig() code path — no code changes needed.
+config:
+  profile: balanced
+  agent: pi-coding-agent
+  providers:
+    memory: sqlite
+    scanner: regex
+    channels: []
+    web: none
+    browser: none
+    credentials: env
+    storage: postgresql
+    eventbus: nats
+    sandbox: k8s-pod
+    audit: sqlite
+    history: sqlite
+    scheduler: sqlite
+    image: none
+  sandbox:
+    timeout_sec: 120
+    memory_mb: 512
+  scheduler:
+    active_hours:
+      start: 8
+      end: 22
+      timezone: UTC
+    tick_interval_ms: 60000
+    max_concurrent: 5
+  history:
+    max_turns: 50
+  admin:
+    enabled: true
+    port: 8080
+
+# ─── Host (Ingress Layer) ────────────────────────────────────────
+host:
+  replicas: 2
+  image:
+    registry: ""
+    repository: ax/host
+    tag: ""  # Defaults to Chart.appVersion
+  command: ["node", "dist/host/host-process.js"]
+  ports:
+    http: 8080
+    metrics: 9090
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 30
+  terminationGracePeriodSeconds: 30
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    host: "ax.example.com"
+    tls: []
+  autoscaling:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  env: []
+
+# ─── Agent Runtime (Conversation Layer) ──────────────────────────
+agentRuntime:
+  replicas: 3
+  image:
+    registry: ""
+    repository: ax/host
+    tag: ""
+  command: ["node", "dist/host/agent-runtime-process.js"]
+  ports:
+    metrics: 9091
+  resources:
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+    limits:
+      cpu: "1"
+      memory: "2Gi"
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 9091
+    initialDelaySeconds: 5
+    periodSeconds: 10
+  terminationGracePeriodSeconds: 600
+  autoscaling:
+    enabled: false
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 60
+  env: []
+
+# ─── Pool Controller ─────────────────────────────────────────────
+poolController:
+  replicas: 1
+  image:
+    registry: ""
+    repository: ax/host
+    tag: ""
+  command: ["node", "dist/pool-controller/main.js"]
+  ports:
+    metrics: 9092
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 9092
+    initialDelaySeconds: 3
+    periodSeconds: 10
+  reconcileIntervalMs: 5000
+  env: []
+
+# ─── Sandbox Pods ─────────────────────────────────────────────────
+sandbox:
+  image:
+    registry: ""
+    repository: ax/agent
+    tag: "latest"
+  tiers:
+    light:
+      minReady: 2
+      maxReady: 10
+      template:
+        command: ["node", "dist/sandbox-worker/main.js"]
+        cpu: "1"
+        memory: "2Gi"
+        workspaceRoot: "/workspace"
+    heavy:
+      minReady: 0
+      maxReady: 3
+      template:
+        command: ["node", "dist/sandbox-worker/main.js"]
+        cpu: "4"
+        memory: "16Gi"
+        workspaceRoot: "/workspace"
+        nodeSelector:
+          cloud.google.com/compute-class: Performance
+
+# ─── PostgreSQL ───────────────────────────────────────────────────
+postgresql:
+  external:
+    enabled: true
+    existingSecret: "ax-db-credentials"
+    secretKey: "url"
+    cloudSqlProxy:
+      enabled: true
+      replicas: 2
+      instanceConnectionName: "PROJECT:REGION:INSTANCE"
+      image:
+        repository: gcr.io/cloud-sql-connectors/cloud-sql-proxy
+        tag: "2"
+      serviceAccount:
+        annotations:
+          iam.gke.io/gcp-service-account: "ax-cloudsql@PROJECT.iam.gserviceaccount.com"
+      resources:
+        requests:
+          cpu: "250m"
+          memory: "256Mi"
+        limits:
+          cpu: "250m"
+          memory: "256Mi"
+  internal:
+    enabled: false
+    auth:
+      database: ax
+      username: ax
+      existingSecret: ""
+    primary:
+      persistence:
+        size: 10Gi
+
+# ─── NATS (subchart) ─────────────────────────────────────────────
+nats:
+  enabled: true
+  externalUrl: ""
+  config:
+    cluster:
+      enabled: true
+      replicas: 3
+    jetstream:
+      enabled: true
+      memoryStore:
+        maxSize: 256Mi
+      fileStore:
+        maxSize: 8Gi
+        pvc:
+          size: 10Gi
+
+# ─── Network Policies ────────────────────────────────────────────
+networkPolicies:
+  enabled: true
+
+# ─── API Credentials ─────────────────────────────────────────────
+apiCredentials:
+  existingSecret: "ax-api-credentials"
+  anthropicApiKeyKey: "anthropic-api-key"
