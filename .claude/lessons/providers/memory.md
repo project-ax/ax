@@ -1,5 +1,17 @@
 # Provider Lessons: Memory
 
+### DbSummaryStore.initDefaults() must run AFTER database migrations
+**Date:** 2026-03-06
+**Context:** K8s deployment with PostgreSQL crashed because `summaryStore.initDefaults()` tried to INSERT into `cortex_summaries` before the migration that creates the table had run. The bug only affects k8s/PostgreSQL -- local SQLite uses FileSummaryStore which doesn't need the table.
+**Lesson:** In `cortex/provider.ts`, always run `runMigrations()` before `summaryStore.initDefaults()`. When adding new DB-dependent initialization steps, verify the ordering is: (1) connect DB, (2) run migrations, (3) initialize stores. Test with PostgreSQL -- SQLite file-based stores hide ordering bugs.
+**Tags:** cortex, migration, postgresql, k8s, DbSummaryStore, ordering
+
+### Bitnami PostgreSQL subchart auth requires explicit password for custom users
+**Date:** 2026-03-06
+**Context:** Helm chart uses `postgres-password` secret key for DATABASE_URL, but the Bitnami PostgreSQL subchart only creates a `postgres-password` key by default. Custom user `ax` needs `auth.password` set explicitly at the subchart level (`postgresql.auth.password`), not just at the parent chart level (`postgresql.internal.auth.password`).
+**Lesson:** When deploying with a custom PostgreSQL user via Bitnami subchart, set both `postgresql.auth.password` and `postgresql.auth.postgresPassword`. The parent chart's `_helpers.tpl` uses `postgres-password` key for the DATABASE_URL -- if passwords differ, set them to the same value as a workaround.
+**Tags:** helm, postgresql, bitnami, auth, k8s, deployment
+
 ### Tests asserting exact query() result counts must account for appended summaries
 **Date:** 2026-03-06
 **Context:** After wiring summaries into query() as trailing results (Task 4), a pre-existing integration test (`dedup: same fact mentioned twice -> one entry reinforced`) failed because it expected `toHaveLength(1)` but got 2 — the second result was an appended summary.

@@ -125,11 +125,6 @@ export async function create(config: Config, _name?: string, opts?: CreateOption
   const memoryDir = dataFile('memory');
   const vecDbPath = join(memoryDir, '_vec.db');
 
-  const summaryStore: SummaryStore = database && database.type !== 'sqlite'
-    ? new DbSummaryStore(database.db)
-    : new FileSummaryStore(memoryDir);
-  await summaryStore.initDefaults();
-
   // Use shared database if available, otherwise create a standalone Kysely instance
   let itemsDb;
   if (database) {
@@ -140,8 +135,14 @@ export async function create(config: Config, _name?: string, opts?: CreateOption
     itemsDb = createKyselyDb({ type: 'sqlite', path: dbPath });
   }
 
+  // Run migrations BEFORE initializing summary store — DbSummaryStore needs cortex_summaries table
   const migResult = await runMigrations(itemsDb, memoryMigrations(database?.type ?? 'sqlite'), 'cortex_migration');
   if (migResult.error) throw migResult.error;
+
+  const summaryStore: SummaryStore = database && database.type !== 'sqlite'
+    ? new DbSummaryStore(database.db)
+    : new FileSummaryStore(memoryDir);
+  await summaryStore.initDefaults();
 
   const store = new ItemsStore(itemsDb);
 
