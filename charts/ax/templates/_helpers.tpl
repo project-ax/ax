@@ -94,13 +94,14 @@ Include with: {{ include "ax.databaseEnv" . | nindent <N> }}
       name: {{ .Values.postgresql.external.existingSecret | default "ax-db-credentials" }}
       key: {{ .Values.postgresql.external.secretKey | default "url" }}
 {{- else }}
+{{- $pgUser := .Values.postgresql.internal.auth.username | default "postgres" }}
 - name: PGPASSWORD
   valueFrom:
     secretKeyRef:
       name: {{ include "ax.fullname" . }}-postgresql
-      key: postgres-password
+      key: {{ if eq $pgUser "postgres" }}postgres-password{{ else }}password{{ end }}
 - name: DATABASE_URL
-  value: "postgresql://{{ .Values.postgresql.internal.auth.username | default "postgres" }}:$(PGPASSWORD)@{{ include "ax.fullname" . }}-postgresql:5432/{{ .Values.postgresql.internal.auth.database | default "ax" }}"
+  value: "postgresql://{{ $pgUser }}:$(PGPASSWORD)@{{ include "ax.fullname" . }}-postgresql:5432/{{ .Values.postgresql.internal.auth.database | default "ax" }}"
 {{- end -}}
 {{- end }}
 

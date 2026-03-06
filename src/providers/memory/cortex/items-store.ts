@@ -154,7 +154,14 @@ export class ItemsStore {
       q = q.where('scope', '=', scope);
     }
 
-    q = q.where('content', 'like', `%${query}%`);
+    // Split OR-joined terms (from extractQueryTerms) into individual LIKE conditions
+    const terms = query.split(' OR ').map(t => t.trim()).filter(Boolean);
+    if (terms.length > 1) {
+      q = q.where(eb =>
+        eb.or(terms.map(term => eb('content', 'like', `%${term}%`))));
+    } else {
+      q = q.where('content', 'like', `%${query}%`);
+    }
 
     if (userId) {
       q = q.where(eb =>

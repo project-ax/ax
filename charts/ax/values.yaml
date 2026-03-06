@@ -173,7 +173,7 @@ postgresql:
     enabled: false
     auth:
       database: ax
-      username: ax
+      username: postgres
       existingSecret: ""
     primary:
       persistence:

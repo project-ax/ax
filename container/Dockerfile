@@ -12,7 +12,7 @@ FROM node:22-slim
 
 # Install git (needed for workspace provisioning in k8s mode)
 # and tsx for running TypeScript directly
-RUN apt-get update && apt-get install -y --no-install-recommends git && \
+RUN apt-get update && apt-get install -y --no-install-recommends git python3 make g++ && \
     rm -rf /var/lib/apt/lists/* && \
     npm install -g tsx
 

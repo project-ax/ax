@@ -102,6 +102,16 @@ describe('ItemsStore', () => {
     expect(results[0].content).toContain('TypeScript');
   });
 
+  it('searchContent splits OR-joined terms into individual LIKE conditions', async () => {
+    await store.insert({ ...sampleItem, content: 'Prefers TypeScript over JavaScript' });
+    await store.insert({ ...sampleItem, content: 'Uses vim keybindings', contentHash: 'dddddddddddddddd' });
+    await store.insert({ ...sampleItem, content: 'Deployed on Kubernetes', contentHash: 'eeeeeeeeeeeeeeee' });
+
+    // Simulates extractQueryTerms() output: "typescript OR vim OR kubernetes"
+    const results = await store.searchContent('typescript OR vim OR kubernetes', 'default');
+    expect(results).toHaveLength(3);
+  });
+
   it('scopes queries by agentId when provided', async () => {
     await store.insert({ ...sampleItem, agentId: 'agent_1' });
     await store.insert({ ...sampleItem, content: 'Other agent fact', contentHash: 'eeeeeeeeeeeeeeee', agentId: 'agent_2' });
