@@ -2,7 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { FileSummaryStore } from '../../../../src/providers/memory/cortex/summary-store.js';
+import { FileSummaryStore, DbSummaryStore } from '../../../../src/providers/memory/cortex/summary-store.js';
+import { createKyselyDb } from '../../../../src/utils/database.js';
+import { runMigrations } from '../../../../src/utils/migrator.js';
+import { memoryMigrations } from '../../../../src/providers/memory/cortex/migrations.js';
 
 describe('FileSummaryStore', () => {
   let memoryDir: string;
@@ -85,5 +88,91 @@ describe('FileSummaryStore', () => {
     expect(all.size).toBe(2);
     expect(all.get('preferences')).toBe('prefs content');
     expect(all.get('knowledge')).toBe('knowledge content');
+  });
+});
+
+describe('DbSummaryStore', () => {
+  let db: ReturnType<typeof createKyselyDb>;
+  let store: DbSummaryStore;
+
+  beforeEach(async () => {
+    db = createKyselyDb({ type: 'sqlite', path: ':memory:' });
+    const result = await runMigrations(db, memoryMigrations('sqlite'), 'cortex_migration');
+    if (result.error) throw result.error;
+    store = new DbSummaryStore(db);
+  });
+
+  afterEach(async () => {
+    await db.destroy();
+  });
+
+  it('writes and reads a summary round-trip', async () => {
+    await store.write('preferences', '# preferences\n## Editor\n- Uses vim\n');
+    const read = await store.read('preferences');
+    expect(read).toBe('# preferences\n## Editor\n- Uses vim\n');
+  });
+
+  it('returns null for non-existent category', async () => {
+    expect(await store.read('nonexistent')).toBeNull();
+  });
+
+  it('overwrites existing summary (upsert)', async () => {
+    await store.write('preferences', 'old');
+    await store.write('preferences', 'new');
+    expect(await store.read('preferences')).toBe('new');
+  });
+
+  it('lists category slugs', async () => {
+    await store.write('preferences', 'content');
+    await store.write('knowledge', 'content');
+    const cats = await store.list();
+    expect(cats.sort()).toEqual(['knowledge', 'preferences']);
+  });
+
+  it('initDefaults creates 10 default categories', async () => {
+    await store.initDefaults();
+    const cats = await store.list();
+    expect(cats).toHaveLength(10);
+    expect(cats).toContain('preferences');
+    const content = await store.read('preferences');
+    expect(content).toContain('# preferences');
+  });
+
+  it('initDefaults is idempotent (does not overwrite existing)', async () => {
+    await store.write('preferences', 'custom content');
+    await store.initDefaults();
+    expect(await store.read('preferences')).toBe('custom content');
+  });
+
+  it('user-scoped write is isolated from shared', async () => {
+    await store.write('preferences', 'alice prefs', 'alice');
+    await store.write('preferences', 'shared prefs');
+    expect(await store.read('preferences', 'alice')).toBe('alice prefs');
+    expect(await store.read('preferences')).toBe('shared prefs');
+  });
+
+  it('list with userId returns user categories only', async () => {
+    await store.write('preferences', 'alice prefs', 'alice');
+    await store.write('knowledge', 'alice knowledge', 'alice');
+    await store.write('habits', 'shared habits');
+    const cats = await store.list('alice');
+    expect(cats.sort()).toEqual(['knowledge', 'preferences']);
+  });
+
+  it('readAll returns all summaries for scope in one call', async () => {
+    await store.write('preferences', 'prefs content');
+    await store.write('knowledge', 'knowledge content');
+    const all = await store.readAll();
+    expect(all.size).toBe(2);
+    expect(all.get('preferences')).toBe('prefs content');
+    expect(all.get('knowledge')).toBe('knowledge content');
+  });
+
+  it('readAll with userId returns only user summaries', async () => {
+    await store.write('preferences', 'alice prefs', 'alice');
+    await store.write('knowledge', 'shared knowledge');
+    const all = await store.readAll('alice');
+    expect(all.size).toBe(1);
+    expect(all.get('preferences')).toBe('alice prefs');
   });
 });

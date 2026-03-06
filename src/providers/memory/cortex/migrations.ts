@@ -42,5 +42,24 @@ export function memoryMigrations(_dbType: 'sqlite' | 'postgresql'): MigrationSet
         await db.schema.dropTable('items').ifExists().execute();
       },
     },
+
+    memory_002_summaries: {
+      async up(db: Kysely<any>) {
+        await db.schema
+          .createTable('cortex_summaries')
+          .ifNotExists()
+          .addColumn('category', 'text', col => col.notNull())
+          .addColumn('user_id', 'text', col => col.notNull().defaultTo('__shared__'))
+          .addColumn('content', 'text', col => col.notNull())
+          .addColumn('updated_at', 'text', col => col.notNull())
+          .execute();
+
+        await db.schema.createIndex('idx_summaries_pk').ifNotExists()
+          .on('cortex_summaries').columns(['category', 'user_id']).unique().execute();
+      },
+      async down(db: Kysely<any>) {
+        await db.schema.dropTable('cortex_summaries').ifExists().execute();
+      },
+    },
   };
 }

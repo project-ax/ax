@@ -84,3 +84,76 @@ export class FileSummaryStore implements SummaryStore {
     }
   }
 }
+
+// ── DbSummaryStore ───────────────────────────────────────────────
+
+/** Sentinel value for shared (non-user-scoped) summaries. NOT NULL so
+ *  the composite unique index (category, user_id) works with ON CONFLICT. */
+const SHARED_USER_ID = '__shared__';
+
+export class DbSummaryStore implements SummaryStore {
+  constructor(private db: Kysely<any>) {}
+
+  private userIdToDb(userId?: string): string {
+    return userId ?? SHARED_USER_ID;
+  }
+
+  async read(category: string, userId?: string): Promise<string | null> {
+    const row = await this.db.selectFrom('cortex_summaries')
+      .select('content')
+      .where('category', '=', category)
+      .where('user_id', '=', this.userIdToDb(userId))
+      .executeTakeFirst();
+    return row?.content ?? null;
+  }
+
+  async write(category: string, content: string, userId?: string): Promise<void> {
+    const now = new Date().toISOString();
+    await this.db.insertInto('cortex_summaries')
+      .values({
+        category,
+        user_id: this.userIdToDb(userId),
+        content,
+        updated_at: now,
+      })
+      .onConflict(oc => oc
+        .columns(['category', 'user_id'])
+        .doUpdateSet({ content, updated_at: now }),
+      )
+      .execute();
+  }
+
+  async list(userId?: string): Promise<string[]> {
+    const rows = await this.db.selectFrom('cortex_summaries')
+      .select('category')
+      .where('user_id', '=', this.userIdToDb(userId))
+      .execute();
+    return rows.map(r => r.category);
+  }
+
+  async readAll(userId?: string): Promise<Map<string, string>> {
+    const rows = await this.db.selectFrom('cortex_summaries')
+      .select(['category', 'content'])
+      .where('user_id', '=', this.userIdToDb(userId))
+      .execute();
+    return new Map(rows.map(r => [r.category, r.content]));
+  }
+
+  async initDefaults(): Promise<void> {
+    const now = new Date().toISOString();
+    for (const cat of DEFAULT_CATEGORIES) {
+      await this.db.insertInto('cortex_summaries')
+        .values({
+          category: cat,
+          user_id: SHARED_USER_ID,
+          content: `# ${cat}\n`,
+          updated_at: now,
+        })
+        .onConflict(oc => oc
+          .columns(['category', 'user_id'])
+          .doNothing(),
+        )
+        .execute();
+    }
+  }
+}
