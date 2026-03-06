@@ -531,4 +531,50 @@ describe('recallMemoryForMessage', () => {
     expect(capturedQuery!.userId).toBe('alice');
     expect(capturedQuery!.embedding).toBeInstanceOf(Float32Array);
   });
+
+  it('falls back to keyword search when embedding returns empty results', async () => {
+    const queries: MemoryQuery[] = [];
+    const memory: MemoryProvider = {
+      async write() { return 'id'; },
+      async query(q: MemoryQuery) {
+        queries.push(q);
+        // Embedding query returns empty; keyword query returns a match
+        if (q.embedding) return [];
+        if (q.query) return [{ id: 'mem1', scope: 'default', content: 'Found via keyword fallback for database' }];
+        return [];
+      },
+      async read() { return null; },
+      async delete() {},
+      async list() { return []; },
+    };
+
+    const mockClient: EmbeddingClient = {
+      available: true,
+      dimensions: 3,
+      async embed(texts: string[]) {
+        return texts.map(() => new Float32Array([0.1, 0.2, 0.3]));
+      },
+    };
+
+    const result = await recallMemoryForMessage(
+      'What database are we using?',
+      memory,
+      { ...enabledConfig, embeddingClient: mockClient },
+      silentLogger,
+    );
+
+    // Should have tried embedding first (returned empty), then keyword fallback
+    expect(queries).toHaveLength(2);
+    expect(queries[0].embedding).toBeInstanceOf(Float32Array);
+    expect(queries[1].query).toBeTruthy();
+    expect(queries[1].embedding).toBeUndefined();
+    // Should return the keyword result
+    expect(result).toHaveLength(2);
+    expect(result[0].content).toContain('keyword fallback');
+    // Should log a warning about empty embedding results
+    expect(silentLogger.warn).toHaveBeenCalledWith(
+      'memory_recall_embedding_empty',
+      expect.objectContaining({ fallback: 'keyword' }),
+    );
+  });
 });

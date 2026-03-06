@@ -256,9 +256,9 @@ export async function create(config: Config, _name?: string, opts?: CreateOption
 
       // Store embedding — reuse precomputed vector if available
       if (precomputedVector) {
-        embeddingStore.upsert(id, scope, precomputedVector, entry.userId).catch(() => {});
+        await embeddingStore.upsert(id, scope, precomputedVector, entry.userId);
       } else {
-        embedItem(id, entry.content, scope, embeddingStore, embeddingClient).catch(() => {});
+        await embedItem(id, entry.content, scope, embeddingStore, embeddingClient);
       }
 
       // Update summary via LLM (fire-and-forget) — summaries stay agent-wide
@@ -384,18 +384,12 @@ export async function create(config: Config, _name?: string, opts?: CreateOption
         await updateCategorySummary(llm, memoryDir, category, newContents);
       }
 
-      // Step 4: Generate embeddings for new items (non-blocking batch)
+      // Step 4: Generate and store embeddings for new items
       if (newItems.length > 0 && embeddingClient.available) {
-        (async () => {
-          try {
-            const vectors = await embeddingClient.embed(newItems.map(i => i.content));
-            for (let i = 0; i < newItems.length; i++) {
-              await embeddingStore.upsert(newItems[i].id, newItems[i].scope, vectors[i], userId);
-            }
-          } catch (err) {
-            logger.warn('memorize_embed_failed', { error: (err as Error).message });
-          }
-        })().catch(() => {});
+        const vectors = await embeddingClient.embed(newItems.map(i => i.content));
+        for (let i = 0; i < newItems.length; i++) {
+          await embeddingStore.upsert(newItems[i].id, newItems[i].scope, vectors[i], userId);
+        }
       }
     },
   };

@@ -96,8 +96,12 @@ export class ItemsStore {
 
   async listByScope(scope: string, limit?: number, agentId?: string, userId?: string): Promise<CortexItem[]> {
     let query = this.db.selectFrom('items')
-      .selectAll()
-      .where('scope', '=', scope);
+      .selectAll();
+
+    // Wildcard scope '*' matches all scopes; otherwise exact match
+    if (scope && scope !== '*') {
+      query = query.where('scope', '=', scope);
+    }
 
     if (agentId) {
       query = query.where('agent_id', '=', agentId);
@@ -130,9 +134,14 @@ export class ItemsStore {
 
   async searchContent(query: string, scope: string, limit = 50, userId?: string): Promise<CortexItem[]> {
     let q = this.db.selectFrom('items')
-      .selectAll()
-      .where('scope', '=', scope)
-      .where('content', 'like', `%${query}%`);
+      .selectAll();
+
+    // Wildcard scope '*' matches all scopes; otherwise exact match
+    if (scope && scope !== '*') {
+      q = q.where('scope', '=', scope);
+    }
+
+    q = q.where('content', 'like', `%${query}%`);
 
     if (userId) {
       q = q.where(eb =>

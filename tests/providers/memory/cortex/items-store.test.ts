@@ -208,4 +208,33 @@ describe('ItemsStore', () => {
     const item = await store.getById(id);
     expect(item!.userId).toBeUndefined();
   });
+
+  // ── Wildcard scope ──
+
+  it('listByScope with wildcard scope returns items from all scopes', async () => {
+    await store.insert({ ...sampleItem, scope: 'project-a' });
+    await store.insert({ ...sampleItem, scope: 'project-b', contentHash: 'bbbbbbbbbbbbbbbb' });
+    await store.insert({ ...sampleItem, scope: 'default', contentHash: 'cccccccccccccccc' });
+
+    const all = await store.listByScope('*', 50);
+    expect(all).toHaveLength(3);
+  });
+
+  it('searchContent with wildcard scope searches across all scopes', async () => {
+    await store.insert({ ...sampleItem, content: 'TypeScript in project A', scope: 'project-a' });
+    await store.insert({ ...sampleItem, content: 'TypeScript in project B', scope: 'project-b', contentHash: 'bbbbbbbbbbbbbbbb' });
+    await store.insert({ ...sampleItem, content: 'Uses vim', scope: 'default', contentHash: 'cccccccccccccccc' });
+
+    const results = await store.searchContent('TypeScript', '*');
+    expect(results).toHaveLength(2);
+  });
+
+  it('listByScope wildcard scope still filters by userId', async () => {
+    await store.insert({ ...sampleItem, scope: 'project-a', userId: 'alice' });
+    await store.insert({ ...sampleItem, scope: 'project-b', contentHash: 'bbbbbbbbbbbbbbbb', userId: 'bob' });
+    await store.insert({ ...sampleItem, scope: 'default', contentHash: 'cccccccccccccccc' }); // shared
+
+    const aliceView = await store.listByScope('*', 50, undefined, 'alice');
+    expect(aliceView).toHaveLength(2); // alice's + shared
+  });
 });

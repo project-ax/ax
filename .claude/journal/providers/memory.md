@@ -1,5 +1,13 @@
 # Providers: Memory
 
+## [2026-03-06 09:45] — Fix memory recall: wildcard scope, synchronous embeddings, observable fallback
+
+**Task:** Memory provider stores data correctly (visible in preferences.md) but agent can't retrieve it in new sessions
+**What I did:** Fixed three issues: (1) `ItemsStore.listByScope()` and `searchContent()` treated scope `'*'` as a literal SQL match instead of a wildcard — added `scope !== '*'` guard to omit scope filter when wildcard. (2) Embedding generation in `write()` and `memorize()` was fire-and-forget (`.catch(() => {})`) meaning embeddings might not exist when the next session queries — made both paths `await` the embedding storage. (3) `recallMemoryForMessage()` now logs `logger.warn('memory_recall_embedding_empty')` when embedding search returns empty and falls back to keywords, so operators can diagnose missing embeddings instead of silent degradation.
+**Files touched:** `src/providers/memory/cortex/items-store.ts`, `src/providers/memory/cortex/provider.ts`, `src/host/memory-recall.ts`, `tests/providers/memory/cortex/items-store.test.ts`, `tests/host/memory-recall.test.ts`
+**Outcome:** Success — 2330 tests pass, 4 new tests added
+**Notes:** Root cause was fire-and-forget embedding generation: `write()` had `.catch(() => {})` (zero logging), `memorize()` had a detached async IIFE. Embeddings were often missing when the next session queried. The wildcard scope bug compounded this by also breaking the keyword fallback path.
+
 ## [2026-03-05 00:00] — Rename MemoryFS types to Cortex in cortex provider
 
 **Task:** Rename MemoryFSItem->CortexItem, MemoryFSConfig->CortexConfig, update header comments from memoryfs->cortex, update MemoryFS->Cortex in comments, and change logger component from 'memoryfs' to 'cortex'

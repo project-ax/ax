@@ -25,13 +25,13 @@
 | ST-13 | Structural | PASS | All 6 types mapped to valid categories |
 | ST-14 | Structural | PASS | write() deduplicates via computeContentHash -> findByHash |
 | ST-15 | Structural | PASS | 4-step pipeline: extract -> dedup -> summaries -> embed |
-| ST-16 | Structural | PASS | embedItem() called fire-and-forget after insert |
-| ST-17 | Structural | PASS | Batch embed in memorize(), non-blocking IIFE, skipped if !available |
+| ST-16 | Structural | PASS | embedItem()/upsert() awaited after insert (was fire-and-forget, fixed) |
+| ST-17 | Structural | PASS | Batch embed in memorize() awaited, skipped if !available (was fire-and-forget IIFE, fixed) |
 | ST-18 | Structural | PASS | 3-table schema, scoped L2, unscoped vec0 MATCH, graceful degradation |
 | ST-19 | Structural | PASS | query() has embedding branch with 1/(1+distance), keyword fallback |
 | ST-20 | Structural | PASS | MemoryQuery.embedding?: Float32Array exists |
-| ST-21 | Structural | PASS | recallMemoryForMessage() with 2-strategy approach, history.unshift |
-| ST-22 | Structural | PASS | Configurable: enabled=false, limit=5, scope='*' defaults |
+| ST-21 | Structural | PASS | recallMemoryForMessage() with 2-strategy approach, history.unshift, warn on empty embedding fallback |
+| ST-22 | Structural | PASS | Configurable: enabled=false, limit=5, scope='*' defaults; wildcard scope omits WHERE filter |
 | ST-23 | Structural | PASS | backfillEmbeddings() non-blocking in create(), batch of 50 |
 | ST-24 | Structural | PASS | memorize() called after every completion in server-completions |
 | ST-16-old | Structural | PASS | Results sorted by salienceScore descending |
@@ -64,6 +64,12 @@
 All 27 structural tests PASS. Key observations:
 
 **ST-5 (Content hash):** The implementation intentionally omits the `{type}:` prefix from the content hash. This is a deliberate design change from the original plan — it hashes only `sha256(normalized_content)[:16]` so the same fact deduplicates across different memory types. The types.ts comment referencing `{type}:{normalized}` is stale documentation.
+
+**ST-16 / ST-17 (Embedding storage):** Previously fire-and-forget with `.catch(() => {})`, now awaited. Embedding storage completes before `write()` / `memorize()` returns, eliminating the race condition where embeddings were missing in the next session.
+
+**ST-21 (Memory recall):** Empty embedding results now fall through to keyword search with `logger.warn('memory_recall_embedding_empty')` instead of silently returning empty.
+
+**ST-22 (Wildcard scope):** `scope: '*'` now correctly omits the SQL scope filter in `listByScope()` and `searchContent()`. Previously `WHERE scope = '*'` was a literal match that returned nothing.
 
 **ST-16-old (Salience ranking):** Confirmed deviation DEV-1 — `query()` does NOT call `store.reinforce()` on returned items. Retrieval-based reinforcement is not implemented. This matches previous runs.
 

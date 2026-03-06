@@ -381,16 +381,16 @@ Extracted from the v2 plan's design decisions, data flow diagrams, security chec
 **Plan reference:** Implementation requirement -- embeddings are the primary retrieval mechanism
 
 **Verification steps:**
-1. Read `src/providers/memory/memoryfs/provider.ts`, `write()` function
-2. Check that after inserting a new item, `embedItem()` is called
-3. Verify `embedItem()` calls `embeddingClient.embed([content])` and `embeddingStore.upsert()`
-4. Verify this is fire-and-forget (non-blocking, errors caught)
+1. Read `src/providers/memory/cortex/provider.ts`, `write()` function
+2. Check that after inserting a new item, embedding is generated and stored
+3. Verify `embedItem()` or `embeddingStore.upsert()` is awaited (not fire-and-forget)
+4. Verify embedding errors propagate to the caller
 
 **Expected outcome:**
-- [ ] `write()` calls `embedItem(id, content, scope, embeddingStore, embeddingClient)` after insert
+- [ ] `write()` awaits `embedItem()` or `embeddingStore.upsert()` after insert
 - [ ] `embedItem` generates a vector via `embeddingClient.embed()`
 - [ ] Vector stored via `embeddingStore.upsert(itemId, scope, vector)`
-- [ ] Errors logged but don't fail the write
+- [ ] Embedding storage is synchronous — completes before `write()` returns
 
 **Pass/Fail:** _pending_
 
@@ -402,16 +402,16 @@ Extracted from the v2 plan's design decisions, data flow diagrams, security chec
 **Plan reference:** Implementation requirement -- memorize path must create searchable embeddings
 
 **Verification steps:**
-1. Read `src/providers/memory/memoryfs/provider.ts`, `memorize()` function (Step 4)
+1. Read `src/providers/memory/cortex/provider.ts`, `memorize()` function (Step 4)
 2. Check that new items (not deduped) are batch-embedded
-3. Verify `embeddingClient.embed(newItems.map(i => i.content))` called
-4. Verify each vector stored via `embeddingStore.upsert()`
+3. Verify `embeddingClient.embed(newItems.map(i => i.content))` is awaited
+4. Verify each vector stored via awaited `embeddingStore.upsert()`
 
 **Expected outcome:**
 - [ ] New items collected during dedup loop into `newItems` array
 - [ ] Batch embedding: `embeddingClient.embed()` called with all new item contents
 - [ ] Each embedding stored: `embeddingStore.upsert(id, scope, vector)`
-- [ ] Non-blocking: wrapped in async IIFE with `.catch(() => {})`
+- [ ] Embedding storage is awaited — completes before `memorize()` returns
 - [ ] Skipped if `embeddingClient.available` is false
 
 **Pass/Fail:** _pending_
@@ -497,11 +497,13 @@ Extracted from the v2 plan's design decisions, data flow diagrams, security chec
 6. Check formatting: `formatMemoryTurns()` produces user/assistant turn pair
 7. Read `src/host/server-completions.ts` around line 332
 8. Check recall result is prepended: `history.unshift(...recallTurns)`
+9. Check that empty embedding results fall through to keyword search with a `logger.warn`
 
 **Expected outcome:**
 - [ ] `recallMemoryForMessage()` embeds user message when `embeddingClient.available`
 - [ ] Passes `Float32Array` embedding to `memory.query()` for semantic search
 - [ ] Falls back to keyword extraction when no embedding client
+- [ ] Falls back to keyword extraction when embedding search returns empty (with `logger.warn('memory_recall_embedding_empty')`)
 - [ ] Formats results as `[Long-term memory recall -- N relevant memories...]`
 - [ ] Returns user/assistant turn pair for context injection
 - [ ] `server-completions.ts` calls recall and does `history.unshift(...)` to prepend
@@ -510,10 +512,10 @@ Extracted from the v2 plan's design decisions, data flow diagrams, security chec
 
 ---
 
-### ST-22: Memory recall is configurable
+### ST-22: Memory recall is configurable and wildcard scope works
 
-**Criterion:** Recall behavior must be configurable (enable/disable, limit, scope)
-**Plan reference:** `src/host/memory-recall.ts`
+**Criterion:** Recall behavior must be configurable (enable/disable, limit, scope), and wildcard scope must match all scopes
+**Plan reference:** `src/host/memory-recall.ts`, `src/providers/memory/cortex/items-store.ts`
 
 **Verification steps:**
 1. Read `src/host/memory-recall.ts`
@@ -521,6 +523,8 @@ Extracted from the v2 plan's design decisions, data flow diagrams, security chec
 3. Check defaults: `enabled: false`, `limit: 5`, `scope: '*'`
 4. Read `src/host/server-completions.ts`
 5. Check config wired from `config.history.memory_recall`, `memory_recall_limit`, `memory_recall_scope`
+6. Read `src/providers/memory/cortex/items-store.ts`
+7. Check `listByScope()` and `searchContent()` treat `'*'` as a wildcard (omit scope filter) not a literal string match
 
 **Expected outcome:**
 - [ ] `enabled: false` by default (opt-in)
@@ -528,6 +532,8 @@ Extracted from the v2 plan's design decisions, data flow diagrams, security chec
 - [ ] `scope: '*'` default searches all scopes
 - [ ] Short-circuits with empty array when `!config.enabled`
 - [ ] Config sourced from `config.history.*` fields
+- [ ] `listByScope('*', ...)` returns items from all scopes (no `WHERE scope = '*'` literal match)
+- [ ] `searchContent(query, '*', ...)` searches across all scopes
 
 **Pass/Fail:** _pending_
 
@@ -850,23 +856,21 @@ Extracted from the v2 plan's design decisions, data flow diagrams, security chec
 **Setup:**
 - AX server running with `memory: memoryfs`
 - OPENAI_API_KEY set (embedding client available)
-- Allow a brief delay for async embedding to complete
 
 **Chat script:**
 1. Write via API: `{ scope: "test", content: "The project uses PostgreSQL for the main database" }`
    Structural check: Returns an ID
 
-2. Wait ~2 seconds for fire-and-forget embedding to complete
-
-3. Query via embedding: embed the text "What database does the project use?" and pass resulting vector to `query({ scope: "test", embedding: <vector> })`
+2. Query via embedding: embed the text "What database does the project use?" and pass resulting vector to `query({ scope: "test", embedding: <vector> })`
    Expected: Returns the PostgreSQL entry (semantic match, not keyword)
+   Note: No delay needed — write() awaits embedding storage before returning
 
-4. Query via embedding: embed unrelated text "What color is the sky?" and query
+3. Query via embedding: embed unrelated text "What color is the sky?" and query
    Expected: Either no results or very low-relevance results
 
 **Expected outcome:**
-- [ ] Write succeeds and embedding is generated asynchronously
-- [ ] Semantic query for related concept finds the entry
+- [ ] Write succeeds and embedding is stored before write returns
+- [ ] Semantic query for related concept finds the entry immediately (no delay needed)
 - [ ] Unrelated semantic query does not return the entry (or ranks it very low)
 - [ ] Entry in `_vec.db` confirmed via `embeddingStore.hasEmbedding(id)`
 
@@ -888,7 +892,7 @@ Extracted from the v2 plan's design decisions, data flow diagrams, security chec
 **Chat script:**
 1. First session: Store memories
    Send: `Remember that I always use Python with pandas for data analysis`
-   Wait for memorize + embedding to complete
+   Note: memorize() awaits embedding storage — no delay needed before next session
 
 2. New session (different session ID): Ask about the topic
    Send: `I need to analyze some CSV data, what tools should I use?`
@@ -1169,11 +1173,8 @@ Extracted from the v2 plan's design decisions, data flow diagrams, security chec
    ```
    Verify: Items stored in SQLite + embeddings generated in `_vec.db`
 
-2. [Wait for embeddings]
-   Action: Wait ~3 seconds for async embedding to complete
-   Verify: `_vec.db` has embedding entries for the new items
-
-3. [Session B: Ask related question]
+2. [Session B: Ask related question]
+   Note: No delay needed — memorize() awaits embedding storage before returning
    Action: In a NEW session, send: `"How should I set up the deployment pipeline?"`
    Verify: Memory recall fires -- host embeds this prompt, queries `_vec.db`, finds AWS/ECS memory
    Verify: Agent response incorporates AWS ECS / Fargate context

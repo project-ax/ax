@@ -1,5 +1,23 @@
 # Provider Lessons: Memory
 
+### Wildcard scope '*' must be handled explicitly in SQL queries — it's not a SQL pattern
+**Date:** 2026-03-06
+**Context:** Memory recall was returning empty results despite data existing in SQLite. The `memory_recall_scope` config defaults to `'*'`, but `listByScope()` and `searchContent()` used `WHERE scope = '*'` (literal string match), which matched nothing since items are stored with scope `'default'`.
+**Lesson:** When a provider accepts a wildcard/all-scopes sentinel like `'*'`, every SQL query method that filters by scope must check for it: `if (scope && scope !== '*') { query = query.where('scope', '=', scope); }`. The sentinel is a convention at the application layer, not a SQL feature — it requires explicit handling in every query path (listByScope, searchContent, and the EmbeddingStore's findSimilar already did this correctly).
+**Tags:** cortex, scope, sql, wildcard, memory-recall, config
+
+### Never fire-and-forget critical data writes — await embeddings in write() and memorize()
+**Date:** 2026-03-06
+**Context:** `write()` used `.catch(() => {})` for embedding storage (zero logging), `memorize()` used a detached async IIFE with `.catch(() => {})`. Embeddings were often missing when the next session queried because the fire-and-forget hadn't completed or had silently failed.
+**Lesson:** Embedding storage must be awaited in `write()` and `memorize()`, not fire-and-forget. If embedding fails, the error should propagate so callers know the write is incomplete. Fire-and-forget with `.catch(() => {})` is appropriate for truly optional side effects (like summary .md updates), but not for data that the primary query path depends on. Rule of thumb: if the read path queries this data, the write path must await it.
+**Tags:** cortex, embedding, fire-and-forget, await, write, memorize
+
+### Search strategy fallbacks must be observable — log warnings, not silent degradation
+**Date:** 2026-03-06
+**Context:** `recallMemoryForMessage()` silently fell back from embedding to keyword search when embeddings returned empty, hiding misconfigured providers, missing API keys, or exhausted token budgets.
+**Lesson:** When a search strategy chain degrades (embedding → keyword), log a `warn` on fallback, not a `debug`. Include a diagnostic hint: `"Check embedding provider configuration and that embeddings are being stored."` Silent degradation makes misconfiguration invisible. The keyword fallback should exist for resilience, but operators need to know it's being used.
+**Tags:** cortex, memory-recall, embedding, keyword-fallback, observability, logging
+
 ### userId = NULL means shared; use (user_id = ? OR user_id IS NULL) for "own + shared" queries
 **Date:** 2026-03-04
 **Context:** Implementing multi-user memory scoping for MemoryFS. Needed a backward-compatible way to isolate user memories while keeping agent-wide shared memories accessible.
