@@ -6,14 +6,14 @@ models:
   default:
     - mock/default
 providers:
-  memory: sqlite
+  memory: memoryfs
   scanner: patterns
   channels: []
   web: none
   browser: none
   credentials: env
   skills: readonly
-  audit: sqlite
+  audit: file
   sandbox: subprocess
   scheduler: none
 sandbox:

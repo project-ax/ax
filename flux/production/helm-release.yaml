@@ -23,16 +23,17 @@ spec:
     config:
       profile: paranoid
       providers:
-        memory: sqlite
+        memory: memoryfs
         scanner: regex
         channels: []
         web: none
         browser: none
         credentials: env
-        storage: postgresql
+        storage: database
+        database: postgresql
         eventbus: nats
         sandbox: k8s
-        audit: sqlite
+        audit: database
         history: sqlite
         scheduler: sqlite
         image: none

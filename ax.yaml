@@ -3,7 +3,7 @@ models:
   default:
     - anthropic/claude-sonnet-4-20250514
 providers:
-  memory: sqlite
+  memory: memoryfs
   scanner: patterns
   channels: []
   web: none

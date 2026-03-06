@@ -3,7 +3,7 @@ models:
   default:
     - mock/default
 providers:
-  memory: sqlite
+  memory: memoryfs
   scanner: patterns
   channels: []
   web: none

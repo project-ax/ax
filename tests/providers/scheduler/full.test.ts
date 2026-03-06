@@ -10,7 +10,7 @@ import type { AuditProvider } from '../../../src/providers/audit/types.js';
 const mockConfig = {
   profile: 'balanced',
   providers: {
-    memory: 'sqlite', scanner: 'patterns',
+    memory: 'memoryfs', scanner: 'patterns',
     channels: ['cli'], web: 'none', browser: 'none',
     credentials: 'keychain', skills: 'readonly', audit: 'file',
     sandbox: 'subprocess', scheduler: 'full',
@@ -98,7 +98,7 @@ describe('scheduler-full', () => {
     stopFn = () => scheduler.stop();
 
     // Manually trigger cron check
-    scheduler.checkCronNow!();
+    await scheduler.checkCronNow!();
 
     expect(received.some(m => m.sender === 'cron:every-min')).toBe(true);
     expect(received.find(m => m.sender === 'cron:every-min')!.content).toBe('Run every minute');
@@ -123,7 +123,7 @@ describe('scheduler-full', () => {
     await scheduler.start((msg) => received.push(msg));
     stopFn = () => scheduler.stop();
 
-    scheduler.checkCronNow!();
+    await scheduler.checkCronNow!();
 
     expect(received.filter(m => m.sender === 'cron:specific-min')).toHaveLength(0);
   });
@@ -143,14 +143,14 @@ describe('scheduler-full', () => {
     stopFn = () => scheduler.stop();
 
     // Pass a date that matches */5 (minute 0)
-    scheduler.checkCronNow!(new Date('2026-02-08T12:00:00Z'));
+    await scheduler.checkCronNow!(new Date('2026-02-08T12:00:00Z'));
 
     const matches = received.filter(m => m.sender === 'cron:every-5');
     expect(matches.length).toBe(1);
 
     // Now check minute 3 — should not match
     received.length = 0;
-    scheduler.checkCronNow!(new Date('2026-02-08T12:03:00Z'));
+    await scheduler.checkCronNow!(new Date('2026-02-08T12:03:00Z'));
 
     expect(received.filter(m => m.sender === 'cron:every-5')).toHaveLength(0);
   });
@@ -171,14 +171,14 @@ describe('scheduler-full', () => {
     stopFn = () => scheduler.stop();
 
     // First check — should fire
-    scheduler.checkCronNow!(new Date('2026-03-01T12:05:00Z'));
+    await scheduler.checkCronNow!(new Date('2026-03-01T12:05:00Z'));
     expect(received.filter(m => m.sender === 'cron:once-job')).toHaveLength(1);
 
     // Job should be deleted
-    expect(scheduler.listJobs!()).toHaveLength(0);
+    expect(await scheduler.listJobs!()).toHaveLength(0);
 
     // Next minute — should NOT fire (job was removed)
-    scheduler.checkCronNow!(new Date('2026-03-01T12:06:00Z'));
+    await scheduler.checkCronNow!(new Date('2026-03-01T12:06:00Z'));
     expect(received.filter(m => m.sender === 'cron:once-job')).toHaveLength(1);
   });
 
@@ -199,15 +199,15 @@ describe('scheduler-full', () => {
     const t = new Date('2026-03-01T12:05:00Z');
 
     // First check — should fire
-    scheduler.checkCronNow!(t);
+    await scheduler.checkCronNow!(t);
     expect(received.filter(m => m.sender === 'cron:dedup-job')).toHaveLength(1);
 
     // Second check same minute — should NOT fire again
-    scheduler.checkCronNow!(new Date('2026-03-01T12:05:30Z'));
+    await scheduler.checkCronNow!(new Date('2026-03-01T12:05:30Z'));
     expect(received.filter(m => m.sender === 'cron:dedup-job')).toHaveLength(1);
 
     // Next minute — should fire again
-    scheduler.checkCronNow!(new Date('2026-03-01T12:06:00Z'));
+    await scheduler.checkCronNow!(new Date('2026-03-01T12:06:00Z'));
     expect(received.filter(m => m.sender === 'cron:dedup-job')).toHaveLength(2);
   });
 
@@ -230,7 +230,7 @@ describe('scheduler-full', () => {
     }, fireAt);
 
     // Job should be listed before firing
-    expect(scheduler.listJobs!()).toHaveLength(1);
+    expect(await scheduler.listJobs!()).toHaveLength(1);
 
     // Wait for the timer to fire
     await new Promise((r) => setTimeout(r, 150));
@@ -239,17 +239,17 @@ describe('scheduler-full', () => {
     expect(received[0].content).toBe('Timed one-shot');
 
     // Job should be auto-deleted after firing
-    expect(scheduler.listJobs!()).toHaveLength(0);
+    expect(await scheduler.listJobs!()).toHaveLength(0);
   });
 
   test('scheduleOnce: job is still in store when async handler runs', async () => {
     const scheduler = await create(mockConfig);
-    let jobListDuringHandler: ReturnType<NonNullable<typeof scheduler.listJobs>> = [];
+    let jobListDuringHandler: Awaited<ReturnType<NonNullable<typeof scheduler.listJobs>>> = [];
 
     // Use an async handler (like the real server handler) that yields before checking the job store
     await scheduler.start(async (_msg) => {
       await new Promise(r => setTimeout(r, 10)); // yield to event loop
-      jobListDuringHandler = scheduler.listJobs!();
+      jobListDuringHandler = await scheduler.listJobs!();
     });
     stopFn = () => scheduler.stop();
 
@@ -269,7 +269,7 @@ describe('scheduler-full', () => {
     expect(jobListDuringHandler.some(j => j.id === 'race-test')).toBe(true);
 
     // But after handler completes, job should be cleaned up
-    expect(scheduler.listJobs!()).toHaveLength(0);
+    expect(await scheduler.listJobs!()).toHaveLength(0);
   });
 
   test('scheduleOnce job can be cancelled via removeCron', async () => {
@@ -294,7 +294,7 @@ describe('scheduler-full', () => {
     await new Promise((r) => setTimeout(r, 200));
 
     expect(received.filter(m => m.sender === 'cron:cancel-me')).toHaveLength(0);
-    expect(scheduler.listJobs!()).toHaveLength(0);
+    expect(await scheduler.listJobs!()).toHaveLength(0);
   });
 
   // ─── ProactiveHint bridge ──────────────────────────
@@ -492,10 +492,10 @@ describe('scheduler-full', () => {
       prompt: 'Check updates',
     });
 
-    expect(scheduler.listJobs!()).toHaveLength(1);
+    expect(await scheduler.listJobs!()).toHaveLength(1);
 
     scheduler.removeCron!('job-1');
-    expect(scheduler.listJobs!()).toHaveLength(0);
+    expect(await scheduler.listJobs!()).toHaveLength(0);
   });
 
   test('start and stop lifecycle', async () => {

@@ -20,17 +20,18 @@ config:
   models:
     default: ["anthropic/claude-sonnet-4-20250514"]
   providers:
-    memory: sqlite
+    memory: memoryfs
     scanner: patterns
     channels: []
     web: none
     browser: none
     credentials: env
     skills: readonly
-    storage: postgresql
+    storage: database
+    database: postgresql
     eventbus: nats
     sandbox: k8s
-    audit: sqlite
+    audit: database
     scheduler: plainjob
   sandbox:
     timeout_sec: 120

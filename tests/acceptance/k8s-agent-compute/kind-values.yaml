@@ -98,6 +98,7 @@ config:
   models:
     default: ["openrouter/anthropic/claude-sonnet-4"]
   providers:
-    storage: postgresql
+    storage: database
+    database: postgresql
     eventbus: nats
     sandbox: k8s

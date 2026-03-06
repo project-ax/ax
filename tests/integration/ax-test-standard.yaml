@@ -1,19 +1,19 @@
 # Balanced profile test config
-# Uses Phase 1 providers: patterns scanner, sqlite audit, cron scheduler
+# Uses Phase 1 providers: patterns scanner, file audit, cron scheduler
 # LLM is still mock for testing (no API key needed)
 profile: balanced
 models:
   default:
     - mock/default
 providers:
-  memory: sqlite
+  memory: memoryfs
   scanner: patterns
   channels: []
   web: none
   browser: none
   credentials: env
   skills: readonly
-  audit: sqlite
+  audit: file
   sandbox: subprocess
   scheduler: none
 sandbox:

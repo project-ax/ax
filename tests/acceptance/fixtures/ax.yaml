@@ -20,7 +20,7 @@ models:
 # Local environment providers — compare with ax-k8s.yaml for k8s differences.
 providers:
   memory: memoryfs
-  audit: sqlite
+  audit: file
   credentials: plaintext
   sandbox: seatbelt
   screener: static
@@ -30,7 +30,7 @@ providers:
   channels: []
   web: none
   scanner: patterns
-  storage: sqlite
+  storage: file
   eventbus: inprocess
 
 # ── History / Memory / Embeddings ───────────────────────────

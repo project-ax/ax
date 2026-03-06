@@ -15,7 +15,7 @@ function imageRouterConfig(imageModels: string[]): Config {
     },
     profile: 'balanced',
     providers: {
-      memory: 'sqlite', scanner: 'patterns',
+      memory: 'memoryfs', scanner: 'patterns',
       channels: [], web: 'none', browser: 'none',
       credentials: 'keychain', skills: 'readonly', audit: 'file',
       sandbox: 'subprocess', scheduler: 'none',

@@ -38,9 +38,9 @@ function mockConfig(profile: 'paranoid' | 'balanced' | 'yolo' = 'balanced'): Con
     profile,
     models: { default: ['mock/default'] },
     providers: {
-      memory: 'sqlite', scanner: 'patterns',
+      memory: 'memoryfs', scanner: 'patterns',
       channels: [], web: 'none', browser: 'none',
-      credentials: 'keychain', skills: 'readonly', audit: 'sqlite',
+      credentials: 'keychain', skills: 'readonly', audit: 'file',
       sandbox: 'subprocess', scheduler: 'none',
     },
     sandbox: { timeout_sec: 30, memory_mb: 256 },
@@ -336,8 +336,8 @@ describe('Balanced Profile Config', () => {
 
     expect(config.profile).toBe('balanced');
     expect(config.providers.scanner).toBe('patterns');
-    expect(config.providers.memory).toBe('sqlite');
-    expect(config.providers.audit).toBe('sqlite');
+    expect(config.providers.memory).toBe('memoryfs');
+    expect(config.providers.audit).toBe('file');
   });
 
   test('standard profile providers can be instantiated', async () => {
@@ -383,7 +383,6 @@ describe('Provider Map', () => {
     expect(PROVIDER_MAP.llm).toHaveProperty('mock');
 
     // Memory providers
-    expect(PROVIDER_MAP.memory).toHaveProperty('sqlite');
     expect(PROVIDER_MAP.memory).toHaveProperty('memoryfs');
 
     // Scanner providers
@@ -405,7 +404,7 @@ describe('Provider Map', () => {
 
     // Audit providers
     expect(PROVIDER_MAP.audit).toHaveProperty('file');
-    expect(PROVIDER_MAP.audit).toHaveProperty('sqlite');
+    expect(PROVIDER_MAP.audit).toHaveProperty('database');
 
     // Sandbox providers
     expect(PROVIDER_MAP.sandbox).toHaveProperty('subprocess');

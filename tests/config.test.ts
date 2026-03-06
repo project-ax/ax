@@ -35,7 +35,7 @@ describe('Config parser', () => {
 agent: ${agent}
 profile: balanced
 providers:
-  memory: sqlite
+  memory: memoryfs
   scanner: patterns
   channels: []
   web: none
@@ -69,7 +69,7 @@ scheduler:
 agent: unknown-agent
 profile: balanced
 providers:
-  memory: sqlite
+  memory: memoryfs
   scanner: patterns
   channels: []
   web: none
@@ -104,7 +104,7 @@ models:
     - openrouter/anthropic/claude-sonnet-4
 profile: balanced
 providers:
-  memory: sqlite
+  memory: memoryfs
   scanner: patterns
   channels: []
   web: none
@@ -145,7 +145,7 @@ models:
     - openrouter/seedream-5-0
 profile: balanced
 providers:
-  memory: sqlite
+  memory: memoryfs
   scanner: patterns
   channels: []
   web: none
@@ -191,7 +191,7 @@ models:
     - openai/gpt-image-1.5
 profile: balanced
 providers:
-  memory: sqlite
+  memory: memoryfs
   scanner: patterns
   channels: []
   web: none
@@ -233,7 +233,7 @@ scheduler:
     writeFileSync(tmpPath, `
 profile: balanced
 providers:
-  memory: sqlite
+  memory: memoryfs
   scanner: patterns
   channels: []
   web: none
@@ -271,7 +271,7 @@ webhooks:
     writeFileSync(tmpPath, `
 profile: balanced
 providers:
-  memory: sqlite
+  memory: memoryfs
   scanner: patterns
   channels: []
   web: none
@@ -315,7 +315,7 @@ webhooks:
     writeFileSync(tmpPath, `
 profile: balanced
 providers:
-  memory: sqlite
+  memory: memoryfs
   scanner: patterns
   channels: []
   web: none
@@ -361,7 +361,7 @@ webhooks:
     writeFileSync(tmpPath, `
 profile: balanced
 providers:
-  memory: sqlite
+  memory: memoryfs
   scanner: patterns
   channels: []
   web: none
@@ -399,7 +399,7 @@ admin:
     writeFileSync(tmpPath, `
 profile: balanced
 providers:
-  memory: sqlite
+  memory: memoryfs
   scanner: patterns
   channels: []
   web: none

@@ -4,6 +4,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { handleFileUpload, handleFileDownload } from '../../src/host/server-files.js';
 import { FileStore } from '../../src/file-store.js';
+import { createKyselyDb } from '../../src/utils/database.js';
+import { runMigrations } from '../../src/utils/migrator.js';
+import { filesMigrations } from '../../src/migrations/files.js';
 
 // Stub paths.ts to use temp directory for workspace
 let tmpDir: string;
@@ -177,9 +180,11 @@ describe('File upload/download API', () => {
       const { fileId } = JSON.parse(uploadRes.end.mock.calls[0][0]);
 
       // Register in FileStore
-      const fileStore = await FileStore.create(join(tmpDir, 'files.db'));
+      const db = createKyselyDb({ type: 'sqlite', path: join(tmpDir, 'files.db') });
+      await runMigrations(db, filesMigrations);
+      const fileStore = new FileStore(db);
       try {
-        fileStore.register(fileId, 'main', 'testuser', 'image/png');
+        await fileStore.register(fileId, 'main', 'testuser', 'image/png');
 
         // Download WITHOUT agent/user params — should resolve via FileStore
         const downloadReq = mockRequest('GET', `/v1/files/${fileId}`, {});
@@ -191,12 +196,14 @@ describe('File upload/download API', () => {
         }));
         expect(downloadRes.end.mock.calls[0][0]).toEqual(imageData);
       } finally {
-        fileStore.close();
+        await fileStore.close();
       }
     });
 
     test('returns 404 when fileId not in FileStore and no agent/user params', async () => {
-      const fileStore = await FileStore.create(join(tmpDir, 'files.db'));
+      const db = createKyselyDb({ type: 'sqlite', path: join(tmpDir, 'files.db') });
+      await runMigrations(db, filesMigrations);
+      const fileStore = new FileStore(db);
       try {
         const req = mockRequest('GET', '/v1/files/nonexistent.png', {});
         const res = mockResponse();
@@ -204,7 +211,7 @@ describe('File upload/download API', () => {
 
         expect(res.writeHead).toHaveBeenCalledWith(404, expect.any(Object));
       } finally {
-        fileStore.close();
+        await fileStore.close();
       }
     });
   });

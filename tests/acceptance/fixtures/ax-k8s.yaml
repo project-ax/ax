@@ -4,7 +4,7 @@
 # running on a kind cluster. Compare with ax.yaml (local) — differences are:
 #   sandbox:    k8s       (vs seatbelt)
 #   eventbus:   nats      (vs inprocess)
-#   storage:    sqlite    (keeps things simple — postgresql is tested by k8s-agent-compute)
+#   storage:    file      (keeps things simple — database+postgresql is tested by k8s-agent-compute)
 #
 # Credentials are injected via Kubernetes secret (ax-api-credentials).
 
@@ -19,7 +19,7 @@ models:
 # -- Providers -------------------------------------------------------------
 providers:
   memory: memoryfs
-  audit: sqlite
+  audit: file
   credentials: plaintext
   sandbox: k8s
   screener: static
@@ -29,7 +29,7 @@ providers:
   channels: []
   web: none
   scanner: patterns
-  storage: sqlite
+  storage: file
   eventbus: nats
 
 # -- History / Memory / Embeddings -----------------------------------------

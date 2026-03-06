@@ -3,8 +3,11 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { create } from '../../../src/providers/scheduler/plainjob.js';
-import { SQLiteJobStore, MemoryJobStore } from '../../../src/providers/scheduler/types.js';
-import { openDatabase } from '../../../src/utils/sqlite.js';
+import { MemoryJobStore } from '../../../src/providers/scheduler/types.js';
+import { KyselyJobStore } from '../../../src/job-store.js';
+import { createKyselyDb } from '../../../src/utils/database.js';
+import { runMigrations } from '../../../src/utils/migrator.js';
+import { jobsMigrations } from '../../../src/migrations/jobs.js';
 import type { Config } from '../../../src/types.js';
 import type { InboundMessage } from '../../../src/providers/channel/types.js';
 
@@ -13,7 +16,7 @@ const AGENT = 'main';
 
 const mockConfig = {
   profile: 'paranoid',
-  providers: { memory: 'sqlite', scanner: 'patterns', channels: ['cli'], web: 'none', browser: 'none', credentials: 'keychain', skills: 'readonly', audit: 'file', sandbox: 'subprocess', scheduler: 'plainjob' },
+  providers: { memory: 'memoryfs', scanner: 'patterns', channels: ['cli'], web: 'none', browser: 'none', credentials: 'keychain', skills: 'readonly', audit: 'file', sandbox: 'subprocess', scheduler: 'plainjob' },
   sandbox: { timeout_sec: 120, memory_mb: 512 },
   scheduler: {
     active_hours: { start: '00:00', end: '23:59', timezone: 'UTC' },
@@ -23,33 +26,35 @@ const mockConfig = {
 } as Config;
 
 // ═══════════════════════════════════════════════════════
-// SQLiteJobStore unit tests
+// KyselyJobStore unit tests
 // ═══════════════════════════════════════════════════════
 
-describe('SQLiteJobStore', () => {
+describe('KyselyJobStore', () => {
   let tmpDir: string;
-  let store: SQLiteJobStore;
+  let store: KyselyJobStore;
 
-  beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'ax-sqlite-jobstore-'));
-    const db = openDatabase(join(tmpDir, 'test.db'));
-    store = new SQLiteJobStore(db);
+  beforeEach(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'ax-kysely-jobstore-'));
+    const db = createKyselyDb({ type: 'sqlite', path: join(tmpDir, 'test.db') });
+    const result = await runMigrations(db, jobsMigrations);
+    if (result.error) throw result.error;
+    store = new KyselyJobStore(db);
   });
 
-  afterEach(() => {
-    store.close();
+  afterEach(async () => {
+    await store.close();
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  test('set and get a job', () => {
-    store.set({
+  test('set and get a job', async () => {
+    await store.set({
       id: 'job-1',
       schedule: '*/5 * * * *',
       agentId: 'assistant',
       prompt: 'Check for updates',
     });
 
-    const job = store.get('job-1');
+    const job = await store.get('job-1');
     expect(job).toBeDefined();
     expect(job!.id).toBe('job-1');
     expect(job!.schedule).toBe('*/5 * * * *');
@@ -57,49 +62,49 @@ describe('SQLiteJobStore', () => {
     expect(job!.prompt).toBe('Check for updates');
   });
 
-  test('get returns undefined for missing job', () => {
-    expect(store.get('nonexistent')).toBeUndefined();
+  test('get returns undefined for missing job', async () => {
+    expect(await store.get('nonexistent')).toBeUndefined();
   });
 
-  test('set overwrites existing job (upsert)', () => {
-    store.set({ id: 'job-1', schedule: '* * * * *', agentId: 'a', prompt: 'v1' });
-    store.set({ id: 'job-1', schedule: '*/10 * * * *', agentId: 'a', prompt: 'v2' });
+  test('set overwrites existing job (upsert)', async () => {
+    await store.set({ id: 'job-1', schedule: '* * * * *', agentId: 'a', prompt: 'v1' });
+    await store.set({ id: 'job-1', schedule: '*/10 * * * *', agentId: 'a', prompt: 'v2' });
 
-    const job = store.get('job-1');
+    const job = await store.get('job-1');
     expect(job!.schedule).toBe('*/10 * * * *');
     expect(job!.prompt).toBe('v2');
-    expect(store.list()).toHaveLength(1);
+    expect(await store.list()).toHaveLength(1);
   });
 
-  test('delete removes a job and returns true', () => {
-    store.set({ id: 'job-1', schedule: '* * * * *', agentId: 'a', prompt: 'p' });
-    expect(store.delete('job-1')).toBe(true);
-    expect(store.get('job-1')).toBeUndefined();
+  test('delete removes a job and returns true', async () => {
+    await store.set({ id: 'job-1', schedule: '* * * * *', agentId: 'a', prompt: 'p' });
+    expect(await store.delete('job-1')).toBe(true);
+    expect(await store.get('job-1')).toBeUndefined();
   });
 
-  test('delete returns false for missing job', () => {
-    expect(store.delete('nope')).toBe(false);
+  test('delete returns false for missing job', async () => {
+    expect(await store.delete('nope')).toBe(false);
   });
 
-  test('list returns all jobs', () => {
-    store.set({ id: 'j1', schedule: '* * * * *', agentId: 'a', prompt: 'p1' });
-    store.set({ id: 'j2', schedule: '* * * * *', agentId: 'b', prompt: 'p2' });
+  test('list returns all jobs', async () => {
+    await store.set({ id: 'j1', schedule: '* * * * *', agentId: 'a', prompt: 'p1' });
+    await store.set({ id: 'j2', schedule: '* * * * *', agentId: 'b', prompt: 'p2' });
 
-    const all = store.list();
+    const all = await store.list();
     expect(all).toHaveLength(2);
     expect(all.map(j => j.id).sort()).toEqual(['j1', 'j2']);
   });
 
-  test('list filters by agentId', () => {
-    store.set({ id: 'j1', schedule: '* * * * *', agentId: 'a', prompt: 'p1' });
-    store.set({ id: 'j2', schedule: '* * * * *', agentId: 'b', prompt: 'p2' });
+  test('list filters by agentId', async () => {
+    await store.set({ id: 'j1', schedule: '* * * * *', agentId: 'a', prompt: 'p1' });
+    await store.set({ id: 'j2', schedule: '* * * * *', agentId: 'b', prompt: 'p2' });
 
-    expect(store.list('a')).toHaveLength(1);
-    expect(store.list('a')[0].id).toBe('j1');
+    expect(await store.list('a')).toHaveLength(1);
+    expect((await store.list('a'))[0].id).toBe('j1');
   });
 
-  test('persists optional fields: maxTokenBudget, delivery, runOnce', () => {
-    store.set({
+  test('persists optional fields: maxTokenBudget, delivery, runOnce', async () => {
+    await store.set({
       id: 'full-job',
       schedule: '0 9 * * *',
       agentId: 'assistant',
@@ -109,54 +114,58 @@ describe('SQLiteJobStore', () => {
       runOnce: true,
     });
 
-    const job = store.get('full-job')!;
+    const job = (await store.get('full-job'))!;
     expect(job.maxTokenBudget).toBe(2048);
     expect(job.delivery).toEqual({ mode: 'channel', target: 'last' });
     expect(job.runOnce).toBe(true);
   });
 
-  test('persists across database reopens', () => {
+  test('persists across database reopens', async () => {
     const dbPath = join(tmpDir, 'persist.db');
-    const db1 = openDatabase(dbPath);
-    const store1 = new SQLiteJobStore(db1);
-    store1.set({ id: 'persistent', schedule: '* * * * *', agentId: 'a', prompt: 'survives restart' });
-    store1.close();
+    const db1 = createKyselyDb({ type: 'sqlite', path: dbPath });
+    const r1 = await runMigrations(db1, jobsMigrations);
+    if (r1.error) throw r1.error;
+    const store1 = new KyselyJobStore(db1);
+    await store1.set({ id: 'persistent', schedule: '* * * * *', agentId: 'a', prompt: 'survives restart' });
+    await store1.close();
 
-    const db2 = openDatabase(dbPath);
-    const store2 = new SQLiteJobStore(db2);
-    const job = store2.get('persistent');
+    const db2 = createKyselyDb({ type: 'sqlite', path: dbPath });
+    const r2 = await runMigrations(db2, jobsMigrations);
+    if (r2.error) throw r2.error;
+    const store2 = new KyselyJobStore(db2);
+    const job = await store2.get('persistent');
     expect(job).toBeDefined();
     expect(job!.prompt).toBe('survives restart');
-    store2.close();
+    await store2.close();
   });
 
-  test('setRunAt persists fire time and listWithRunAt retrieves it', () => {
-    store.set({ id: 'once-job', schedule: '* * * * *', agentId: 'a', prompt: 'one-shot' });
+  test('setRunAt persists fire time and listWithRunAt retrieves it', async () => {
+    await store.set({ id: 'once-job', schedule: '* * * * *', agentId: 'a', prompt: 'one-shot' });
     const fireAt = new Date('2026-06-01T12:00:00Z');
-    store.setRunAt('once-job', fireAt);
+    await store.setRunAt('once-job', fireAt);
 
-    const results = store.listWithRunAt();
+    const results = await store.listWithRunAt();
     expect(results).toHaveLength(1);
     expect(results[0].job.id).toBe('once-job');
     expect(results[0].runAt.toISOString()).toBe(fireAt.toISOString());
   });
 
-  test('listWithRunAt excludes jobs without run_at', () => {
-    store.set({ id: 'cron-job', schedule: '0 9 * * *', agentId: 'a', prompt: 'recurring' });
-    store.set({ id: 'once-job', schedule: '* * * * *', agentId: 'a', prompt: 'one-shot' });
-    store.setRunAt('once-job', new Date('2026-06-01T12:00:00Z'));
+  test('listWithRunAt excludes jobs without run_at', async () => {
+    await store.set({ id: 'cron-job', schedule: '0 9 * * *', agentId: 'a', prompt: 'recurring' });
+    await store.set({ id: 'once-job', schedule: '* * * * *', agentId: 'a', prompt: 'one-shot' });
+    await store.setRunAt('once-job', new Date('2026-06-01T12:00:00Z'));
 
-    const results = store.listWithRunAt();
+    const results = await store.listWithRunAt();
     expect(results).toHaveLength(1);
     expect(results[0].job.id).toBe('once-job');
   });
 
-  test('delete clears run_at along with the job', () => {
-    store.set({ id: 'once-job', schedule: '* * * * *', agentId: 'a', prompt: 'p' });
-    store.setRunAt('once-job', new Date());
-    store.delete('once-job');
+  test('delete clears run_at along with the job', async () => {
+    await store.set({ id: 'once-job', schedule: '* * * * *', agentId: 'a', prompt: 'p' });
+    await store.setRunAt('once-job', new Date());
+    await store.delete('once-job');
 
-    expect(store.listWithRunAt()).toHaveLength(0);
+    expect(await store.listWithRunAt()).toHaveLength(0);
   });
 });
 
@@ -253,6 +262,7 @@ describe('scheduler-plainjob', () => {
     stopFn = () => scheduler.stop();
 
     scheduler.checkCronNow!(new Date('2026-03-01T12:05:00Z'));
+    await new Promise(r => setTimeout(r, 10));
 
     expect(received).toHaveLength(1);
     expect(received[0].sender).toBe('cron:my-job');
@@ -270,6 +280,7 @@ describe('scheduler-plainjob', () => {
     stopFn = () => scheduler.stop();
 
     scheduler.checkCronNow!(new Date('2026-03-01T12:05:00Z'));
+    await new Promise(r => setTimeout(r, 10));
 
     expect(received).toHaveLength(1);
     expect(received[0].sender).toBe('cron:j1');
@@ -369,6 +380,7 @@ describe('scheduler-plainjob', () => {
     stopFn = () => scheduler.stop();
 
     scheduler.checkCronNow!(new Date('2026-03-01T12:05:00Z'));
+    await new Promise(r => setTimeout(r, 10));
 
     expect(received.filter(m => m.sender === 'cron:test-job')).toHaveLength(1);
     expect(received[0].content).toBe('Run test task');
@@ -391,14 +403,17 @@ describe('scheduler-plainjob', () => {
 
     const t = new Date('2026-03-01T12:05:00Z');
     scheduler.checkCronNow!(t);
+    await new Promise(r => setTimeout(r, 10));
     expect(received.filter(m => m.sender === 'cron:dedup-job')).toHaveLength(1);
 
     // Same minute — should NOT fire again
     scheduler.checkCronNow!(new Date('2026-03-01T12:05:30Z'));
+    await new Promise(r => setTimeout(r, 10));
     expect(received.filter(m => m.sender === 'cron:dedup-job')).toHaveLength(1);
 
     // Next minute — should fire again
     scheduler.checkCronNow!(new Date('2026-03-01T12:06:00Z'));
+    await new Promise(r => setTimeout(r, 10));
     expect(received.filter(m => m.sender === 'cron:dedup-job')).toHaveLength(2);
   });
 
@@ -420,6 +435,7 @@ describe('scheduler-plainjob', () => {
     stopFn = () => scheduler.stop();
 
     scheduler.checkCronNow!(new Date('2026-03-01T12:05:00Z'));
+    await new Promise(r => setTimeout(r, 10));
     expect(received.filter(m => m.sender === 'cron:once-job')).toHaveLength(1);
 
     // Job should be deleted
@@ -427,6 +443,7 @@ describe('scheduler-plainjob', () => {
 
     // Next minute — should NOT fire
     scheduler.checkCronNow!(new Date('2026-03-01T12:06:00Z'));
+    await new Promise(r => setTimeout(r, 10));
     expect(received.filter(m => m.sender === 'cron:once-job')).toHaveLength(1);
   });
 
@@ -511,8 +528,10 @@ describe('scheduler-plainjob', () => {
   test('stop waits for in-flight async cleanup before closing DB', async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), 'ax-plainjob-asyncstop-'));
     const dbPath = join(tmpDir, 'scheduler.db');
-    const db = openDatabase(dbPath);
-    const store = new SQLiteJobStore(db);
+    const db = createKyselyDb({ type: 'sqlite', path: dbPath });
+    const migResult = await runMigrations(db, jobsMigrations);
+    if (migResult.error) throw migResult.error;
+    const store = new KyselyJobStore(db);
     const scheduler = await create(mockConfig, { jobStore: store });
     let cleanupRan = false;
 
@@ -545,11 +564,13 @@ describe('scheduler-plainjob', () => {
 
   // ─── One-shot rehydration (P1 fix) ────────────────
 
-  test('scheduleOnce persists run_at in SQLiteJobStore', async () => {
+  test('scheduleOnce persists run_at in KyselyJobStore', async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), 'ax-plainjob-runat-'));
     const dbPath = join(tmpDir, 'scheduler.db');
-    const db = openDatabase(dbPath);
-    const store = new SQLiteJobStore(db);
+    const db = createKyselyDb({ type: 'sqlite', path: dbPath });
+    const migResult = await runMigrations(db, jobsMigrations);
+    if (migResult.error) throw migResult.error;
+    const store = new KyselyJobStore(db);
     const scheduler = await create(mockConfig, { jobStore: store });
 
     await scheduler.start(() => {});
@@ -564,7 +585,7 @@ describe('scheduler-plainjob', () => {
     }, fireAt);
 
     // Verify run_at was persisted
-    const persisted = store.listWithRunAt();
+    const persisted = await store.listWithRunAt();
     expect(persisted).toHaveLength(1);
     expect(persisted[0].job.id).toBe('persist-runat');
     expect(persisted[0].runAt.toISOString()).toBe(fireAt.toISOString());
@@ -573,13 +594,15 @@ describe('scheduler-plainjob', () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  test('one-shot jobs are rehydrated on start with SQLiteJobStore', async () => {
+  test('one-shot jobs are rehydrated on start with KyselyJobStore', async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), 'ax-plainjob-rehydrate-'));
     const dbPath = join(tmpDir, 'scheduler.db');
 
     // First instance: schedule a one-shot job for the near future, then stop
-    const db1 = openDatabase(dbPath);
-    const store1 = new SQLiteJobStore(db1);
+    const db1 = createKyselyDb({ type: 'sqlite', path: dbPath });
+    const r1 = await runMigrations(db1, jobsMigrations);
+    if (r1.error) throw r1.error;
+    const store1 = new KyselyJobStore(db1);
     const scheduler1 = await create(mockConfig, { jobStore: store1 });
     await scheduler1.start(() => {});
 
@@ -596,8 +619,10 @@ describe('scheduler-plainjob', () => {
     await scheduler1.stop();
 
     // Second instance: rehydrated job should fire
-    const db2 = openDatabase(dbPath);
-    const store2 = new SQLiteJobStore(db2);
+    const db2 = createKyselyDb({ type: 'sqlite', path: dbPath });
+    const r2 = await runMigrations(db2, jobsMigrations);
+    if (r2.error) throw r2.error;
+    const store2 = new KyselyJobStore(db2);
     const scheduler2 = await create(mockConfig, { jobStore: store2 });
     const received: InboundMessage[] = [];
 
@@ -618,21 +643,25 @@ describe('scheduler-plainjob', () => {
     const dbPath = join(tmpDir, 'scheduler.db');
 
     // Manually insert a job with a past run_at
-    const db1 = openDatabase(dbPath);
-    const store1 = new SQLiteJobStore(db1);
-    store1.set({
+    const db1 = createKyselyDb({ type: 'sqlite', path: dbPath });
+    const r1 = await runMigrations(db1, jobsMigrations);
+    if (r1.error) throw r1.error;
+    const store1 = new KyselyJobStore(db1);
+    await store1.set({
       id: 'past-due',
       schedule: '* * * * *',
       agentId: AGENT,
       prompt: 'Past due job',
       runOnce: true,
     });
-    store1.setRunAt('past-due', new Date(Date.now() - 60_000)); // 1 minute ago
-    store1.close();
+    await store1.setRunAt('past-due', new Date(Date.now() - 60_000)); // 1 minute ago
+    await store1.close();
 
     // Start a new scheduler — job should fire immediately
-    const db2 = openDatabase(dbPath);
-    const store2 = new SQLiteJobStore(db2);
+    const db2 = createKyselyDb({ type: 'sqlite', path: dbPath });
+    const r2 = await runMigrations(db2, jobsMigrations);
+    if (r2.error) throw r2.error;
+    const store2 = new KyselyJobStore(db2);
     const scheduler = await create(mockConfig, { jobStore: store2 });
     const received: InboundMessage[] = [];
 
@@ -651,17 +680,21 @@ describe('scheduler-plainjob', () => {
     const dbPath = join(tmpDir, 'scheduler.db');
 
     // Insert jobs for two different agents
-    const db1 = openDatabase(dbPath);
-    const store1 = new SQLiteJobStore(db1);
-    store1.set({ id: 'my-job', schedule: '* * * * *', agentId: AGENT, prompt: 'mine', runOnce: true });
-    store1.setRunAt('my-job', new Date(Date.now() + 30));
-    store1.set({ id: 'other-job', schedule: '* * * * *', agentId: 'other-agent', prompt: 'theirs', runOnce: true });
-    store1.setRunAt('other-job', new Date(Date.now() + 30));
-    store1.close();
+    const db1 = createKyselyDb({ type: 'sqlite', path: dbPath });
+    const r1 = await runMigrations(db1, jobsMigrations);
+    if (r1.error) throw r1.error;
+    const store1 = new KyselyJobStore(db1);
+    await store1.set({ id: 'my-job', schedule: '* * * * *', agentId: AGENT, prompt: 'mine', runOnce: true });
+    await store1.setRunAt('my-job', new Date(Date.now() + 30));
+    await store1.set({ id: 'other-job', schedule: '* * * * *', agentId: 'other-agent', prompt: 'theirs', runOnce: true });
+    await store1.setRunAt('other-job', new Date(Date.now() + 30));
+    await store1.close();
 
     // Start scheduler — only 'my-job' should fire
-    const db2 = openDatabase(dbPath);
-    const store2 = new SQLiteJobStore(db2);
+    const db2 = createKyselyDb({ type: 'sqlite', path: dbPath });
+    const r2 = await runMigrations(db2, jobsMigrations);
+    if (r2.error) throw r2.error;
+    const store2 = new KyselyJobStore(db2);
     const scheduler = await create(mockConfig, { jobStore: store2 });
     const received: InboundMessage[] = [];
 
@@ -677,13 +710,15 @@ describe('scheduler-plainjob', () => {
 
   // ─── SQLite persistence integration ───────────────
 
-  test('jobs persist across provider recreates with SQLiteJobStore', async () => {
+  test('jobs persist across provider recreates with KyselyJobStore', async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), 'ax-plainjob-persist-'));
     const dbPath = join(tmpDir, 'scheduler.db');
 
     // Create first instance and add a job
-    const db1 = openDatabase(dbPath);
-    const store1 = new SQLiteJobStore(db1);
+    const db1 = createKyselyDb({ type: 'sqlite', path: dbPath });
+    const r1 = await runMigrations(db1, jobsMigrations);
+    if (r1.error) throw r1.error;
+    const store1 = new KyselyJobStore(db1);
     const scheduler1 = await create(mockConfig, { jobStore: store1 });
 
     scheduler1.addCron!({
@@ -692,15 +727,20 @@ describe('scheduler-plainjob', () => {
       agentId: AGENT,
       prompt: 'Morning standup',
     });
+    // Wait for async store write to complete
+    await new Promise(r => setTimeout(r, 10));
 
     await scheduler1.stop();
 
     // Create second instance — job should still be there
-    const db2 = openDatabase(dbPath);
-    const store2 = new SQLiteJobStore(db2);
+    const db2 = createKyselyDb({ type: 'sqlite', path: dbPath });
+    const r2 = await runMigrations(db2, jobsMigrations);
+    if (r2.error) throw r2.error;
+    const store2 = new KyselyJobStore(db2);
     const scheduler2 = await create(mockConfig, { jobStore: store2 });
 
-    const jobs = scheduler2.listJobs!();
+    // listJobs() returns [] for async stores, so read directly from store
+    const jobs = await store2.list(AGENT);
     expect(jobs).toHaveLength(1);
     expect(jobs[0].id).toBe('persisted-job');
     expect(jobs[0].prompt).toBe('Morning standup');
@@ -709,13 +749,15 @@ describe('scheduler-plainjob', () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  test('removed jobs do not reappear after restart with SQLiteJobStore', async () => {
+  test('removed jobs do not reappear after restart with KyselyJobStore', async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), 'ax-plainjob-remove-'));
     const dbPath = join(tmpDir, 'scheduler.db');
 
     // Create, add, then remove
-    const db1 = openDatabase(dbPath);
-    const store1 = new SQLiteJobStore(db1);
+    const db1 = createKyselyDb({ type: 'sqlite', path: dbPath });
+    const r1 = await runMigrations(db1, jobsMigrations);
+    if (r1.error) throw r1.error;
+    const store1 = new KyselyJobStore(db1);
     const scheduler1 = await create(mockConfig, { jobStore: store1 });
 
     scheduler1.addCron!({
@@ -728,8 +770,10 @@ describe('scheduler-plainjob', () => {
     await scheduler1.stop();
 
     // Reopen — should be empty
-    const db2 = openDatabase(dbPath);
-    const store2 = new SQLiteJobStore(db2);
+    const db2 = createKyselyDb({ type: 'sqlite', path: dbPath });
+    const r2 = await runMigrations(db2, jobsMigrations);
+    if (r2.error) throw r2.error;
+    const store2 = new KyselyJobStore(db2);
     const scheduler2 = await create(mockConfig, { jobStore: store2 });
 
     expect(scheduler2.listJobs!()).toHaveLength(0);

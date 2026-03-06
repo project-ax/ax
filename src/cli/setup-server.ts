@@ -200,7 +200,7 @@ profile: ${profile}
 agent: ${agentType}
 
 providers:
-  memory: sqlite
+  memory: memoryfs
   scanner: patterns
   channels: []
   web: none

@@ -21,7 +21,7 @@ config:
       - openrouter/google/gemini-3-flash-preview
   providers:
     memory: memoryfs
-    audit: sqlite
+    audit: file
     credentials: plaintext
     sandbox: subprocess
     screener: static
@@ -31,7 +31,7 @@ config:
     channels: []
     web: none
     scanner: patterns
-    storage: sqlite
+    storage: file
     eventbus: nats
   history:
     max_turns: 50

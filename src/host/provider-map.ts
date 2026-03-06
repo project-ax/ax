@@ -32,7 +32,6 @@ const _PROVIDER_MAP = {
     mock:       '../providers/image/mock.js',
   },
   memory: {
-    sqlite:   '../providers/memory/sqlite.js',
     memoryfs: '../providers/memory/memoryfs/index.js',
   },
   scanner: {
@@ -61,7 +60,6 @@ const _PROVIDER_MAP = {
   },
   audit: {
     file:     '../providers/audit/file.js',
-    sqlite:   '../providers/audit/sqlite.js',
     database: '../providers/audit/database.js',
   },
   sandbox: {
@@ -86,8 +84,6 @@ const _PROVIDER_MAP = {
     postgresql: '../providers/database/postgres.js',
   },
   storage: {
-    sqlite:     '../providers/storage/sqlite.js',
-    postgresql: '../providers/storage/postgresql.js',
     file:       '../providers/storage/file.js',
     database:   '../providers/storage/database.js',
   },

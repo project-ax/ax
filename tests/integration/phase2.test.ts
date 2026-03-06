@@ -36,9 +36,9 @@ function powerUserConfig(): Config {
   return {
     profile: 'yolo',
     providers: {
-      memory: 'sqlite', scanner: 'promptfoo',
+      memory: 'memoryfs', scanner: 'promptfoo',
       channels: [], web: 'tavily', browser: 'container',
-      credentials: 'keychain', skills: 'git', audit: 'sqlite',
+      credentials: 'keychain', skills: 'git', audit: 'file',
       sandbox: 'docker', scheduler: 'full',
     },
     sandbox: { timeout_sec: 60, memory_mb: 512 },
@@ -430,11 +430,11 @@ describe('Architectural Invariants', () => {
   });
 
   test('MemoryProvider has optional memorize method', async () => {
-    const { create: createSqlite } = await import('../../src/providers/memory/sqlite.js');
-    const sqliteProvider = await createSqlite({} as Config);
+    const { create: createMemoryfs } = await import('../../src/providers/memory/memoryfs/index.js');
+    const memoryfsProvider = await createMemoryfs({} as Config);
 
-    // SQLite provider should NOT have memorize
-    expect(sqliteProvider.memorize).toBeUndefined();
+    // memoryfs provider DOES have memorize (LLM-powered extraction)
+    expect(typeof memoryfsProvider.memorize).toBe('function');
   });
 
   test('scanner providers share the same interface', async () => {

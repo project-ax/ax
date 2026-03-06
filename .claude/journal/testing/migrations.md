@@ -2,6 +2,30 @@
 
 Kysely migration infrastructure: runner, database factory, store integration, upgrade-path tests.
 
+## [2026-03-05 19:10] — Port plainjob.test.ts from SQLiteJobStore to KyselyJobStore
+
+**Task:** Replace removed `SQLiteJobStore` and `openDatabase` imports with `KyselyJobStore`, `createKyselyDb`, `runMigrations`, and `jobsMigrations` in plainjob.test.ts
+**What I did:** Replaced all `SQLiteJobStore` usages with `KyselyJobStore` (with `createKyselyDb` + `runMigrations`). Added `await` to all async store methods (set/get/delete/list/setRunAt/listWithRunAt/close). Made beforeEach/afterEach async. Added microtask yields after `checkCronNow` calls since `checkCronJobs` is now async. Used `store.list()` directly instead of `scheduler.listJobs()` for KyselyJobStore persistence tests since `listJobs()` returns `[]` for async stores.
+**Files touched:** tests/providers/scheduler/plainjob.test.ts
+**Outcome:** Success — all 35 tests pass
+**Notes:** `checkCronNow` calls `checkCronJobs` without await (fire-and-forget async). With MemoryJobStore this works because `list()` is sync, but the async function itself still returns a Promise. Tests need a small delay (`setTimeout(r, 10)`) after `checkCronNow` to let the async operation complete.
+
+## [2026-03-05 19:05] — Await async scheduler methods in full.test.ts
+
+**Task:** Fix scheduler full.test.ts after checkCronNow and listJobs became async (returning Promises)
+**What I did:** Added `await` to all 9 `scheduler.checkCronNow!()` calls and all 8 `scheduler.listJobs!()` calls. Also updated the `jobListDuringHandler` type annotation from `ReturnType` to `Awaited<ReturnType>` since `listJobs` now returns a Promise.
+**Files touched:** `tests/providers/scheduler/full.test.ts`
+**Outcome:** Success — all 21 scheduler tests pass
+**Notes:** `addCron`, `removeCron`, and `scheduleOnce` remain synchronous in the full.ts implementation, so those calls did not need `await`.
+
+## [2026-03-05 19:02] — Fix server-files.test.ts for DatabaseProvider refactor
+
+**Task:** Fix two test cases in server-files.test.ts that called `FileStore.create(path)` after `FileStore.create` was changed to accept an optional `DatabaseProvider` instead of a string path.
+**What I did:** Imported `createKyselyDb`, `runMigrations`, and `filesMigrations`. Replaced `FileStore.create(join(tmpDir, 'files.db'))` with manual Kysely DB creation, migration, and `new FileStore(db)`. Added `await` to `fileStore.register()` and `fileStore.close()` calls since they are now async.
+**Files touched:** tests/host/server-files.test.ts
+**Outcome:** Success — all 10 tests pass.
+**Notes:** After the database refactor, FileStore no longer accepts a path string. Tests must create their own Kysely instance + run migrations directly.
+
 ## [2026-02-22 18:13] — Add upgrade-path tests and guard memory migration
 
 **Task:** Verify backwards compatibility with existing databases and fix memory_002 migration

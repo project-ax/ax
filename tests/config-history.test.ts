@@ -20,7 +20,7 @@ describe('history config', () => {
     const p = writeConfig(`
 profile: balanced
 providers:
-  memory: sqlite
+  memory: memoryfs
   scanner: patterns
   channels: []
   web: none
@@ -46,7 +46,7 @@ scheduler:
     const p = writeConfig(`
 profile: balanced
 providers:
-  memory: sqlite
+  memory: memoryfs
   scanner: patterns
   channels: []
   web: none
@@ -76,7 +76,7 @@ history:
     const p = writeConfig(`
 profile: balanced
 providers:
-  memory: sqlite
+  memory: memoryfs
   scanner: patterns
   channels: []
   web: none

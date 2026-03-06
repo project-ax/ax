@@ -37,7 +37,7 @@ const defaultSandbox = process.platform === 'darwin' ? 'seatbelt' : 'bwrap';
 export const PROFILE_DEFAULTS: Record<string, ProfileDefaults> = {
   paranoid: {
     agent: 'pi-coding-agent',
-    memory: 'sqlite',
+    memory: 'memoryfs',
     scanner: 'patterns',
     web: 'none',
     browser: 'none',
@@ -51,13 +51,13 @@ export const PROFILE_DEFAULTS: Record<string, ProfileDefaults> = {
   },
   balanced: {
     agent: 'pi-coding-agent',
-    memory: 'sqlite',
+    memory: 'memoryfs',
     scanner: 'patterns',
     web: 'fetch',
     browser: 'none',
     credentials: 'keychain',
     skills: 'git',
-    audit: 'sqlite',
+    audit: 'file',
     sandbox: defaultSandbox,
     scheduler: 'full',
     screener: 'static',
@@ -66,13 +66,13 @@ export const PROFILE_DEFAULTS: Record<string, ProfileDefaults> = {
   },
   yolo: {
     agent: 'pi-coding-agent',
-    memory: 'sqlite',
+    memory: 'memoryfs',
     scanner: 'patterns',
     web: 'fetch',
     browser: 'container',
     credentials: 'keychain',
     skills: 'git',
-    audit: 'sqlite',
+    audit: 'file',
     sandbox: defaultSandbox,
     scheduler: 'full',
     screener: 'static',
@@ -170,13 +170,13 @@ export const DEFAULT_IMAGE_MODELS: Record<ImageProviderChoice, string> = {
 
 /** Available provider choices per category, derived from the provider map. */
 export const PROVIDER_CHOICES = {
-  memory: ['sqlite', 'memoryfs'],
+  memory: ['memoryfs'],
   scanner: ['patterns'],
   web: ['none', 'fetch'],
   browser: ['none', 'container'],
   credentials: ['keychain', 'plaintext'],
   skills: ['readonly', 'git'],
-  audit: ['file', 'sqlite'],
+  audit: ['file', 'database'],
   sandbox: ['subprocess', 'seatbelt', 'bwrap', 'nsjail', 'docker'],
   scheduler: ['none', 'full'],
   channels: ['slack'],

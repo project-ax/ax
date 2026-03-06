@@ -52,7 +52,7 @@ function mockConfig(): Config {
   return {
     profile: 'balanced',
     providers: {
-      memory: 'sqlite', scanner: 'patterns',
+      memory: 'memoryfs', scanner: 'patterns',
       channels: ['cli'], web: 'none', browser: 'none',
       credentials: 'keychain', skills: 'readonly', audit: 'file',
       sandbox: 'k8s', scheduler: 'none',
