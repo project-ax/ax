@@ -230,9 +230,13 @@ kind load docker-image ax/host:test --name "$KIND_CLUSTER"
 
 # 3. Update Helm dependencies (done once)
 helm dependency update charts/ax
+
+# 4. Read API keys from .env.test (passed to each k8s agent)
+LLM_PROVIDER=$(grep -m1 'ANTHROPIC_API_KEY\|OPENROUTER_API_KEY\|OPENAI_API_KEY' .env.test | cut -d_ -f1 | tr '[:upper:]' '[:lower:]')
+API_KEY=$(grep -m1 '_API_KEY=' .env.test | cut -d= -f2-)
 ```
 
-Pass `KIND_CLUSTER` and `KUBE_CTX` to each k8s agent in its prompt. Skip k8s agents entirely if no kind cluster is available.
+Pass `KIND_CLUSTER`, `KUBE_CTX`, `LLM_PROVIDER`, and `API_KEY` to each k8s agent in its prompt. Skip k8s agents entirely if no kind cluster is available.
 
 ### Test fixtures
 
@@ -393,18 +397,22 @@ Helm dependencies are already updated (done by lead agent).
 K8S_NS="ax-test-<FEATURE_NAME>-$(openssl rand -hex 4)"
 PF_PORT=$(( 18080 + RANDOM % 10000 ))
 
-# Create namespace and secrets
-kubectl --context "$KUBE_CTX" create namespace "$K8S_NS"
-kubectl --context "$KUBE_CTX" -n "$K8S_NS" create secret generic ax-api-credentials \
-  --from-literal=openrouter-api-key="$(grep OPENROUTER_API_KEY .env.test | cut -d= -f2-)" \
-  --from-literal=deepinfra-api-key="$(grep DEEPINFRA_API_KEY .env.test | cut -d= -f2-)"
+# Use ax k8s init to create namespace, secrets, and values file
+# (non-interactive mode with CLI flags)
+tsx src/cli/index.ts k8s init \
+  --preset small \
+  --llm-provider "<LLM_PROVIDER>" \
+  --api-key "<API_KEY>" \
+  --database internal \
+  --namespace "$K8S_NS" \
+  --output "$K8S_NS-values.yaml"
 
-# Deploy via Helm
+# Deploy via Helm with generated values + kind-specific overrides
 HELM_RELEASE="ax-$K8S_NS"
 helm --kube-context "$KUBE_CTX" install "$HELM_RELEASE" charts/ax -n "$K8S_NS" \
+  -f "$K8S_NS-values.yaml" \
   -f tests/acceptance/fixtures/kind-values.yaml \
-  --set namespace.create=false \
-  --set namespace.name="$K8S_NS"
+  --set namespace.create=false
 
 # Delete unnecessary deployments
 kubectl --context "$KUBE_CTX" -n "$K8S_NS" delete deploy \
@@ -464,6 +472,7 @@ kubectl exec $HOST_POD -- node -e "const db = require('better-sqlite3')('<path>'
 kill $PF_PID 2>/dev/null
 helm --kube-context "$KUBE_CTX" uninstall "$HELM_RELEASE" -n "$K8S_NS" 2>/dev/null
 kubectl --context "$KUBE_CTX" delete namespace "$K8S_NS"
+rm -f "$K8S_NS-values.yaml"
 
 ## Results format
 Write results to tests/acceptance/<FEATURE_NAME>/results-k8s.md using this format:
@@ -608,18 +617,22 @@ K8S_NS="ax-test-<feature>-$(openssl rand -hex 4)"
 # 2. Pick a unique port for port-forwarding (avoid collisions with parallel agents)
 PF_PORT=$(( 18080 + RANDOM % 10000 ))
 
-# 3. Create namespace and secrets
-kubectl --context "$KUBE_CTX" create namespace "$K8S_NS"
-kubectl --context "$KUBE_CTX" -n "$K8S_NS" create secret generic ax-api-credentials \
-  --from-literal=openrouter-api-key="$(grep OPENROUTER_API_KEY .env.test | cut -d= -f2-)" \
-  --from-literal=deepinfra-api-key="$(grep DEEPINFRA_API_KEY .env.test | cut -d= -f2-)"
+# 3. Use ax k8s init to create namespace, secrets, and values file
+#    Non-interactive mode with CLI flags — no manual kubectl create secret needed
+tsx src/cli/index.ts k8s init \
+  --preset small \
+  --llm-provider "$LLM_PROVIDER" \
+  --api-key "$API_KEY" \
+  --database internal \
+  --namespace "$K8S_NS" \
+  --output "$K8S_NS-values.yaml"
 
-# 4. Deploy via Helm with a unique release name
+# 4. Deploy via Helm with generated values + kind-specific overrides
 HELM_RELEASE="ax-$K8S_NS"
 helm --kube-context "$KUBE_CTX" install "$HELM_RELEASE" charts/ax -n "$K8S_NS" \
+  -f "$K8S_NS-values.yaml" \
   -f tests/acceptance/fixtures/kind-values.yaml \
-  --set namespace.create=false \
-  --set namespace.name="$K8S_NS"
+  --set namespace.create=false
 
 # 5. Delete agent-runtime and pool-controller deployments
 kubectl --context "$KUBE_CTX" -n "$K8S_NS" delete deploy \
@@ -669,6 +682,7 @@ curl -sf http://localhost:$PF_PORT/health && echo "K8S_SERVER_READY"
 kill $PF_PID 2>/dev/null
 helm --kube-context "$KUBE_CTX" uninstall "$HELM_RELEASE" -n "$K8S_NS" 2>/dev/null
 kubectl --context "$KUBE_CTX" delete namespace "$K8S_NS"
+rm -f "$K8S_NS-values.yaml"
 ```
 
 Do NOT delete the kind cluster itself — it's shared across all features and test runs.

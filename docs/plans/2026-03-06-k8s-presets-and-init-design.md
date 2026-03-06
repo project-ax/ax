@@ -129,6 +129,40 @@ postgresql:
 - Run DB migrations (host runs them automatically on startup)
 - Configure ingress/domain (port-forward only for now)
 
+#### Non-Interactive Mode
+
+All questions can be passed as CLI flags for scripting and CI/automation:
+
+```bash
+ax k8s init \
+  --preset small \
+  --registry-url registry.mycompany.com/ax \
+  --registry-user deploy-bot \
+  --registry-password "********" \
+  --llm-provider anthropic \
+  --api-key "sk-ant-********" \
+  --database internal \
+  --namespace my-namespace \
+  --output my-values.yaml
+```
+
+| Flag | Interactive equivalent | Required |
+|------|----------------------|----------|
+| `--preset` | Cluster size prompt | Yes |
+| `--registry-url` | Docker registry URL | No (skip imagePullSecret if omitted) |
+| `--registry-user` | Registry username | Only with `--registry-url` |
+| `--registry-password` | Registry password | Only with `--registry-url` |
+| `--llm-provider` | LLM provider prompt | Yes |
+| `--api-key` | API key prompt | Yes |
+| `--database` | Database prompt (`internal` or `external`) | Yes |
+| `--database-url` | PostgreSQL connection URL | Only with `--database external` |
+| `--namespace` | Target namespace | No (defaults to `ax`) |
+| `--output` | Output file path | No (defaults to `ax-values.yaml`) |
+
+When all required flags are provided, the CLI runs without prompting. If any
+required flag is missing, it falls back to interactive prompting for that
+question only.
+
 ### Database Initialization
 
 No separate DB init job or Helm hook is needed. AX runs migrations
