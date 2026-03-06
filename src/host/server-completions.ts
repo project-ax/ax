@@ -13,7 +13,7 @@ import { mergeSkillsOverlay } from '../providers/sandbox/canonical-paths.js';
 import type { Config, ProviderRegistry, ContentBlock, ImageMimeType } from '../types.js';
 import { safePath } from '../utils/safe-path.js';
 import type { InboundMessage } from '../providers/channel/types.js';
-import { deserializeContent } from '../conversation-store.js';
+import { deserializeContent } from '../utils/content-serialization.js';
 import type { ConversationStoreProvider, MessageQueueStore } from '../providers/storage/types.js';
 import type { Router } from './router.js';
 import { TaintBudget, thresholdForProfile } from './taint-budget.js';

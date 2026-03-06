@@ -13,7 +13,7 @@
 import { describe, test, expect, beforeAll, afterAll } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { resolve, join } from 'node:path';
-import { rmSync, mkdirSync, existsSync } from 'node:fs';
+import { rmSync, mkdirSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
@@ -308,13 +308,21 @@ describe('Smoke Test', () => {
     // leftover state from a previous session/crash
     await withServer({
       preStart: async (home) => {
-        const dbDir = join(home, 'data');
-        mkdirSync(dbDir, { recursive: true });
-        const { MessageQueue } = await import('../../src/db.js');
-        const db = await MessageQueue.create(join(dbDir, 'messages.db'));
-        db.enqueue({ sessionId: 'stale-session-1', channel: 'cli', sender: 'ghost', content: 'stale msg 1' });
-        db.enqueue({ sessionId: 'stale-session-2', channel: 'cli', sender: 'ghost', content: 'stale msg 2' });
-        db.close();
+        // Pre-populate pending message files to simulate leftover state
+        const pendingDir = join(home, 'data', 'messages', 'pending');
+        mkdirSync(pendingDir, { recursive: true });
+        for (const [i, msg] of ['stale msg 1', 'stale msg 2'].entries()) {
+          const id = randomUUID();
+          writeFileSync(join(pendingDir, `${id}.json`), JSON.stringify({
+            id,
+            sessionId: `stale-session-${i + 1}`,
+            channel: 'cli',
+            sender: 'ghost',
+            content: msg,
+            status: 'pending',
+            createdAt: Date.now(),
+          }));
+        }
       },
     }, async ({ socket, output }) => {
       const res = await sendMessage(socket, 'hello');

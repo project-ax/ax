@@ -30,6 +30,12 @@
 **Lesson:** When replacing a range of rows with new rows in SQLite and ordering matters (ORDER BY id ASC), you can't just delete the old rows and insert new ones — the new rows get higher autoincrement IDs. Instead, snapshot the remaining rows, delete ALL rows for the scope, then re-insert in the correct order: new rows first (get lower IDs), then remaining rows (get higher IDs).
 **Tags:** sqlite, autoincrement, ordering, conversation-store, summarization
 
+### Creating a MessageQueueStore in tests requires full storage provider setup
+**Date:** 2026-03-05
+**Context:** Migrating 5 test files from deleted `MessageQueue` class to `MessageQueueStore` interface
+**Lesson:** To create a `MessageQueueStore` in tests, you must: (1) `createKyselyDb({ type: 'sqlite', path })`, (2) `runMigrations(db, storageMigrations('sqlite'))`, (3) `createStorage(config, undefined, { database: { db, type: 'sqlite', vectorsAvailable: false, close } })`, (4) use `storage.messages`. The `createMessageQueue()` internal function is not exported, so you must go through the full `createStorage()` path. For cleanup, call `kyselyDb.destroy()` not `db.close()` since `MessageQueueStore` has no close method. When `dispose()` must stay synchronous (e.g., called by many callers without `await`), use `void kyselyDb.destroy()`.
+**Tags:** sqlite, kysely, testing, message-queue, storage-provider, migration
+
 ### Structured content serialization — use JSON detection on load
 **Date:** 2026-02-25
 **Context:** Storing ContentBlock[] in SQLite TEXT columns alongside plain string content

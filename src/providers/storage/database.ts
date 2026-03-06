@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { sql, type Kysely } from 'kysely';
 import { runMigrations } from '../../utils/migrator.js';
 import { storageMigrations } from './migrations.js';
-import { serializeContent } from '../../conversation-store.js';
+import { serializeContent } from '../../utils/content-serialization.js';
 import type { Config, ContentBlock } from '../../types.js';
 import type { DatabaseProvider } from '../database/types.js';
 import type { SessionAddress, SessionScope } from '../channel/types.js';

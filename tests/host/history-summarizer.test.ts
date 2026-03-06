@@ -1,11 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { ConversationStore } from '../../src/conversation-store.js';
 import { maybeSummarizeHistory, type SummarizationConfig, SUMMARIZATION_DEFAULTS } from '../../src/host/history-summarizer.js';
 import type { LLMProvider, ChatChunk, ChatRequest } from '../../src/providers/llm/types.js';
-import { rmSync } from 'node:fs';
+import type { ConversationStoreProvider } from '../../src/providers/storage/types.js';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { createKyselyDb } from '../../src/utils/database.js';
+import { runMigrations } from '../../src/utils/migrator.js';
+import { storageMigrations } from '../../src/providers/storage/migrations.js';
+import { create as createStorage } from '../../src/providers/storage/database.js';
+import type { Config } from '../../src/types.js';
+import type { Kysely } from 'kysely';
 
 function createMockLLM(summaryText: string): LLMProvider {
   return {
@@ -37,20 +42,22 @@ const silentLogger = {
 } as any;
 
 describe('maybeSummarizeHistory', () => {
-  let dbPath: string;
-  let store: ConversationStore;
+  let tmpDir: string;
+  let db: Kysely<any>;
+  let store: ConversationStoreProvider;
 
   beforeEach(async () => {
-    dbPath = join(tmpdir(), `ax-summarizer-test-${randomUUID()}.db`);
-    store = await ConversationStore.create(dbPath);
+    tmpDir = mkdtempSync(join(tmpdir(), 'ax-summarizer-test-'));
+    db = createKyselyDb({ type: 'sqlite', path: join(tmpDir, 'test.db') });
+    const database = { db, type: 'sqlite' as const, vectorsAvailable: false, async close() { await db.destroy(); } };
+    const storage = await createStorage({} as Config, undefined, { database });
+    store = storage.conversations;
     vi.clearAllMocks();
   });
 
-  afterEach(() => {
-    store.close();
-    rmSync(dbPath, { force: true });
-    rmSync(dbPath + '-wal', { force: true });
-    rmSync(dbPath + '-shm', { force: true });
+  afterEach(async () => {
+    await db.destroy();
+    rmSync(tmpDir, { recursive: true, force: true });
   });
 
   const enabledConfig: SummarizationConfig = {
@@ -61,31 +68,31 @@ describe('maybeSummarizeHistory', () => {
 
   it('does nothing when disabled', async () => {
     for (let i = 0; i < 20; i++) {
-      store.append('sess1', 'user', `msg${i}`);
+      await store.append('sess1', 'user', `msg${i}`);
     }
     const llm = createMockLLM('should not be called');
     const result = await maybeSummarizeHistory(
       'sess1', store, llm, { ...enabledConfig, enabled: false }, silentLogger,
     );
     expect(result).toBe(false);
-    expect(store.count('sess1')).toBe(20);
+    expect(await store.count('sess1')).toBe(20);
   });
 
   it('does nothing when below threshold', async () => {
     for (let i = 0; i < 5; i++) {
-      store.append('sess1', 'user', `msg${i}`);
+      await store.append('sess1', 'user', `msg${i}`);
     }
     const llm = createMockLLM('should not be called');
     const result = await maybeSummarizeHistory(
       'sess1', store, llm, enabledConfig, silentLogger,
     );
     expect(result).toBe(false);
-    expect(store.count('sess1')).toBe(5);
+    expect(await store.count('sess1')).toBe(5);
   });
 
   it('summarizes older turns when above threshold', async () => {
     for (let i = 0; i < 15; i++) {
-      store.append('sess1', i % 2 === 0 ? 'user' : 'assistant', `msg${i}`);
+      await store.append('sess1', i % 2 === 0 ? 'user' : 'assistant', `msg${i}`);
     }
     const llm = createMockLLM('Key decisions: chose React over Vue. Action: deploy by Friday.');
 
@@ -95,7 +102,7 @@ describe('maybeSummarizeHistory', () => {
 
     expect(result).toBe(true);
 
-    const turns = store.load('sess1');
+    const turns = await store.load('sess1');
     // 11 old turns summarized → 2 summary turns + 4 recent = 6
     expect(turns).toHaveLength(6);
     expect(turns[0].is_summary).toBe(1);
@@ -111,7 +118,7 @@ describe('maybeSummarizeHistory', () => {
 
   it('handles LLM failure gracefully', async () => {
     for (let i = 0; i < 15; i++) {
-      store.append('sess1', 'user', `msg${i}`);
+      await store.append('sess1', 'user', `msg${i}`);
     }
     const llm = createFailingLLM();
 
@@ -121,7 +128,7 @@ describe('maybeSummarizeHistory', () => {
 
     expect(result).toBe(false);
     // All turns should still be there (no data loss)
-    expect(store.count('sess1')).toBe(15);
+    expect(await store.count('sess1')).toBe(15);
     expect(silentLogger.warn).toHaveBeenCalledWith(
       'history_summarize_failed',
       expect.objectContaining({ error: 'LLM unavailable' }),
@@ -130,7 +137,7 @@ describe('maybeSummarizeHistory', () => {
 
   it('handles empty LLM response gracefully', async () => {
     for (let i = 0; i < 15; i++) {
-      store.append('sess1', 'user', `msg${i}`);
+      await store.append('sess1', 'user', `msg${i}`);
     }
     const llm = createMockLLM('');
 
@@ -139,13 +146,13 @@ describe('maybeSummarizeHistory', () => {
     );
 
     expect(result).toBe(false);
-    expect(store.count('sess1')).toBe(15);
+    expect(await store.count('sess1')).toBe(15);
   });
 
   it('skips when too few older turns (<4)', async () => {
     // 6 total with keepRecent=4 → only 2 older turns, not worth summarizing
     for (let i = 0; i < 12; i++) {
-      store.append('sess1', 'user', `msg${i}`);
+      await store.append('sess1', 'user', `msg${i}`);
     }
     const llm = createMockLLM('summary');
 
@@ -159,25 +166,25 @@ describe('maybeSummarizeHistory', () => {
   it('supports recursive summarization across multiple rounds', async () => {
     // Round 1: 15 turns, summarize older ones
     for (let i = 0; i < 15; i++) {
-      store.append('sess1', i % 2 === 0 ? 'user' : 'assistant', `round1-msg${i}`);
+      await store.append('sess1', i % 2 === 0 ? 'user' : 'assistant', `round1-msg${i}`);
     }
 
     const llm1 = createMockLLM('Round 1 summary: discussed architecture and picked TypeScript.');
     await maybeSummarizeHistory('sess1', store, llm1, enabledConfig, silentLogger);
 
-    const afterRound1 = store.count('sess1');
+    const afterRound1 = await store.count('sess1');
     expect(afterRound1).toBe(6); // 2 summary + 4 recent
 
     // Round 2: add more turns, trigger another summarization
     for (let i = 0; i < 15; i++) {
-      store.append('sess1', i % 2 === 0 ? 'user' : 'assistant', `round2-msg${i}`);
+      await store.append('sess1', i % 2 === 0 ? 'user' : 'assistant', `round2-msg${i}`);
     }
-    expect(store.count('sess1')).toBe(21);
+    expect(await store.count('sess1')).toBe(21);
 
     const llm2 = createMockLLM('Round 2 summary: built on prior architecture decisions, implemented auth.');
     await maybeSummarizeHistory('sess1', store, llm2, enabledConfig, silentLogger);
 
-    const afterRound2 = store.load('sess1');
+    const afterRound2 = await store.load('sess1');
     expect(afterRound2).toHaveLength(6); // 2 new summary + 4 recent
     expect(afterRound2[0].is_summary).toBe(1);
     expect(afterRound2[0].content).toContain('Round 2 summary');
@@ -195,10 +202,10 @@ describe('maybeSummarizeHistory', () => {
       async models() { return ['mock']; },
     };
 
-    store.append('sess1', 'user', 'What is TypeScript?', 'alice');
-    store.append('sess1', 'assistant', 'TypeScript is a typed superset of JavaScript.');
+    await store.append('sess1', 'user', 'What is TypeScript?', 'alice');
+    await store.append('sess1', 'assistant', 'TypeScript is a typed superset of JavaScript.');
     for (let i = 0; i < 15; i++) {
-      store.append('sess1', 'user', `follow-up-${i}`);
+      await store.append('sess1', 'user', `follow-up-${i}`);
     }
 
     await maybeSummarizeHistory('sess1', store, llm, enabledConfig, silentLogger);
@@ -214,7 +221,7 @@ describe('maybeSummarizeHistory', () => {
 
   it('logs start and completion', async () => {
     for (let i = 0; i < 15; i++) {
-      store.append('sess1', 'user', `msg${i}`);
+      await store.append('sess1', 'user', `msg${i}`);
     }
     const llm = createMockLLM('Summary of the conversation.');
 

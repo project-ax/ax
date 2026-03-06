@@ -19,10 +19,15 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 
-import { MessageQueue } from '../../src/db.js';
+import type { Kysely } from 'kysely';
+import { createKyselyDb } from '../../src/utils/database.js';
+import { runMigrations } from '../../src/utils/migrator.js';
+import { storageMigrations } from '../../src/providers/storage/migrations.js';
+import { create as createStorage } from '../../src/providers/storage/database.js';
+import type { MessageQueueStore } from '../../src/providers/storage/types.js';
 import { createRouter, type Router } from '../../src/host/router.js';
 import { createIPCHandler, type IPCContext, type DelegationConfig, type DelegateRequest } from '../../src/host/ipc-server.js';
-import type { ProviderRegistry } from '../../src/types.js';
+import type { ProviderRegistry, Config } from '../../src/types.js';
 import type { AuditEntry } from '../../src/providers/audit/types.js';
 import type { InboundMessage, SessionAddress, ChannelProvider, OutboundMessage } from '../../src/providers/channel/types.js';
 import type { MemoryEntry, MemoryQuery } from '../../src/providers/memory/types.js';
@@ -91,7 +96,7 @@ export interface HarnessOptions {
 export class TestHarness {
   readonly tmpDir: string;
   readonly agentDir: string;
-  readonly db: MessageQueue;
+  readonly db: MessageQueueStore;
   readonly router: Router;
   readonly handleIPC: (raw: string, ctx: IPCContext) => Promise<string>;
   readonly llm: ScriptedLLM;
@@ -122,9 +127,11 @@ export class TestHarness {
   private readonly mockChannel: ChannelProvider;
 
   private originalAxHome: string | undefined;
+  private kyselyDb: Kysely<any>;
 
   private constructor(
-    db: MessageQueue,
+    db: MessageQueueStore,
+    kyselyDb: Kysely<any>,
     opts: HarnessOptions,
     tmpDir: string,
     agentDir: string,
@@ -133,6 +140,7 @@ export class TestHarness {
     this.tmpDir = tmpDir;
     this.agentDir = agentDir;
     this.originalAxHome = originalAxHome;
+    this.kyselyDb = kyselyDb;
 
     this.webFetches = opts.webFetches ?? [];
     this.webSearches = opts.webSearches ?? [];
@@ -192,8 +200,12 @@ export class TestHarness {
     const originalAxHome = process.env.AX_HOME;
     process.env.AX_HOME = tmpDir;
 
-    const db = await MessageQueue.create(join(tmpDir, 'messages.db'));
-    return new TestHarness(db, opts, tmpDir, agentDir, originalAxHome);
+    const kyselyDb = createKyselyDb({ type: 'sqlite', path: join(tmpDir, 'messages.db') });
+    await runMigrations(kyselyDb, storageMigrations('sqlite'));
+    const storage = await createStorage({} as Config, undefined, {
+      database: { db: kyselyDb, type: 'sqlite', vectorsAvailable: false, close: async () => { await kyselyDb.destroy(); } },
+    });
+    return new TestHarness(storage.messages, kyselyDb, opts, tmpDir, agentDir, originalAxHome);
   }
 
   // ─── Event Drivers ───────────────────────────────
@@ -227,7 +239,7 @@ export class TestHarness {
     }
 
     // Dequeue
-    const queued = this.db.dequeue();
+    const queued = await this.db.dequeue();
     if (!queued) {
       return { inbound: inResult };
     }
@@ -252,7 +264,7 @@ export class TestHarness {
       agentResponse, inResult.sessionId, inResult.canaryToken,
     );
 
-    this.db.complete(queued.id);
+    await this.db.complete(queued.id);
 
     return { inbound: inResult, llmResponse: agentResponse, outbound: outResult };
   }
@@ -430,7 +442,8 @@ export class TestHarness {
   // ─── Cleanup ─────────────────────────────────────
 
   dispose(): void {
-    this.db.close();
+    // For SQLite, destroy() is effectively synchronous under the hood
+    void this.kyselyDb.destroy();
     // Restore AX_HOME
     if (this.originalAxHome !== undefined) {
       process.env.AX_HOME = this.originalAxHome;

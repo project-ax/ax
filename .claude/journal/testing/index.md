@@ -4,6 +4,7 @@ Test infrastructure, integration tests, E2E framework, migration tests.
 
 ## Entries
 
+- 2026-03-05 20:00 — Migrate 5 test files from deleted MessageQueue to Kysely-backed MessageQueueStore [migrations.md](migrations.md)
 - 2026-03-05 19:10 — Port plainjob.test.ts from SQLiteJobStore to KyselyJobStore [migrations.md](migrations.md)
 - 2026-03-05 19:05 — Await async scheduler methods in full.test.ts [migrations.md](migrations.md)
 - 2026-03-05 19:02 — Fix server-files.test.ts for DatabaseProvider refactor [migrations.md](migrations.md)

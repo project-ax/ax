@@ -2,6 +2,14 @@
 
 Kysely migration infrastructure: runner, database factory, store integration, upgrade-path tests.
 
+## [2026-03-05 20:00] — Migrate 5 test files from deleted MessageQueue to Kysely-backed MessageQueueStore
+
+**Task:** Fix 5 test files that imported `MessageQueue` from the now-deleted `src/db.js`
+**What I did:** Replaced all imports with Kysely-backed storage provider pattern: create a Kysely DB, run storage migrations, create storage via `create()`, use `storage.messages` as the `MessageQueueStore`. Made all previously-synchronous calls (`dequeue()`, `pending()`, `complete()`, `close()`) properly async with `await`.
+**Files touched:** tests/e2e/harness.ts, tests/host/router.test.ts, tests/integration/phase1.test.ts, tests/integration/e2e.test.ts, tests/integration/phase2.test.ts
+**Outcome:** Success — all 5 files compile cleanly with `npx tsc --noEmit`
+**Notes:** For cleanup, used `kyselyDb.destroy()` instead of the old `db.close()`. For the E2E harness `dispose()` method, kept it synchronous using `void kyselyDb.destroy()` to avoid breaking 15+ scenario test callers that don't `await` dispose. For phase1/phase2, created a shared `createMessageQueueStore()` helper returning `{ db, destroy }`.
+
 ## [2026-03-05 19:10] — Port plainjob.test.ts from SQLiteJobStore to KyselyJobStore
 
 **Task:** Replace removed `SQLiteJobStore` and `openDatabase` imports with `KyselyJobStore`, `createKyselyDb`, `runMigrations`, and `jobsMigrations` in plainjob.test.ts

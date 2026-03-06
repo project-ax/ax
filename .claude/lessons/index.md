@@ -44,6 +44,7 @@
 - Separate Kysely + openDatabase connections can't share :memory: databases [testing/sqlite.md](testing/sqlite.md)
 - ALTER TABLE ADD COLUMN has no IF NOT EXISTS in SQLite [testing/sqlite.md](testing/sqlite.md)
 - Always check runMigrations result.error in store factories [testing/sqlite.md](testing/sqlite.md)
+- Creating a MessageQueueStore in tests requires full storage provider setup [testing/sqlite.md](testing/sqlite.md)
 - Structured content serialization — use JSON detection on load [testing/sqlite.md](testing/sqlite.md)
 - SQLite autoincrement IDs don't respect logical ordering after delete+insert [testing/sqlite.md](testing/sqlite.md)
 - Bootstrap lifecycle must be tested end-to-end including server restarts [testing/bootstrap.md](testing/bootstrap.md)

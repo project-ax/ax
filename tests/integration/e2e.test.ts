@@ -3,10 +3,15 @@ import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync } from 'node:f
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { MessageQueue } from '../../src/db.js';
+import type { Kysely } from 'kysely';
+import { createKyselyDb } from '../../src/utils/database.js';
+import { runMigrations } from '../../src/utils/migrator.js';
+import { storageMigrations } from '../../src/providers/storage/migrations.js';
+import { create as createStorage } from '../../src/providers/storage/database.js';
+import type { MessageQueueStore } from '../../src/providers/storage/types.js';
 import { createRouter, type Router } from '../../src/host/router.js';
 import { createIPCHandler } from '../../src/host/ipc-server.js';
-import type { ProviderRegistry } from '../../src/types.js';
+import type { ProviderRegistry, Config } from '../../src/types.js';
 import type { InboundMessage } from '../../src/providers/channel/types.js';
 import type { AuditEntry } from '../../src/providers/audit/types.js';
 
@@ -148,21 +153,27 @@ function createTestProviders(tmpDir: string) {
 
 describe('E2E Integration', () => {
   let tmpDir: string;
-  let db: MessageQueue;
+  let db: MessageQueueStore;
+  let kyselyDb: Kysely<any>;
   let router: Router;
   let handleIPC: (raw: string, ctx: { sessionId: string; agentId: string }) => Promise<string>;
   let testProviders: ReturnType<typeof createTestProviders>;
 
   beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'ax-e2e-'));
-    db = await MessageQueue.create(join(tmpDir, 'messages.db'));
+    kyselyDb = createKyselyDb({ type: 'sqlite', path: join(tmpDir, 'messages.db') });
+    await runMigrations(kyselyDb, storageMigrations('sqlite'));
+    const storage = await createStorage({} as Config, undefined, {
+      database: { db: kyselyDb, type: 'sqlite', vectorsAvailable: false, close: async () => { await kyselyDb.destroy(); } },
+    });
+    db = storage.messages;
     testProviders = createTestProviders(tmpDir);
     router = createRouter(testProviders.providers, db);
     handleIPC = createIPCHandler(testProviders.providers);
   });
 
-  afterEach(() => {
-    db.close();
+  afterEach(async () => {
+    await kyselyDb.destroy();
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -182,7 +193,7 @@ describe('E2E Integration', () => {
     expect(inResult.scanResult.verdict).toBe('PASS');
 
     // Dequeue
-    const queued = db.dequeue();
+    const queued = await db.dequeue();
     expect(queued).not.toBeNull();
     expect(queued!.content).toContain('Hello!');
     expect(queued!.content).toContain('<external_content');
@@ -206,8 +217,8 @@ describe('E2E Integration', () => {
     expect(outResult.canaryLeaked).toBe(false);
     expect(outResult.content).toBe('Hello! How can I help you today?');
 
-    db.complete(queued!.id);
-    expect(db.pending()).toBe(0);
+    await db.complete(queued!.id);
+    expect(await db.pending()).toBe(0);
   });
 
   test('memory write/read via IPC', async () => {
@@ -254,7 +265,7 @@ describe('E2E Integration', () => {
     expect(result.scanResult.reason).toContain('injection');
 
     // Nothing should be queued
-    expect(db.pending()).toBe(0);
+    expect(await db.pending()).toBe(0);
 
     // Audit should record the block
     const blockEntries = testProviders.auditLog.filter(e => e.result === 'blocked');
@@ -303,7 +314,7 @@ describe('E2E Integration', () => {
     const inResult = await router.processInbound(msg);
     expect(inResult.queued).toBe(true);
 
-    const queued = db.dequeue()!;
+    const queued = await db.dequeue()!;
 
     // LLM call via IPC
     await handleIPC(JSON.stringify({

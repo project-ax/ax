@@ -1,7 +1,12 @@
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import type { Kysely } from 'kysely';
 import { createRouter, type Router } from '../../src/host/router.js';
-import { MessageQueue } from '../../src/db.js';
-import type { ProviderRegistry } from '../../src/types.js';
+import { createKyselyDb } from '../../src/utils/database.js';
+import { runMigrations } from '../../src/utils/migrator.js';
+import { storageMigrations } from '../../src/providers/storage/migrations.js';
+import { create as createStorage } from '../../src/providers/storage/database.js';
+import type { MessageQueueStore } from '../../src/providers/storage/types.js';
+import type { ProviderRegistry, Config } from '../../src/types.js';
 import type { InboundMessage, SessionAddress } from '../../src/providers/channel/types.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -107,17 +112,23 @@ function makeMsg(content: string, overrides?: Partial<InboundMessage>): InboundM
 
 describe('Message Router', () => {
   let router: Router;
-  let db: MessageQueue;
+  let db: MessageQueueStore;
+  let kyselyDb: Kysely<any>;
   let tmpDir: string;
 
   beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'ax-router-test-'));
-    db = await MessageQueue.create(join(tmpDir, 'messages.db'));
+    kyselyDb = createKyselyDb({ type: 'sqlite', path: join(tmpDir, 'messages.db') });
+    await runMigrations(kyselyDb, storageMigrations('sqlite'));
+    const storage = await createStorage({} as Config, undefined, {
+      database: { db: kyselyDb, type: 'sqlite', vectorsAvailable: false, close: async () => { await kyselyDb.destroy(); } },
+    });
+    db = storage.messages;
     router = createRouter(mockRegistry(), db);
   });
 
-  afterEach(() => {
-    db.close();
+  afterEach(async () => {
+    await kyselyDb.destroy();
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -130,13 +141,13 @@ describe('Message Router', () => {
       expect(result.sessionId).toBe('cli:dm:user');
       expect(result.canaryToken).toBe(CANARY);
       expect(result.scanResult.verdict).toBe('PASS');
-      expect(db.pending()).toBe(1);
+      expect(await db.pending()).toBe(1);
     });
 
     test('wraps content with external_content tags', async () => {
       await router.processInbound(makeMsg('Hello'));
 
-      const queued = db.dequeue();
+      const queued = await db.dequeue();
       expect(queued).not.toBeNull();
       expect(queued!.content).toContain('<external_content trust="external" source="cli">');
       expect(queued!.content).toContain('</external_content>');
@@ -146,7 +157,7 @@ describe('Message Router', () => {
     test('injects canary token into enqueued content', async () => {
       await router.processInbound(makeMsg('Hello'));
 
-      const queued = db.dequeue();
+      const queued = await db.dequeue();
       expect(queued).not.toBeNull();
       expect(queued!.content).toContain(`canary:${CANARY}`);
     });
@@ -159,7 +170,7 @@ describe('Message Router', () => {
       expect(result.queued).toBe(false);
       expect(result.messageId).toBeUndefined();
       expect(result.scanResult.verdict).toBe('BLOCK');
-      expect(db.pending()).toBe(0);
+      expect(await db.pending()).toBe(0);
     });
 
     test('derives session id from session address', async () => {

@@ -14,7 +14,7 @@ import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dataFile } from '../../paths.js';
-import { serializeContent } from '../../conversation-store.js';
+import { serializeContent } from '../../utils/content-serialization.js';
 import { safePath } from '../../utils/safe-path.js';
 import type { Config, ContentBlock } from '../../types.js';
 import type { SessionAddress, SessionScope } from '../channel/types.js';

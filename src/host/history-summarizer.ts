@@ -7,7 +7,7 @@
  */
 
 import type { ConversationStoreProvider, StoredTurn } from '../providers/storage/types.js';
-import { deserializeContent } from '../conversation-store.js';
+import { deserializeContent } from '../utils/content-serialization.js';
 import type { LLMProvider, ChatChunk } from '../providers/llm/types.js';
 import type { Logger } from '../logger.js';
 

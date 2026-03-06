@@ -15,7 +15,11 @@ import { tmpdir } from 'node:os';
 
 import { createIPCHandler, type IPCContext } from '../../src/host/ipc-server.js';
 import { createRouter } from '../../src/host/router.js';
-import { MessageQueue } from '../../src/db.js';
+import { createKyselyDb } from '../../src/utils/database.js';
+import { runMigrations } from '../../src/utils/migrator.js';
+import { storageMigrations } from '../../src/providers/storage/migrations.js';
+import { create as createStorage } from '../../src/providers/storage/database.js';
+import type { MessageQueueStore } from '../../src/providers/storage/types.js';
 import { TaintBudget, thresholdForProfile } from '../../src/host/taint-budget.js';
 import type { ProviderRegistry, Config } from '../../src/types.js';
 import type { ScanResult } from '../../src/providers/scanner/types.js';
@@ -142,6 +146,15 @@ function mockProviders(opts?: {
       async stop() {},
     },
   };
+}
+
+async function createMessageQueueStore(dbPath: string): Promise<{ db: MessageQueueStore; destroy: () => Promise<void> }> {
+  const kyselyDb = createKyselyDb({ type: 'sqlite', path: dbPath });
+  await runMigrations(kyselyDb, storageMigrations('sqlite'));
+  const storage = await createStorage({} as Config, undefined, {
+    database: { db: kyselyDb, type: 'sqlite', vectorsAvailable: false, close: async () => { await kyselyDb.destroy(); } },
+  });
+  return { db: storage.messages, destroy: () => kyselyDb.destroy() };
 }
 
 const defaultCtx: IPCContext = { sessionId: 'test-session', agentId: 'primary' };
@@ -471,7 +484,7 @@ describe('Architectural Invariants', () => {
 
   test('router pipeline works with ML scanner', async () => {
     const providers = mockProviders({ scanInputVerdict: 'BLOCK' });
-    const db = await MessageQueue.create(join(testDataDir, 'messages.db'));
+    const { db, destroy } = await createMessageQueueStore(join(testDataDir, 'messages.db'));
     const taintBudget = new TaintBudget({ threshold: 0.60 });
     const router = createRouter(providers, db, { taintBudget });
 
@@ -488,6 +501,6 @@ describe('Architectural Invariants', () => {
     expect(result.queued).toBe(false);
     expect(result.scanResult.verdict).toBe('BLOCK');
 
-    db.close();
+    await destroy();
   });
 });

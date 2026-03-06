@@ -88,11 +88,11 @@ describe('E2E Scenario: Full Pipeline', () => {
 
     const r1 = await harness.sendMessage('First message');
     expect(r1.llmResponse).toBe('First response');
-    expect(harness.db.pending()).toBe(0); // All completed
+    expect(await harness.db.pending()).toBe(0); // All completed
 
     const r2 = await harness.sendMessage('Second message');
     expect(r2.llmResponse).toBe('Second response');
-    expect(harness.db.pending()).toBe(0);
+    expect(await harness.db.pending()).toBe(0);
   });
 
   test('full pipeline with memory write tool call', async () => {

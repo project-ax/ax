@@ -16,7 +16,11 @@ import { initLogger, resetLogger } from '../../src/logger.js';
 
 // Direct-integration imports (not subprocess)
 import { createRouter } from '../../src/host/router.js';
-import { MessageQueue } from '../../src/db.js';
+import { createKyselyDb } from '../../src/utils/database.js';
+import { runMigrations } from '../../src/utils/migrator.js';
+import { storageMigrations } from '../../src/providers/storage/migrations.js';
+import { create as createStorage } from '../../src/providers/storage/database.js';
+import type { MessageQueueStore } from '../../src/providers/storage/types.js';
 import { TaintBudget, thresholdForProfile } from '../../src/host/taint-budget.js';
 import type { ProviderRegistry, Config } from '../../src/types.js';
 import type { ScanResult } from '../../src/providers/scanner/types.js';
@@ -144,6 +148,15 @@ function mockProviders(opts?: {
   };
 }
 
+async function createMessageQueueStore(dbPath: string): Promise<{ db: MessageQueueStore; destroy: () => Promise<void> }> {
+  const kyselyDb = createKyselyDb({ type: 'sqlite', path: dbPath });
+  await runMigrations(kyselyDb, storageMigrations('sqlite'));
+  const storage = await createStorage({} as Config, undefined, {
+    database: { db: kyselyDb, type: 'sqlite', vectorsAvailable: false, close: async () => { await kyselyDb.destroy(); } },
+  });
+  return { db: storage.messages, destroy: () => kyselyDb.destroy() };
+}
+
 beforeEach(() => {
   testDataDir = join(tmpdir(), `ax-phase1-test-${randomUUID()}`);
   mkdirSync(testDataDir, { recursive: true });
@@ -174,7 +187,7 @@ describe('Taint Budget E2E', () => {
 
   test('router records taint via taint budget', async () => {
     const providers = mockProviders();
-    const db = await MessageQueue.create(join(testDataDir, 'messages.db'));
+    const { db, destroy } = await createMessageQueueStore(join(testDataDir, 'messages.db'));
     const taintBudget = new TaintBudget({ threshold: thresholdForProfile('balanced') });
     const router = createRouter(providers, db, { taintBudget });
 
@@ -196,7 +209,7 @@ describe('Taint Budget E2E', () => {
     expect(state!.taintedTokens).toBeGreaterThan(0);
     expect(state!.totalTokens).toBeGreaterThan(0);
 
-    db.close();
+    await destroy();
   });
 
   test('taint budget blocks sensitive actions when ratio exceeds threshold', async () => {
@@ -259,7 +272,7 @@ describe('Taint Budget E2E', () => {
 describe('Router + Scanner Integration', () => {
   test('scanner blocks injection and router returns blocked result', async () => {
     const providers = mockProviders({ scanInputVerdict: 'BLOCK' });
-    const db = await MessageQueue.create(join(testDataDir, 'messages.db'));
+    const { db, destroy } = await createMessageQueueStore(join(testDataDir, 'messages.db'));
     const router = createRouter(providers, db);
 
     const msg: InboundMessage = {
@@ -275,12 +288,12 @@ describe('Router + Scanner Integration', () => {
     expect(result.queued).toBe(false);
     expect(result.scanResult.verdict).toBe('BLOCK');
 
-    db.close();
+    await destroy();
   });
 
   test('canary token detection redacts response', async () => {
     const providers = mockProviders();
-    const db = await MessageQueue.create(join(testDataDir, 'messages.db'));
+    const { db, destroy } = await createMessageQueueStore(join(testDataDir, 'messages.db'));
     const router = createRouter(providers, db);
 
     // Process an inbound message to get a canary token
@@ -304,12 +317,12 @@ describe('Router + Scanner Integration', () => {
     expect(outResult.content).toContain('redacted');
     expect(outResult.content).not.toContain(inResult.canaryToken);
 
-    db.close();
+    await destroy();
   });
 
   test('clean response passes through', async () => {
     const providers = mockProviders();
-    const db = await MessageQueue.create(join(testDataDir, 'messages.db'));
+    const { db, destroy } = await createMessageQueueStore(join(testDataDir, 'messages.db'));
     const router = createRouter(providers, db);
 
     const outResult = await router.processOutbound(
@@ -321,7 +334,7 @@ describe('Router + Scanner Integration', () => {
     expect(outResult.canaryLeaked).toBe(false);
     expect(outResult.content).toBe('This is a clean response.');
 
-    db.close();
+    await destroy();
   });
 });
 
