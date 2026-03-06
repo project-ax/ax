@@ -22,10 +22,13 @@ import { createEmbeddingClient, type EmbeddingClient } from '../../../utils/embe
 import { getLogger } from '../../../logger.js';
 import { mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { sql } from 'kysely';
 
 const logger = getLogger().child({ component: 'cortex' });
 
 const SEMANTIC_DEDUP_THRESHOLD = 0.8;
+// PostgreSQL advisory lock key for backfill coordination across processes
+const BACKFILL_ADVISORY_LOCK_KEY = 0x41585F4246; // "AX_BF" as int
 
 export interface CreateOptions {
   llm?: LLMProvider;
@@ -61,9 +64,22 @@ async function backfillEmbeddings(
   store: ItemsStore,
   embeddingStore: EmbeddingStore,
   client: EmbeddingClient,
+  database?: DatabaseProvider,
   batchSize = 50,
 ): Promise<void> {
   if (!client.available) return;
+
+  // In PostgreSQL mode, use an advisory lock so only one process runs the
+  // backfill at a time (host and agent-runtime share the same DB).
+  if (database && database.type === 'postgresql') {
+    const lockResult = await sql<{ acquired: boolean }>`
+      SELECT pg_try_advisory_lock(${BACKFILL_ADVISORY_LOCK_KEY}) as acquired
+    `.execute(database.db);
+    if (!lockResult.rows[0]?.acquired) {
+      logger.info('backfill_skipped', { reason: 'another process holds the advisory lock' });
+      return;
+    }
+  }
 
   try {
     const scopes = await store.listAllScopes();
@@ -93,6 +109,11 @@ async function backfillEmbeddings(
     }
   } catch (err) {
     logger.warn('backfill_failed', { error: (err as Error).message });
+  } finally {
+    // Release the advisory lock if we acquired one
+    if (database && database.type === 'postgresql') {
+      await sql`SELECT pg_advisory_unlock(${BACKFILL_ADVISORY_LOCK_KEY})`.execute(database.db).catch(() => {});
+    }
   }
 }
 
@@ -187,7 +208,7 @@ export async function create(config: Config, _name?: string, opts?: CreateOption
   await embeddingStore.ready();
 
   // Kick off background backfill (non-blocking)
-  backfillEmbeddings(store, embeddingStore, embeddingClient).catch(err => {
+  backfillEmbeddings(store, embeddingStore, embeddingClient, database).catch(err => {
     logger.warn('backfill_error', { error: (err as Error).message });
   });
 

@@ -2,6 +2,22 @@
 
 Acceptance test skill and framework for validating features against plan design goals.
 
+## [2026-03-06 23:00] -- Fix 3 k8s infrastructure gaps from cortex re-test
+
+**Task:** Fix 3 infrastructure gaps identified in the cortex k8s re-test: (1) pgvector not auto-enabled, (2) custom PG user/database not reliably created, (3) dual cortex instances run duplicate backfills
+**What I did:** Created `charts/ax/templates/postgresql-init-job.yaml` — Helm hook Job (post-install/post-upgrade, weight=1) that connects as postgres superuser, enables pgvector, and optionally creates custom user/database when non-postgres username is configured. Added PostgreSQL advisory lock to `backfillEmbeddings()` in `src/providers/memory/cortex/provider.ts` so only one process runs the backfill when sharing a database. Added `initImage` field to values.yaml for the pg-init job.
+**Files touched:** `charts/ax/templates/postgresql-init-job.yaml` (created), `charts/ax/values.yaml` (modified), `src/providers/memory/cortex/provider.ts` (modified), `tests/acceptance/cortex/fixes.md` (updated)
+**Outcome:** Success. Build passes, all 2359 tests pass. Helm template renders correctly for both postgres and custom user cases, and is skipped for external PostgreSQL.
+**Notes:** The advisory lock key (0x41585F4246) is "AX_BF" encoded as an integer. The lock is session-scoped so it auto-releases if the process crashes.
+
+## [2026-03-06 22:00] -- Cortex Memory K8s re-test (22/23 PASS, 1 SKIP)
+
+**Task:** Re-run the 7 non-PASS tests from the previous k8s cortex run (BT-6, BT-7, BT-8, BT-11, BT-12, IT-7, IT-8) after applying FIX-6 through FIX-9
+**What I did:** Deployed to kind cluster (ns: ax-test-cortex-retest-545d544b). Key infrastructure fix: pgvector 0.8.2 was available in Bitnami PostgreSQL image but not enabled -- installed via `CREATE EXTENSION vector`. Also patched PG secret (missing `password` key) and created `ax` user/database manually. After pgvector install, restarted both host and agent-runtime pods. Ran all 7 tests sequentially via chat API.
+**Files touched:** `tests/acceptance/cortex/results-k8s-retest.md` (created)
+**Outcome:** 6/7 now PASS, 1 SKIP (BT-7, structural limitation). Combined with previous run: 22/23 PASS, 1 SKIP. Key findings: (1) pgvector works out of the box in Bitnami PG 17 once enabled, (2) both host AND agent-runtime have independent cortex provider instances with separate backfill, (3) write-time embedding works with pgvector, (4) semantic cross-session recall confirmed working, (5) backfill covered all 24 items (100%).
+**Notes:** BT-7 (LLM extraction failure) remains SKIP -- cannot trigger LLM failure via chat endpoint, this is a unit test concern. Three infra gaps remain: pgvector not auto-enabled by chart, PG user/database not created by Bitnami subchart, secret missing `password` key.
+
 ## [2026-03-06 20:30] -- Cortex Memory K8s-only acceptance tests (16/23 PASS, 5 SKIP, 2 PARTIAL)
 
 **Task:** Run k8s-only cortex acceptance tests (no local, no structural)

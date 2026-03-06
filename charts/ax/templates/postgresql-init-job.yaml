@@ -1,0 +1,95 @@
+{{- if and (not .Values.postgresql.external.enabled) .Values.postgresql.internal.enabled }}
+{{- $pgUser := .Values.postgresql.internal.auth.username | default "postgres" }}
+{{- $pgDb := .Values.postgresql.internal.auth.database | default "ax" }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "ax.fullname" . }}-pg-init
+  namespace: {{ include "ax.namespace" . }}
+  labels:
+    {{- include "ax.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": hook-succeeded,before-hook-creation
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        {{- include "ax.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: pg-init
+          image: {{ .Values.postgresql.internal.initImage | default "bitnami/postgresql:17" }}
+          command: ["/bin/bash", "-c"]
+          args:
+            - |
+              set -e
+              PG_HOST="{{ include "ax.fullname" . }}-postgresql"
+              PG_PORT="5432"
+
+              # Wait for PostgreSQL to accept connections
+              until PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$PG_HOST" -p "$PG_PORT" -U postgres -c "SELECT 1" 2>/dev/null; do
+                echo "Waiting for PostgreSQL..."
+                sleep 2
+              done
+
+              echo "PostgreSQL is ready."
+
+              # Enable pgvector extension (requires superuser)
+              PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$PG_HOST" -p "$PG_PORT" -U postgres -d "{{ $pgDb }}" -c \
+                "CREATE EXTENSION IF NOT EXISTS vector;" \
+                && echo "pgvector extension enabled." \
+                || echo "pgvector not available in this image (non-fatal)."
+
+              {{- if ne $pgUser "postgres" }}
+              # Create custom user and database if using non-postgres username
+              PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$PG_HOST" -p "$PG_PORT" -U postgres <<EOSQL
+              -- Create user if not exists
+              DO \$\$
+              BEGIN
+                IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '{{ $pgUser }}') THEN
+                  CREATE ROLE "{{ $pgUser }}" WITH LOGIN PASSWORD '$APP_PASSWORD';
+                  RAISE NOTICE 'Created user {{ $pgUser }}';
+                ELSE
+                  ALTER ROLE "{{ $pgUser }}" WITH PASSWORD '$APP_PASSWORD';
+                  RAISE NOTICE 'Updated password for user {{ $pgUser }}';
+                END IF;
+              END
+              \$\$;
+
+              -- Create database if not exists
+              SELECT 'CREATE DATABASE "{{ $pgDb }}" OWNER "{{ $pgUser }}"'
+                WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '{{ $pgDb }}')\gexec
+
+              -- Grant privileges
+              GRANT ALL PRIVILEGES ON DATABASE "{{ $pgDb }}" TO "{{ $pgUser }}";
+              \c "{{ $pgDb }}"
+              GRANT ALL ON SCHEMA public TO "{{ $pgUser }}";
+              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO "{{ $pgUser }}";
+              ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO "{{ $pgUser }}";
+
+              -- Enable pgvector in the app database too (if not already done above)
+              CREATE EXTENSION IF NOT EXISTS vector;
+              EOSQL
+              echo "Custom user {{ $pgUser }} and database {{ $pgDb }} configured."
+              {{- end }}
+
+              echo "PostgreSQL initialization complete."
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ax.fullname" . }}-postgresql
+                  key: postgres-password
+            {{- if ne $pgUser "postgres" }}
+            - name: APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ax.fullname" . }}-postgresql
+                  key: password
+                  optional: true
+            {{- end }}
+{{- end }}

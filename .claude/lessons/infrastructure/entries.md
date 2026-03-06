@@ -112,17 +112,29 @@
 **Lesson:** The Bitnami PostgreSQL subchart only auto-generates `postgres-password` (superuser) in its secret. When using a custom username (e.g., `auth.username: ax`), you MUST also set `auth.password` explicitly, or the `ax` user will be created without a password while the chart's DATABASE_URL uses `postgres-password`. Fix: either set `postgresql.internal.auth.password` in values, or use `auth.username: postgres` to match the auto-generated password.
 **Tags:** k8s, helm, postgresql, bitnami, auth, password
 
-### sqlite-vec is not available in the AX container image
+### sqlite-vec is available but unused in k8s PostgreSQL mode -- pgvector is the right path
 **Date:** 2026-03-06
-**Context:** Embedding store returned available=false on host pod, preventing vector search
-**Lesson:** The AX Docker image does not include the sqlite-vec native extension. In k8s mode, the EmbeddingStore's `findSimilar()` returns empty arrays and `available` is false. This means embedding-based memory recall and semantic search do not work in k8s. Consider adding pgvector to PostgreSQL for k8s vector search, or bundling sqlite-vec in the container image.
-**Tags:** k8s, sqlite-vec, embeddings, container, vector-search
+**Context:** After FIX-7 added build tools to Dockerfile, sqlite-vec loaded on the host pod. But in k8s with PostgreSQL, the cortex provider passes the PostgreSQL `database` object to the EmbeddingStore, which uses pgvector (not sqlite-vec). sqlite-vec is only used in SQLite mode (standalone local development).
+**Lesson:** In k8s/PostgreSQL mode, the embedding store uses pgvector, not sqlite-vec. pgvector is available in the Bitnami PostgreSQL 17 image but must be explicitly enabled via `CREATE EXTENSION IF NOT EXISTS vector`. The database provider (`src/providers/database/postgres.ts`) runs this command at init, but requires sufficient privileges. For the Helm chart: either use the `postgres` superuser, or add an init container that enables the extension as superuser before the application starts.
+**Tags:** k8s, pgvector, embeddings, postgresql, vector-search, bitnami
 
 ### Keyword search LIKE bug: OR-joined terms treated as literal string
 **Date:** 2026-03-06
 **Context:** Memory recall keyword fallback produced zero results despite matching items existing
 **Lesson:** `items-store.ts:searchContent()` uses `WHERE content LIKE '%query%'` where query is the raw output of `extractQueryTerms()` (e.g., "set OR deployment OR pipeline"). This does a literal substring match for the entire string including " OR ". Fix: split on " OR " and generate multiple LIKE conditions joined with SQL OR.
 **Tags:** cortex, memory, keyword-search, bug, sql, like
+
+### Both host and agent-runtime have independent cortex provider instances
+**Date:** 2026-03-06
+**Context:** After enabling pgvector on PostgreSQL and restarting only the host pod, new items from chat still had no embeddings. The memorize code runs on the agent-runtime, which had its own cortex provider instance that was initialized before pgvector was installed.
+**Lesson:** In k8s mode, both the host AND agent-runtime pods create independent cortex provider instances. The agent-runtime uses its instance for memory recall (injecting context before conversation) and memorize (storing extracted facts). The host uses its instance for its own operations. Both need pgvector access, both must be restarted after infrastructure changes (like enabling pgvector). Use PostgreSQL advisory locks (`pg_try_advisory_lock`) to coordinate expensive one-time operations like embedding backfill so only one process does the work.
+**Tags:** k8s, cortex, agent-runtime, host, provider-instances, pgvector, backfill, advisory-lock
+
+### Use Helm hook Jobs for PostgreSQL extensions and user setup
+**Date:** 2026-03-06
+**Context:** pgvector needed manual `CREATE EXTENSION` as superuser; custom PG user/database needed manual creation
+**Lesson:** Create a `postgresql-init-job.yaml` as a Helm post-install/post-upgrade hook (weight=1, before NATS weight=5) that connects as postgres superuser to: (1) enable pgvector, (2) create custom user/database if configured. Use `bitnami/postgresql:17` as the job image since it includes psql and matches the subchart. Make pgvector creation non-fatal (`|| echo`) since not all PG images include it.
+**Tags:** helm, postgresql, pgvector, init-job, hook, bitnami
 
 ### NATS nc.request() returns JetStream stream ack instead of worker reply
 **Date:** 2026-03-05

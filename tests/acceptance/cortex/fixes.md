@@ -100,6 +100,35 @@
 **Estimated scope:** 1-2 files
 **Status:** FIXED — Changed default `internal.auth.username` from `ax` to `postgres` in values.yaml (matches the `postgres-password` key that Bitnami always generates). Updated `_helpers.tpl` to conditionally use `password` key when a non-postgres custom user is configured.
 
+## K8s Infrastructure Gaps (2026-03-06 re-test)
+
+### FIX-10: pgvector extension not auto-enabled in PostgreSQL
+**Test:** BT-8, IT-7, IT-8 (blocked until manually enabled)
+**Environment:** K8s only
+**Root cause:** Missing
+**Location:** `charts/ax/templates/postgresql-init-job.yaml` (new)
+**What's wrong:** The Bitnami PostgreSQL image includes pgvector but doesn't enable the extension by default. `CREATE EXTENSION IF NOT EXISTS vector` requires superuser privileges, so the app user's attempt in `postgres.ts` fails silently.
+**What to fix:** Add a Helm hook Job that runs after PostgreSQL is ready, connects as superuser, and enables pgvector.
+**Status:** FIXED — New `postgresql-init-job.yaml` Helm hook (post-install/post-upgrade, weight=1) connects as postgres superuser and runs `CREATE EXTENSION IF NOT EXISTS vector`. Non-fatal if pgvector isn't in the image.
+
+### FIX-11: Custom PostgreSQL user/database not created reliably
+**Test:** Infrastructure setup (blocked all tests when using non-postgres username)
+**Environment:** K8s only
+**Root cause:** Integration gap
+**Location:** `charts/ax/templates/postgresql-init-job.yaml` (new)
+**What's wrong:** Bitnami subchart only generates `postgres-password` key. Custom users need manual creation and the `password` secret key isn't generated.
+**What to fix:** The pg-init job conditionally creates the custom user, database, and grants when `auth.username` is not "postgres".
+**Status:** FIXED — The pg-init job detects non-postgres username and creates the role, database, grants, and pgvector extension in the app database.
+
+### FIX-12: Dual cortex instances run independent embedding backfills
+**Test:** IT-8 (duplicate API calls observed in acceptance test)
+**Environment:** K8s only
+**Root cause:** Missing coordination
+**Location:** `src/providers/memory/cortex/provider.ts` — `backfillEmbeddings()`
+**What's wrong:** Both host and agent-runtime create independent cortex provider instances. Both run `backfillEmbeddings()` on startup, embedding the same items twice (wasting API calls and money).
+**What to fix:** Use PostgreSQL advisory lock (`pg_try_advisory_lock`) at the start of backfill. If the lock is already held, skip the backfill. Release on completion.
+**Status:** FIXED — `backfillEmbeddings()` acquires `pg_try_advisory_lock(BACKFILL_ADVISORY_LOCK_KEY)` when using PostgreSQL. Second process logs `backfill_skipped` and returns immediately. Lock released in `finally` block.
+
 ## Suggested Fix Order
 
 All fixes are now resolved:
@@ -111,3 +140,6 @@ All fixes are now resolved:
 5. **FIX-1** — Previously fixed (uncommitted).
 6. **FIX-4** — Previously fixed (uncommitted).
 7. **FIX-5** — Previously fixed (uncommitted).
+8. **FIX-10** — FIXED. pgvector auto-enabled via Helm hook init job.
+9. **FIX-11** — FIXED. Custom user/database creation in pg-init job.
+10. **FIX-12** — FIXED. Advisory lock prevents duplicate backfill runs.

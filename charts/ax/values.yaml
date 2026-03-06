@@ -171,6 +171,9 @@ postgresql:
     secretKey: "url"
   internal:
     enabled: false
+    # Image used by the pg-init job (pgvector setup, custom user creation).
+    # Must include psql CLI. Defaults to bitnami/postgresql:17.
+    initImage: ""
     auth:
       database: ax
       username: postgres
