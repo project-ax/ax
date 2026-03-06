@@ -1,5 +1,11 @@
 # Provider Lessons: Memory
 
+### Read-path reinforcement should use fire-and-forget, not await
+**Date:** 2026-03-06
+**Context:** Adding `store.reinforce()` to read() and query() per plan spec. Initial implementation was skipped ("keep reads side-effect-free") but the plan specifies reinforcement on retrieval for salience accuracy.
+**Lesson:** Use `.catch(() => {})` for read-path reinforcement — it's a non-critical side effect that shouldn't block or fail the read. Contrast with embedding storage in write(), which MUST be awaited because the read path depends on it. Rule: if a failure in the side effect doesn't affect the caller's result, fire-and-forget is correct.
+**Tags:** cortex, reinforcement, read, query, fire-and-forget, salience
+
 ### DbSummaryStore.initDefaults() must run AFTER database migrations
 **Date:** 2026-03-06
 **Context:** K8s deployment with PostgreSQL crashed because `summaryStore.initDefaults()` tried to INSERT into `cortex_summaries` before the migration that creates the table had run. The bug only affects k8s/PostgreSQL -- local SQLite uses FileSummaryStore which doesn't need the table.

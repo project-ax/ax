@@ -1,5 +1,13 @@
 # Providers: Memory
 
+## [2026-03-06 13:55] — Fix acceptance test issues: read/query reinforcement and write reinforcementCount
+
+**Task:** Implement remaining fixes from tests/acceptance/cortex/fixes.md (FIX-3, FIX-4, FIX-5)
+**What I did:** (1) FIX-5: Changed `reinforcementCount: 10` to `1` in `write()` per plan spec. (2) FIX-4: Added fire-and-forget `store.reinforce()` calls in `read()` and both query() paths (embedding + keyword). (3) FIX-3: Documented taint as intentionally system-managed — agents can't set taint via tool schema; it's only set during `memorize()` from conversation context. (4) FIX-2: Marked as deferred — k8s init infrastructure doesn't exist yet. (5) Added 2 new provider tests verifying salience boost from repeated read/query access. Updated test name for FIX-5.
+**Files touched:** `src/providers/memory/cortex/provider.ts`, `tests/providers/memory/cortex/provider.test.ts`, `tests/acceptance/cortex/fixes.md`
+**Outcome:** Success — all 145 cortex tests pass across 12 files
+**Notes:** Read-path reinforcement was originally omitted from the implementation (journal entry from Task 8 notes: "Removed reinforce-on-read from the plan's spec to keep reads side-effect-free"). Now restored per plan intent — fire-and-forget `.catch(() => {})` keeps reads non-blocking while still incrementing counts.
+
 ## [2026-03-06 12:10] — Remove dead summary-io code and make tests storage-agnostic
 
 **Task:** Tasks 5 and 6 of cortex summary storage plan: delete orphaned summary-io module and update provider tests to assert via query() instead of reading .md files from disk

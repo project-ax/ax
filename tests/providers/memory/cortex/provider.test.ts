@@ -121,6 +121,38 @@ describe('cortex provider', () => {
     expect(entry!.taint!.trust).toBe('external');
   });
 
+  it('read() reinforces accessed items (boosts salience on repeated access)', async () => {
+    const idA = await memory.write({ scope: 'default', content: 'Item Alpha about testing' });
+    const idB = await memory.write({ scope: 'default', content: 'Item Beta about testing' });
+
+    // Read item A multiple times to reinforce it
+    for (let i = 0; i < 5; i++) {
+      await memory.read(idA);
+    }
+
+    // Query for both — item A should rank first due to higher reinforcement
+    const results = await memory.query({ scope: 'default', query: 'testing' });
+    const items = results.filter(r => !r.id?.startsWith('summary:'));
+    expect(items.length).toBe(2);
+    expect(items[0].id).toBe(idA);
+  });
+
+  it('query() reinforces returned items', async () => {
+    const idA = await memory.write({ scope: 'default', content: 'Unique alpha fact for reinforcement test' });
+    await memory.write({ scope: 'default', content: 'Unique beta fact for reinforcement test' });
+
+    // Query multiple times for item A specifically to reinforce it
+    for (let i = 0; i < 5; i++) {
+      await memory.query({ scope: 'default', query: 'alpha' });
+    }
+
+    // Now query for both — item A should rank higher due to reinforcement
+    const results = await memory.query({ scope: 'default', query: 'reinforcement test' });
+    const items = results.filter(r => !r.id?.startsWith('summary:'));
+    expect(items.length).toBe(2);
+    expect(items[0].id).toBe(idA);
+  });
+
   it('filters by agentId', async () => {
     await memory.write({ scope: 'default', content: 'Agent 1 fact', agentId: 'a1' });
     await memory.write({ scope: 'default', content: 'Agent 2 fact', agentId: 'a2' });
@@ -257,7 +289,7 @@ describe('cortex provider with LLM', () => {
     delete process.env.AX_HOME;
   });
 
-  it('write() gives explicit entries reinforcementCount=10', async () => {
+  it('write() stores explicit entries with initial reinforcement', async () => {
     // Use a summary response for the fire-and-forget update
     llm = mockLLM(['# knowledge\n## Facts\n- REST API with JWT auth']);
     memory = await create(config, undefined, { llm });

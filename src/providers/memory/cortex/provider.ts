@@ -242,14 +242,13 @@ export async function create(config: Config, _name?: string, opts?: CreateOption
         }
       }
 
-      // Explicit writes get reinforcement boost of 10
       const id = await store.insert({
         content: entry.content,
         memoryType: 'knowledge',
         category: 'knowledge',
         contentHash,
         confidence: 1.0,
-        reinforcementCount: 10,
+        reinforcementCount: 1,
         lastReinforcedAt: now,
         createdAt: now,
         updatedAt: now,
@@ -315,7 +314,12 @@ export async function create(config: Config, _name?: string, opts?: CreateOption
           });
           ranked.sort((a, b) => b.score - a.score);
 
-          return ranked.slice(0, limit).map(({ item }) => toEntry(item));
+          const results = ranked.slice(0, limit);
+          // Reinforce accessed items (fire-and-forget)
+          for (const { item } of results) {
+            store.reinforce(item.id).catch(() => {});
+          }
+          return results.map(({ item }) => toEntry(item));
         } catch (err) {
           logger.warn('embedding_query_failed', { error: (err as Error).message });
           // Fall through to keyword search only on error (graceful degradation)
@@ -344,7 +348,12 @@ export async function create(config: Config, _name?: string, opts?: CreateOption
       ranked.sort((a, b) => b.score - a.score);
 
       // ── Build item results ──
-      const itemResults = ranked.slice(0, limit).map(({ item }) => toEntry(item));
+      const sliced = ranked.slice(0, limit);
+      // Reinforce accessed items (fire-and-forget)
+      for (const { item } of sliced) {
+        store.reinforce(item.id).catch(() => {});
+      }
+      const itemResults = sliced.map(({ item }) => toEntry(item));
 
       // ── Append summaries to fill remaining limit slots ──
       const remaining = limit - itemResults.length;
@@ -388,6 +397,8 @@ export async function create(config: Config, _name?: string, opts?: CreateOption
       if (id.startsWith(SUMMARY_ID_PREFIX)) return null;
       const item = await store.getById(id);
       if (!item) return null;
+      // Reinforce accessed items (boosts salience for frequently read items)
+      store.reinforce(item.id).catch(() => {});
       return toEntry(item);
     },
 

@@ -24,6 +24,7 @@
 **What's wrong:** The `ax k8s init` command provisions the LLM provider API key but not the embedding provider key (DEEPINFRA_API_KEY). The kind-values.yaml references it in `apiCredentials.envVars` but the actual secret doesn't contain a valid value.
 **What to fix:** Either: (a) add `--embedding-api-key` flag to `k8s init`, or (b) ensure the acceptance test skill passes DEEPINFRA_API_KEY from `.env.test` into the k8s secret during setup.
 **Estimated scope:** 1-2 files
+**Status:** DEFERRED — Requires `ax k8s init` CLI command (not yet implemented; see docs/plans/2026-03-06-k8s-presets-and-init-design.md)
 
 ### FIX-3: Taint not exposed in agent memory tool schema
 **Test:** BT-6 (partial in k8s)
@@ -33,6 +34,7 @@
 **What's wrong:** The `memory_write` tool doesn't expose a `taint` parameter, so users can't set taint tags via the tool. Taint is only system-managed (set during memorize from conversation context).
 **What to fix:** Evaluate whether taint should be user-settable via tools. If yes, add optional `taint` parameter to memory_write tool schema. If no (security decision), document this as intentional and update the test expectation.
 **Estimated scope:** 1 file
+**Status:** RESOLVED (intentional) — Taint is system-managed for security. The host-side `memory_write` IPC handler does not inject taint from tool params; taint is only set during `memorize()` from conversation context. Allowing agents to set their own trust tags would undermine the taint-tracking security model. The `write()` method on MemoryProvider accepts taint for internal/host-side use only.
 
 ## Minor
 
@@ -44,6 +46,7 @@
 **What's wrong:** The plan specifies that reading/querying items should increment their reinforcement count (boosting salience for frequently accessed items). Neither `query()` nor `read()` calls `store.reinforce()`.
 **What to fix:** Add `store.reinforce(id)` calls in query/read paths after returning results. Consider making this async/non-blocking to avoid slowing reads. Alternatively, document as intentional deviation if read-path reinforcement was deliberately omitted.
 **Estimated scope:** 1 file
+**Status:** FIXED — Added fire-and-forget `store.reinforce()` calls in both read() and query() (embedding + keyword paths). Tests added in provider.test.ts verifying salience boost from repeated access.
 
 ### FIX-5: Explicit write() uses reinforcementCount=10 (plan deviation DEV-2)
 **Test:** IT-3 (noted in both environments)
@@ -53,6 +56,7 @@
 **What's wrong:** Explicit `write()` calls set `reinforcementCount: 10`, giving them 10x the salience weight of memorize-extracted items. The plan specifies initial count of 1.
 **What to fix:** Evaluate whether this is intentional (explicit writes are "more important") or a bug. If intentional, document it. If not, change to `reinforcementCount: 1`.
 **Estimated scope:** 1 file
+**Status:** FIXED — Changed to `reinforcementCount: 1` per plan spec. With read-path reinforcement now implemented (FIX-4), frequently accessed items naturally gain salience over time without an artificial initial boost.
 
 ## Suggested Fix Order
 
