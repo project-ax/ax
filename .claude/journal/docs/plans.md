@@ -2,6 +2,14 @@
 
 Architecture analysis, gap analysis, design documents, implementation plans.
 
+## [2026-03-05] — Add 5 missing provider skills to skills/ax
+
+**Task:** Add skills for provider categories that had implementations but no corresponding skill documentation.
+**What I did:** Compared `src/providers/` directories against `.claude/skills/ax/provider-*` skills. Found 5 missing: database, eventbus, image, screener, storage. Created SKILL.md for each following the established format (overview, interface tables, implementations table, provider-map entries, common tasks, gotchas, key files). Updated the parent `skills/ax/SKILL.md` to list all 18 providers.
+**Files touched:** `.claude/skills/ax/provider-{database,eventbus,image,screener,storage}/SKILL.md` (new), `.claude/skills/ax/SKILL.md` (updated)
+**Outcome:** Success — all provider categories now have corresponding skills.
+**Notes:** Explored each provider's types.ts, implementations, and test files to write accurate skill docs. Provider-map entries verified against src/host/provider-map.ts.
+
 ## [2026-03-05 15:30] — Design acceptance tests for K8s agent compute architecture
 
 **Task:** Design acceptance tests for `docs/plans/2026-03-04-k8s-agent-compute-architecture.md` using kind (Kubernetes IN Docker) as the test platform.

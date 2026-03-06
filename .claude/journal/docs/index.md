@@ -4,6 +4,7 @@ Documentation, plans, architecture docs, website updates, GitHub Pages.
 
 ## Entries
 
+- 2026-03-05 — Add 5 missing provider skills (database, eventbus, image, screener, storage) [plans.md](plans.md)
 - 2026-03-05 21:00 — Update README.md with changes since last update (68 commits) [website.md](website.md)
 - 2026-03-05 15:30 — Design acceptance tests for K8s agent compute architecture [plans.md](plans.md)
 - 2026-03-05 12:00 — Helm templates: pool controller deployment, RBAC, sandbox templates [plans.md](plans.md)
