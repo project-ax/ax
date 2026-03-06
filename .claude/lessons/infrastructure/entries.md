@@ -82,6 +82,18 @@
 **Lesson:** Helm subchart values are passed at the top level under the chart's alias key, not under custom keys. For the Bitnami PostgreSQL subchart, use `postgresql.auth.password` (NOT `postgresql.internal.auth.password`). The `internal` key is an AX-specific wrapper for the condition flag. Check the subchart's `values.yaml` for the actual schema.
 **Tags:** helm, subchart, bitnami, postgresql, values
 
+### Helm presets can't override subchart conditions
+**Date:** 2026-03-06
+**Context:** Implementing preset-based defaults for NATS cluster mode and PostgreSQL internal/external
+**Lesson:** Helm evaluates subchart `condition:` keys (from Chart.yaml dependencies) at the values level BEFORE template rendering. Template helpers in `_presets.tpl` can control our own templates but CANNOT affect whether subcharts deploy. For subchart-controlled settings (NATS cluster, PostgreSQL internal vs external), generate the correct values in the CLI tool's output file rather than relying on preset template logic.
+**Tags:** helm, presets, subchart, conditions, nats, postgresql
+
+### Use `kindIs "invalid"` to detect null values in Helm templates
+**Date:** 2026-03-06
+**Context:** Implementing user override > preset > chart default resolution in Helm
+**Lesson:** In Go templates, `nil` (YAML null) has kind "invalid". Use `{{- if not (kindIs "invalid" .Values.foo) -}}` to detect user-provided values vs null defaults. This allows the pattern: null in values.yaml means "use preset or chart default", while any explicit value (including empty string or 0) is treated as a user override.
+**Tags:** helm, template, null-detection, presets
+
 ### NATS nc.request() returns JetStream stream ack instead of worker reply
 **Date:** 2026-03-05
 **Context:** NATSSandboxDispatcher.claimPod() used `nc.request('tasks.sandbox.light', ...)` to claim a sandbox pod. The TASKS JetStream stream covers `tasks.sandbox.*`. The `nc.request()` returned a 27-byte JetStream publish ack (`{"stream":"TASKS","seq":N}`) instead of the worker's `claim_ack` response.

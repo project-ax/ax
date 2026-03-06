@@ -1,6 +1,12 @@
 # AX Helm Chart — values.yaml
 # Single source of truth for AX configuration.
 
+# Preset: set to "small", "medium", or "large" for opinionated defaults.
+# When empty (default), all values below are used as-is.
+# When set, preset values apply for any field left null.
+# User overrides (non-null) always take precedence over preset defaults.
+preset: ""
+
 nameOverride: ""
 fullnameOverride: ""
 
@@ -11,6 +17,7 @@ namespace:
 global:
   imageRegistry: ""
   imageTag: ""
+  imagePullSecrets: []
 
 # ─── AX Configuration ────────────────────────────────────────────
 # This entire block is rendered as ax.yaml and mounted into every pod.
@@ -52,7 +59,7 @@ config:
 
 # ─── Host (Ingress Layer) ────────────────────────────────────────
 host:
-  replicas: 2
+  replicas:   # null → use preset (small=1, medium=2, large=3) or default 2
   image:
     registry: ""
     repository: ax/host
@@ -61,13 +68,7 @@ host:
   ports:
     http: 8080
     metrics: 9090
-  resources:
-    requests:
-      cpu: "500m"
-      memory: "512Mi"
-    limits:
-      cpu: "500m"
-      memory: "512Mi"
+  resources:   # null → use preset (small=250m/256Mi, medium/large=500m/512Mi) or default 500m/512Mi
   readinessProbe:
     httpGet:
       path: /health
@@ -96,7 +97,7 @@ host:
 
 # ─── Agent Runtime (Conversation Layer) ──────────────────────────
 agentRuntime:
-  replicas: 3
+  replicas:   # null → use preset (small=1, medium=3, large=5) or default 3
   image:
     registry: ""
     repository: ax/host
@@ -104,13 +105,7 @@ agentRuntime:
   command: ["node", "dist/host/agent-runtime-process.js"]
   ports:
     metrics: 9091
-  resources:
-    requests:
-      cpu: "1"
-      memory: "2Gi"
-    limits:
-      cpu: "1"
-      memory: "2Gi"
+  resources:   # null → use preset (small=500m/1Gi, medium/large=1cpu/2Gi) or default 1cpu/2Gi
   readinessProbe:
     httpGet:
       path: /health
@@ -160,26 +155,10 @@ sandbox:
     tag: "latest"
   # Pod runtime class for sandbox pods (e.g., "gvisor" for GKE Autopilot).
   # Set to "" to disable (for kind/minikube/non-gVisor clusters).
-  runtimeClass: "gvisor"
+  # null → use preset (small="", medium/large=gvisor) or default gvisor.
+  runtimeClass:
+  # Sandbox tiers — null → use preset or default (light 2-10 + heavy 0-3).
   tiers:
-    light:
-      minReady: 2
-      maxReady: 10
-      template:
-        command: ["node", "dist/sandbox-worker/main.js"]
-        cpu: "1"
-        memory: "2Gi"
-        workspaceRoot: "/workspace"
-    heavy:
-      minReady: 0
-      maxReady: 3
-      template:
-        command: ["node", "dist/sandbox-worker/main.js"]
-        cpu: "4"
-        memory: "16Gi"
-        workspaceRoot: "/workspace"
-        nodeSelector:
-          cloud.google.com/compute-class: Performance
 
 # ─── PostgreSQL ───────────────────────────────────────────────────
 # Provide a DATABASE_URL via a k8s Secret. Works with any PostgreSQL:

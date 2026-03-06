@@ -7,7 +7,7 @@ metadata:
     {{- include "ax.componentLabels" (dict "component" "host" "context" $) | nindent 4 }}
     ax.io/plane: ingress
 spec:
-  replicas: {{ .Values.host.replicas }}
+  replicas: {{ include "ax.preset.hostReplicas" . }}
   selector:
     matchLabels:
       {{- include "ax.selectorLabels" (dict "component" "host" "context" $) | nindent 6 }}
@@ -40,15 +40,13 @@ spec:
             - name: NATS_URL
               value: {{ include "ax.natsUrl" . | quote }}
             - name: K8S_RUNTIME_CLASS
-              value: {{ .Values.sandbox.runtimeClass | default "" | quote }}
+              value: {{ include "ax.preset.sandboxRuntimeClass" . | quote }}
             {{- include "ax.databaseEnv" . | nindent 12 }}
             {{- with .Values.host.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- with .Values.host.resources }}
           resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- include "ax.preset.hostResources" . | nindent 12 }}
           {{- with .Values.host.readinessProbe }}
           readinessProbe:
             {{- toYaml . | nindent 12 }}
@@ -61,6 +59,12 @@ spec:
             - name: ax-config
               mountPath: /etc/ax
               readOnly: true
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . }}
+        {{- end }}
+      {{- end }}
       terminationGracePeriodSeconds: {{ .Values.host.terminationGracePeriodSeconds }}
       volumes:
         - name: ax-config

@@ -14,6 +14,7 @@ export interface CommandHandlers {
   configure?: () => Promise<void>;
   bootstrap?: (args: string[]) => Promise<void>;
   plugin?: (args: string[]) => Promise<void>;
+  k8s?: (args: string[]) => Promise<void>;
   help?: () => Promise<void>;
 }
 
@@ -39,6 +40,9 @@ export async function routeCommand(
     case 'plugin':
       if (handlers.plugin) await handlers.plugin(args.slice(1));
       break;
+    case 'k8s':
+      if (handlers.k8s) await handlers.k8s(args.slice(1));
+      break;
     default:
       if (handlers.help) await handlers.help();
       break;
@@ -55,6 +59,7 @@ Usage:
   ax configure           Run configuration wizard
   ax bootstrap [agent]   Reset agent identity and re-run bootstrap
   ax plugin <command>    Manage third-party provider plugins
+  ax k8s init [options]  Generate Helm values and K8s secrets for deployment
 
 Server Options:
   --daemon               Run server in background
@@ -106,7 +111,7 @@ export async function main(): Promise<void> {
     return;
   }
 
-  const knownCommands = new Set(['serve', 'send', 'configure', 'bootstrap', 'plugin', 'help']);
+  const knownCommands = new Set(['serve', 'send', 'configure', 'bootstrap', 'plugin', 'k8s', 'help']);
   let command: string;
   let restArgs: string[];
 
@@ -138,6 +143,17 @@ export async function main(): Promise<void> {
     plugin: async (pluginArgs) => {
       const { runPlugin } = await import('./plugin.js');
       await runPlugin(pluginArgs);
+    },
+    k8s: async (k8sArgs) => {
+      const subcommand = k8sArgs[0];
+      if (subcommand === 'init') {
+        const { runK8sInit } = await import('./k8s-init.js');
+        await runK8sInit(k8sArgs.slice(1));
+      } else {
+        console.error(`Unknown k8s subcommand: ${subcommand ?? '(none)'}`);
+        console.error('Usage: ax k8s init [options]');
+        process.exit(1);
+      }
     },
     help: async () => {
       showHelp();

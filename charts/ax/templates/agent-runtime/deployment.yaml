@@ -7,7 +7,7 @@ metadata:
     {{- include "ax.componentLabels" (dict "component" "agent-runtime" "context" $) | nindent 4 }}
     ax.io/plane: conversation
 spec:
-  replicas: {{ .Values.agentRuntime.replicas }}
+  replicas: {{ include "ax.preset.agentRuntimeReplicas" . }}
   selector:
     matchLabels:
       {{- include "ax.selectorLabels" (dict "component" "agent-runtime" "context" $) | nindent 6 }}
@@ -51,14 +51,12 @@ spec:
             - name: K8S_POD_IMAGE
               value: {{ include "ax.image" (dict "image" .Values.sandbox.image "global" .Values.global "context" $) | quote }}
             - name: K8S_RUNTIME_CLASS
-              value: {{ .Values.sandbox.runtimeClass | default "" | quote }}
+              value: {{ include "ax.preset.sandboxRuntimeClass" . | quote }}
             {{- with .Values.agentRuntime.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          {{- with .Values.agentRuntime.resources }}
           resources:
-            {{- toYaml . | nindent 12 }}
-          {{- end }}
+            {{- include "ax.preset.agentRuntimeResources" . | nindent 12 }}
           {{- with .Values.agentRuntime.readinessProbe }}
           readinessProbe:
             {{- toYaml . | nindent 12 }}
@@ -67,6 +65,12 @@ spec:
             - name: ax-config
               mountPath: /etc/ax
               readOnly: true
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . }}
+        {{- end }}
+      {{- end }}
       terminationGracePeriodSeconds: {{ .Values.agentRuntime.terminationGracePeriodSeconds }}
       volumes:
         - name: ax-config
