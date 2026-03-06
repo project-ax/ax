@@ -26,6 +26,7 @@
   --ds-green-glow: rgba(52, 211, 153, 0.1);
   --ds-blue: #38bdf8;
   --ds-blue-dim: #0c4a6e;
+  --ds-blue-subtle: rgba(56, 189, 248, 0.15);
   --ds-cyan: #38bdf8;
   --ds-cyan-dim: #0c4a6e;
   --ds-purple: #a78bfa;
@@ -527,7 +528,172 @@ img, svg { display: block; max-width: 100%; }
 }
 
 /* ══════════════════════════════
-   CODE SHOWCASE
+   DEPLOYMENT — Personal vs Enterprise
+   ══════════════════════════════ */
+.deployment { padding: 5rem 0; }
+
+.deployment-header {
+  text-align: center;
+  margin-bottom: 3rem;
+}
+
+.deployment-header h2 {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.75rem;
+}
+
+.deployment-header p {
+  color: var(--text-secondary);
+  font-size: 14px;
+  max-width: 700px;
+  margin: 0 auto;
+  line-height: 1.7;
+}
+
+.deployment-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.deployment-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  overflow: hidden;
+  transition: border-color 0.3s;
+}
+
+.deployment-card:hover {
+  border-color: var(--border-hover);
+}
+
+/* Card label */
+.deployment-card-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem 1.25rem;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.deployment-card-label svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.label-personal {
+  color: var(--accent);
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.06) 0%, transparent 100%);
+}
+
+.label-enterprise {
+  color: var(--ds-blue);
+  background: linear-gradient(135deg, rgba(56, 189, 248, 0.06) 0%, transparent 100%);
+}
+
+/* Code area within deployment card */
+.deployment-code {
+  border-bottom: 1px solid var(--border);
+}
+
+.deployment-code-header {
+  padding: 0.5rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.deployment-code-header span {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 10px;
+  color: var(--text-tertiary);
+}
+
+.deployment-code pre {
+  padding: 1.25rem;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  line-height: 1.8;
+  overflow-x: auto;
+  margin: 0;
+}
+
+.deployment-code .line { display: block; }
+.deployment-code .comment { color: var(--text-tertiary); }
+.deployment-code .key { color: var(--accent); }
+.deployment-code .colon { color: var(--text-tertiary); }
+.deployment-code .value { color: var(--text-primary); }
+
+/* Enterprise card uses blue keys */
+.deployment-card:nth-child(2) .deployment-code .key {
+  color: var(--ds-blue);
+}
+
+/* Highlight list */
+.deployment-highlights {
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.deployment-highlights li {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.deployment-highlights code {
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--text-primary);
+  font-size: 11px;
+  background: var(--bg-elevated);
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.2rem;
+}
+
+.dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.dot-amber {
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.3);
+}
+
+.dot-blue {
+  background: var(--ds-blue);
+  box-shadow: 0 0 6px rgba(56, 189, 248, 0.3);
+}
+
+@media (max-width: 767px) {
+  .deployment-grid {
+    grid-template-columns: 1fr;
+  }
+  .deployment-header h2 {
+    font-size: 22px;
+  }
+}
+
+/* ══════════════════════════════
+   CODE SHOWCASE (Get Started)
    ══════════════════════════════ */
 .code-showcase { padding: 4rem 0 5rem; }
 
@@ -743,17 +909,17 @@ img, svg { display: block; max-width: 100%; }
 
 .provider-grid-inner {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.75rem;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.625rem;
 }
 
 .provider-block {
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.5rem;
+  padding: 0.4rem 0.625rem;
+  border-radius: 0.375rem;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   font-family: 'IBM Plex Mono', monospace;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-secondary);
   text-align: center;
   transition: all 0.2s;
