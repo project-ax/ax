@@ -139,11 +139,9 @@ export async function recallMemoryForMessage(
       }
 
       // Embedding search returned empty — fall through to keyword search.
-      // This likely means embeddings are missing (misconfigured provider, API errors, etc.)
-      logger.warn('memory_recall_embedding_empty', {
+      logger.info('memory_recall_embedding_empty', {
         strategy: 'embedding',
         fallback: 'keyword',
-        hint: 'Embedding search returned no results. Check embedding provider configuration and that embeddings are being stored.',
       });
     } catch (err) {
       // Embedding failed — fall through to keyword search

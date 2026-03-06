@@ -88,4 +88,36 @@ describe('summary-io', () => {
     const files = await readdir(memoryDir);
     expect(files.every(f => !f.endsWith('.tmp'))).toBe(true);
   });
+
+  // ── User-scoped summaries ──
+
+  it('writes user-scoped summary to users/<userId>/ subdirectory', async () => {
+    await writeSummary(memoryDir, 'preferences', 'alice prefs', 'alice');
+    const read = await readSummary(memoryDir, 'preferences', 'alice');
+    expect(read).toBe('alice prefs');
+
+    // Shared summary should be unaffected
+    const shared = await readSummary(memoryDir, 'preferences');
+    expect(shared).toBeNull();
+  });
+
+  it('isolates user-scoped summaries from each other', async () => {
+    await writeSummary(memoryDir, 'preferences', 'alice prefs', 'alice');
+    await writeSummary(memoryDir, 'preferences', 'bob prefs', 'bob');
+    await writeSummary(memoryDir, 'preferences', 'shared prefs');
+
+    expect(await readSummary(memoryDir, 'preferences', 'alice')).toBe('alice prefs');
+    expect(await readSummary(memoryDir, 'preferences', 'bob')).toBe('bob prefs');
+    expect(await readSummary(memoryDir, 'preferences')).toBe('shared prefs');
+  });
+
+  it('user-scoped directory is created lazily on first write', async () => {
+    const files = await readdir(memoryDir);
+    expect(files).not.toContain('users');
+
+    await writeSummary(memoryDir, 'knowledge', 'user content', 'user-1');
+    const usersDir = join(memoryDir, 'users');
+    const userDirs = await readdir(usersDir);
+    expect(userDirs).toContain('user-1');
+  });
 });

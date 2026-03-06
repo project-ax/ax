@@ -229,6 +229,31 @@ describe('ItemsStore', () => {
     expect(results).toHaveLength(2);
   });
 
+  it('listByCategory with wildcard scope returns items across all scopes', async () => {
+    await store.insert({ ...sampleItem, scope: 'project-a' });
+    await store.insert({ ...sampleItem, scope: 'project-b', contentHash: 'bbbbbbbbbbbbbbbb' });
+    await store.insert({ ...sampleItem, content: 'Runs on GKE', category: 'knowledge', scope: 'project-a', contentHash: 'cccccccccccccccc' });
+
+    const prefs = await store.listByCategory('preferences', '*');
+    expect(prefs).toHaveLength(2);
+  });
+
+  it('getAllForCategory with wildcard scope returns items across all scopes', async () => {
+    await store.insert({ ...sampleItem, scope: 'project-a' });
+    await store.insert({ ...sampleItem, scope: 'project-b', contentHash: 'bbbbbbbbbbbbbbbb' });
+
+    const all = await store.getAllForCategory('preferences', '*');
+    expect(all).toHaveLength(2);
+  });
+
+  it('listIdsByScope with wildcard scope returns all item IDs', async () => {
+    await store.insert({ ...sampleItem, scope: 'project-a' });
+    await store.insert({ ...sampleItem, scope: 'project-b', contentHash: 'bbbbbbbbbbbbbbbb' });
+
+    const ids = await store.listIdsByScope('*');
+    expect(ids).toHaveLength(2);
+  });
+
   it('listByScope wildcard scope still filters by userId', async () => {
     await store.insert({ ...sampleItem, scope: 'project-a', userId: 'alice' });
     await store.insert({ ...sampleItem, scope: 'project-b', contentHash: 'bbbbbbbbbbbbbbbb', userId: 'bob' });

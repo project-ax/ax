@@ -5,6 +5,16 @@ import { safePath } from '../../../utils/safe-path.js';
 import { DEFAULT_CATEGORIES } from './types.js';
 
 /**
+ * Resolve the summary directory for a given userId.
+ * Shared (agent-wide) summaries live in memoryDir directly.
+ * User-scoped summaries live in memoryDir/users/<userId>/.
+ */
+function summaryDir(memoryDir: string, userId?: string): string {
+  if (!userId) return memoryDir;
+  return safePath(safePath(memoryDir, 'users'), userId);
+}
+
+/**
  * Write a category summary .md file atomically (temp -> rename).
  *
  * Uses safePath() for all path construction to prevent traversal.
@@ -14,9 +24,11 @@ export async function writeSummary(
   memoryDir: string,
   category: string,
   content: string,
+  userId?: string,
 ): Promise<void> {
-  const filePath = safePath(memoryDir, `${category}.md`);
-  await mkdir(memoryDir, { recursive: true });
+  const dir = summaryDir(memoryDir, userId);
+  const filePath = safePath(dir, `${category}.md`);
+  await mkdir(dir, { recursive: true });
   const tmpPath = `${filePath}.${randomUUID()}.tmp`;
   await writeFile(tmpPath, content, 'utf-8');
   await rename(tmpPath, filePath);
@@ -28,8 +40,9 @@ export async function writeSummary(
 export async function readSummary(
   memoryDir: string,
   category: string,
+  userId?: string,
 ): Promise<string | null> {
-  const filePath = safePath(memoryDir, `${category}.md`);
+  const filePath = safePath(summaryDir(memoryDir, userId), `${category}.md`);
   try {
     return await readFile(filePath, 'utf-8');
   } catch {

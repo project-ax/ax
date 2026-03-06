@@ -571,8 +571,8 @@ describe('recallMemoryForMessage', () => {
     // Should return the keyword result
     expect(result).toHaveLength(2);
     expect(result[0].content).toContain('keyword fallback');
-    // Should log a warning about empty embedding results
-    expect(silentLogger.warn).toHaveBeenCalledWith(
+    // Should log info about empty embedding results falling through to keyword
+    expect(silentLogger.info).toHaveBeenCalledWith(
       'memory_recall_embedding_empty',
       expect.objectContaining({ fallback: 'keyword' }),
     );

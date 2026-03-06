@@ -105,8 +105,9 @@ async function updateCategorySummary(
   memoryDir: string,
   category: string,
   newItems: string[],
+  userId?: string,
 ): Promise<void> {
-  const existing = await readSummary(memoryDir, category) || `# ${category}\n`;
+  const existing = await readSummary(memoryDir, category, userId) || `# ${category}\n`;
   const prompt = buildSummaryPrompt({
     category,
     originalContent: existing,
@@ -115,7 +116,7 @@ async function updateCategorySummary(
   });
   const raw = await llmComplete(llm, prompt);
   const updated = stripCodeFences(raw);
-  await writeSummary(memoryDir, category, updated);
+  await writeSummary(memoryDir, category, updated, userId);
 }
 
 export async function create(config: Config, _name?: string, opts?: CreateOptions): Promise<MemoryProvider> {
@@ -255,15 +256,20 @@ export async function create(config: Config, _name?: string, opts?: CreateOption
       });
 
       // Store embedding — reuse precomputed vector if available
-      if (precomputedVector) {
-        await embeddingStore.upsert(id, scope, precomputedVector, entry.userId);
-      } else {
-        await embedItem(id, entry.content, scope, embeddingStore, embeddingClient);
+      try {
+        if (precomputedVector) {
+          await embeddingStore.upsert(id, scope, precomputedVector, entry.userId);
+        } else {
+          await embedItem(id, entry.content, scope, embeddingStore, embeddingClient);
+        }
+      } catch (err) {
+        logger.warn('write_embedding_failed', { id, error: (err as Error).message });
       }
 
-      // Update summary via LLM (fire-and-forget) — summaries stay agent-wide
+      // Update summary via LLM (fire-and-forget).
+      // User-scoped writes go to data/memory/users/<userId>/, shared writes to data/memory/.
       if (llm) {
-        updateCategorySummary(llm, memoryDir, 'knowledge', [entry.content]).catch(err =>
+        updateCategorySummary(llm, memoryDir, 'knowledge', [entry.content], entry.userId).catch(err =>
           logger.warn('write_summary_update_failed', { error: (err as Error).message }),
         );
       }
@@ -379,16 +385,22 @@ export async function create(config: Config, _name?: string, opts?: CreateOption
         }
       }
 
-      // Step 3: Update category summaries via LLM — summaries stay agent-wide
+      // Step 3: Update category summaries via LLM.
+      // User-scoped items go to data/memory/users/<userId>/, shared to data/memory/.
       for (const [category, newContents] of newItemsByCategory) {
-        await updateCategorySummary(llm, memoryDir, category, newContents);
+        await updateCategorySummary(llm, memoryDir, category, newContents, userId);
       }
 
       // Step 4: Generate and store embeddings for new items
       if (newItems.length > 0 && embeddingClient.available) {
-        const vectors = await embeddingClient.embed(newItems.map(i => i.content));
-        for (let i = 0; i < newItems.length; i++) {
-          await embeddingStore.upsert(newItems[i].id, newItems[i].scope, vectors[i], userId);
+        try {
+          const vectors = await embeddingClient.embed(newItems.map(i => i.content));
+          await Promise.all(
+            newItems.map((item, i) =>
+              embeddingStore.upsert(item.id, item.scope, vectors[i], userId)),
+          );
+        } catch (err) {
+          logger.warn('memorize_embedding_failed', { error: (err as Error).message });
         }
       }
     },

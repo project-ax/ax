@@ -3,6 +3,14 @@ import { randomUUID } from 'node:crypto';
 import { sql, type Kysely } from 'kysely';
 import type { CortexItem } from './types.js';
 
+/** Wildcard sentinel — means "all scopes", not a SQL pattern. */
+export const SCOPE_WILDCARD = '*';
+
+/** True when scope requires an exact-match SQL filter (not wildcard/empty). */
+function isExactScope(scope: string): boolean {
+  return !!scope && scope !== SCOPE_WILDCARD;
+}
+
 export class ItemsStore {
   constructor(private db: Kysely<any>) {}
 
@@ -76,8 +84,11 @@ export class ItemsStore {
   async listByCategory(category: string, scope: string, limit?: number, userId?: string): Promise<CortexItem[]> {
     let query = this.db.selectFrom('items')
       .selectAll()
-      .where('category', '=', category)
-      .where('scope', '=', scope);
+      .where('category', '=', category);
+
+    if (isExactScope(scope)) {
+      query = query.where('scope', '=', scope);
+    }
 
     if (userId) {
       query = query.where(eb =>
@@ -98,8 +109,7 @@ export class ItemsStore {
     let query = this.db.selectFrom('items')
       .selectAll();
 
-    // Wildcard scope '*' matches all scopes; otherwise exact match
-    if (scope && scope !== '*') {
+    if (isExactScope(scope)) {
       query = query.where('scope', '=', scope);
     }
 
@@ -123,11 +133,15 @@ export class ItemsStore {
   }
 
   async getAllForCategory(category: string, scope: string): Promise<CortexItem[]> {
-    const rows = await this.db.selectFrom('items')
+    let query = this.db.selectFrom('items')
       .selectAll()
-      .where('category', '=', category)
-      .where('scope', '=', scope)
-      .orderBy('created_at', 'asc')
+      .where('category', '=', category);
+
+    if (isExactScope(scope)) {
+      query = query.where('scope', '=', scope);
+    }
+
+    const rows = await query.orderBy('created_at', 'asc')
       .execute();
     return rows.map(r => this.rowToItem(r as Record<string, unknown>));
   }
@@ -136,8 +150,7 @@ export class ItemsStore {
     let q = this.db.selectFrom('items')
       .selectAll();
 
-    // Wildcard scope '*' matches all scopes; otherwise exact match
-    if (scope && scope !== '*') {
+    if (isExactScope(scope)) {
       q = q.where('scope', '=', scope);
     }
 
@@ -163,10 +176,14 @@ export class ItemsStore {
   }
 
   async listIdsByScope(scope: string): Promise<string[]> {
-    const rows = await this.db.selectFrom('items')
-      .select('id')
-      .where('scope', '=', scope)
-      .execute();
+    let query = this.db.selectFrom('items')
+      .select('id');
+
+    if (isExactScope(scope)) {
+      query = query.where('scope', '=', scope);
+    }
+
+    const rows = await query.execute();
     return rows.map(r => r.id as string);
   }
 
