@@ -15,7 +15,7 @@ namespace:
   name: ax
 
 global:
-  imageRegistry: ""
+  imageRegistry: "ghcr.io/project-ax"
   imageTag: ""
   imagePullSecrets: []
 
