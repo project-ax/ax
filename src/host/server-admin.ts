@@ -140,7 +140,7 @@ export function createAdminHandler(deps: AdminDeps) {
   // Auto-generate token if not configured
   if (!deps.config.admin.token) {
     deps.config.admin.token = randomBytes(32).toString('hex');
-    logger.info('admin_token_generated');
+    logger.info('admin_token_generated', { token: deps.config.admin.token });
   }
 
   const token = deps.config.admin.token!;
