@@ -14,6 +14,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
 COPY dist/ ./dist/
+COPY src/admin-ui/ ./src/admin-ui/
 COPY templates/ ./templates/
 COPY skills/ ./skills/
 
