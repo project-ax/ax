@@ -2,6 +2,14 @@
 
 Architecture analysis, gap analysis, design documents, implementation plans.
 
+## [2026-03-08 12:00] — Design doc: Three-Tier Sandbox Architecture (WASM, Containers, K8s)
+
+**Task:** Create a final design document capturing recommendations from conversation about WASM sandboxing for AX
+**What I did:** Wrote comprehensive design doc covering: three-tier execution model (WASM for lightweight commands <1ms, containers for full shell 50-500ms, K8s pods for cloud 1-5s), WASI filesystem preopens mapping to canonical paths, tier selection algorithm with shell metacharacter detection and automatic fallback, security analysis comparing attack surfaces across tiers, and the key architectural decision that WASM runs individual commands (not agents) so IPC sockets aren't needed. Referenced existing canonical-paths.ts, sandbox providers, K8s architecture doc, and security hardening spec.
+**Files touched:** docs/plans/2026-03-08-three-tier-sandbox-architecture.md (new)
+**Outcome:** Success — design document written
+**Notes:** Key insight: WASM plugs into sandbox_bash IPC handler as an optimization, NOT as a new SandboxProvider. Agent doesn't know which tier executed its command. WASI preopens provide mathematically stronger filesystem isolation than namespace-based containers (defense by absence vs defense by policy).
+
 ## [2026-03-06 14:00] — Design plan: K8s Helm presets + ax k8s init CLI
 
 **Task:** Evaluate whether to build a K8s operator for AX, and design a simpler alternative
