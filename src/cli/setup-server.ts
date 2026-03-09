@@ -38,7 +38,7 @@ const MIME_TYPES: Record<string, string> = {
 function resolveAdminUIDir(): string {
   const devDir = resolve(import.meta.dirname, '../admin-ui');
   if (existsSync(devDir)) return devDir;
-  const distDir = resolve(import.meta.dirname, '../../src/admin-ui');
+  const distDir = resolve(import.meta.dirname, '../../dist/admin-ui');
   if (existsSync(distDir)) return distDir;
   return devDir;
 }
