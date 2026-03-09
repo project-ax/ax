@@ -1,7 +1,7 @@
 // tests/cli/k8s-init.test.ts
 import { describe, it, expect, vi } from 'vitest';
 import { routeCommand } from '../../src/cli/index.js';
-import { parseArgs, generateValuesYaml } from '../../src/cli/k8s-init.js';
+import { parseArgs, generateValuesYaml, defaultWasmMode } from '../../src/cli/k8s-init.js';
 
 describe('CLI Router — k8s command', () => {
   it('should route k8s command with args', async () => {
@@ -47,6 +47,11 @@ describe('k8s init — parseArgs', () => {
     expect(opts.database).toBe('internal');
     expect(opts.namespace).toBe('prod');
     expect(opts.output).toBe('custom.yaml');
+  });
+
+  it('parses --wasm flag', () => {
+    const opts = parseArgs(['--wasm', 'shadow']);
+    expect(opts.wasm).toBe('shadow');
   });
 
   it('does not have --llm-provider or --embeddings-provider flags', () => {
@@ -138,6 +143,89 @@ describe('k8s init — generateValuesYaml', () => {
     });
     expect(yaml).toContain('postgresql:');
     expect(yaml).toContain('nats:');
+  });
+});
+
+describe('k8s init — defaultWasmMode', () => {
+  it('returns enabled for small preset', () => {
+    expect(defaultWasmMode('small')).toBe('enabled');
+  });
+
+  it('returns shadow for medium preset', () => {
+    expect(defaultWasmMode('medium')).toBe('shadow');
+  });
+
+  it('returns enabled for large preset', () => {
+    expect(defaultWasmMode('large')).toBe('enabled');
+  });
+
+  it('returns disabled for unknown preset', () => {
+    expect(defaultWasmMode('')).toBe('disabled');
+    expect(defaultWasmMode('custom')).toBe('disabled');
+  });
+});
+
+describe('k8s init — WASM values generation', () => {
+  it('includes wasm config when mode is enabled', () => {
+    const yaml = generateValuesYaml({
+      preset: 'small',
+      model: 'anthropic/claude-sonnet-4-20250514',
+      database: 'internal',
+      wasm: 'enabled',
+    });
+    expect(yaml).toContain('wasm:');
+    expect(yaml).toContain('enabled: true');
+    expect(yaml).toContain('shadow_mode: false');
+  });
+
+  it('includes wasm config when mode is shadow', () => {
+    const yaml = generateValuesYaml({
+      preset: 'medium',
+      model: 'anthropic/claude-sonnet-4-20250514',
+      database: 'internal',
+      wasm: 'shadow',
+    });
+    expect(yaml).toContain('wasm:');
+    expect(yaml).toContain('enabled: false');
+    expect(yaml).toContain('shadow_mode: true');
+  });
+
+  it('omits wasm config when mode is disabled', () => {
+    const yaml = generateValuesYaml({
+      preset: 'small',
+      model: 'anthropic/claude-sonnet-4-20250514',
+      database: 'internal',
+      wasm: 'disabled',
+    });
+    expect(yaml).not.toContain('wasm:');
+    expect(yaml).not.toContain('shadow_mode');
+  });
+
+  it('uses preset default when wasm is not specified', () => {
+    const yaml = generateValuesYaml({
+      preset: 'medium',
+      model: 'anthropic/claude-sonnet-4-20250514',
+      database: 'internal',
+    });
+    // medium preset defaults to shadow mode
+    expect(yaml).toContain('wasm:');
+    expect(yaml).toContain('enabled: false');
+    expect(yaml).toContain('shadow_mode: true');
+  });
+
+  it('wasm config is inside the config block (indented)', () => {
+    const yaml = generateValuesYaml({
+      preset: 'small',
+      model: 'anthropic/claude-sonnet-4-20250514',
+      database: 'internal',
+      wasm: 'enabled',
+    });
+    // wasm should appear between config: block and apiCredentials:
+    const configIdx = yaml.indexOf('config:');
+    const wasmIdx = yaml.indexOf('  wasm:');
+    const apiCredIdx = yaml.indexOf('apiCredentials:');
+    expect(wasmIdx).toBeGreaterThan(configIdx);
+    expect(wasmIdx).toBeLessThan(apiCredIdx);
   });
 });
 

@@ -46,6 +46,9 @@ config:
   sandbox:
     timeout_sec: 120
     memory_mb: 512
+  wasm:
+    enabled: false
+    shadow_mode: true
   scheduler:
     active_hours:
       start: "08:00"

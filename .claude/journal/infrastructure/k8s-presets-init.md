@@ -1,3 +1,17 @@
+## [2026-03-08 23:10] — Add WASM tier support to `ax k8s init`
+
+**Task:** Modify the k8s init wizard and values generation to support the new WASM sandbox tier.
+**What I did:**
+- Added `wasm` field to `InitOptions` and `--wasm` CLI flag (accepts `enabled`, `shadow`, `disabled`)
+- Added `defaultWasmMode()` function with preset-aware defaults: small=enabled, medium=shadow, large=enabled
+- Added WASM wizard step (step 6) with three choices: enabled, shadow, disabled
+- Updated `generateValuesYaml()` to emit `config.wasm.enabled` and `config.wasm.shadow_mode` inside the config block
+- Added `config.wasm` defaults to `charts/ax/values.yaml` (enabled: false, shadow_mode: true)
+- Added comprehensive tests: parseArgs --wasm, defaultWasmMode per preset, values generation for all three modes, YAML structure verification
+**Files touched:** `src/cli/k8s-init.ts`, `tests/cli/k8s-init.test.ts`, `charts/ax/values.yaml`
+**Outcome:** Success — all 2681 tests passing (210 test files).
+**Notes:** WASM config is omitted from generated values when mode is `disabled` (chart defaults handle it). When mode is `enabled` or `shadow`, explicit config is written inside the `config:` block to override chart defaults.
+
 ## [2026-03-06 15:10] — FIX-2: Consolidate embeddings API key into single k8s secret
 
 **Task:** Fix cortex acceptance test FIX-2 — DeepInfra embedding API key missing from k8s secrets
