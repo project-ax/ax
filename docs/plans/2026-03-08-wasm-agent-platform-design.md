@@ -221,9 +221,16 @@ Worker Pod (Node.js process)
   │   └── Persistent connections to ax-host-proxy ClusterIP
   │       Used by all WASM sandboxes for LLM calls
   │
+  ├── WASM Tool Executor (pooled Wasmtime instances)
+  │   ├── Pre-compiled: ripgrep, coreutils, diff, sqlite, git-readonly
+  │   ├── Pre-compiled: python.wasm (CPython 3.11+), quickjs.wasm (ES2023)
+  │   ├── Per-call: memory limits, FS caps (workspace), fuel metering
+  │   └── Handles ~90% of tool calls without container dispatch
+  │
   ├── WASM Sandbox Manager
   │   ├── Instantiate sandbox for new session
   │   ├── Route WASI-HTTP calls to proxy or IPC
+  │   ├── Route tool calls to WASM Tool Executor or container fallback
   │   ├── Manage per-sandbox virtual filesystem
   │   ├── Enforce resource limits (memory, CPU time, wall time)
   │   └── Tear down sandbox on session completion
@@ -255,13 +262,19 @@ Worker Pod (Node.js process)
       → Proxy injects credentials, forwards to api.anthropic.com
       → SSE response streams back through proxy → host runtime → sandbox
 
-   b. LLM responds with tool_use (e.g., bash)
+   b. LLM responds with tool_use (e.g., grep, bash)
 
-   c. Agent calls bash tool:
+   c. Agent calls tool:
       → Host runtime intercepts tool call
-      → NATS request to ipc.request.{sessionId}
-      → Host pod handles (or dispatches to sandbox pod for bash)
-      → Response via NATS reply
+      → If WASM tool available (ripgrep, coreutils, diff, sqlite,
+         git-readonly, python, quickjs):
+         → Execute pre-compiled WASM module in pooled Wasmtime instance
+         → Per-call isolation: memory limit, FS caps, fuel metering
+         → Result returned directly (~microseconds overhead)
+      → Else (complex bash, npm test, etc.):
+         → NATS request to ipc.request.{sessionId}
+         → Host pod dispatches to sandbox container pod
+         → Response via NATS reply
 
    d. Agent makes another LLM call with tool result
       → Same HTTP path as step 5a
@@ -279,7 +292,42 @@ Worker Pod (Node.js process)
 
 ### Bash/File Tool Execution
 
-WASM sandboxes can't execute arbitrary bash commands (no syscall access). Two options:
+WASM sandboxes can't run arbitrary bash commands (no syscall access). We address this with a two-tier strategy: a WASM Tool Executor for the fast path (~90% of tool calls), and a container fallback for the rest.
+
+#### Tier 1: WASM Tool Executor (Fast Path)
+
+Pre-compiled WASM modules for the tools agents use most. These run inside the same Wasmtime pooling allocator as the agent sandbox — microsecond cold starts, per-call isolation, no container overhead.
+
+```
+WASM Tool Executor (Wasmtime, pooled)
+
+  Pre-compiled modules:
+  - ripgrep.wasm         — file content search (rg)
+  - coreutils.wasm       — cat, ls, head, tail, wc, sort, etc.
+  - diff.wasm            — unified diff
+  - sqlite.wasm          — query databases
+  - git-readonly.wasm    — log, diff, blame, show (read-only git ops)
+  - python.wasm          — CPython 3.11+ WASI build (pure Python scripts)
+  - quickjs.wasm         — QuickJS ES2023 (lightweight JS execution)
+
+  Per-call isolation:
+  - Memory limits         — per-module caps, OOM = clean termination
+  - FS capabilities       — scoped to workspace directory only
+  - No network            — WASI sockets denied
+  - CPU fuel metering     — bounded execution time per invocation
+```
+
+**Why these tools:** Analysis of agent tool usage shows ~90% of calls are file search, file read, diff, git queries, and short Python/JS scripts. These are all pure computation over file I/O — exactly what WASI Preview 1 handles today.
+
+**Python (python.wasm):** CPython 3.11+ has official WASI build support. Covers data munging, JSON/YAML manipulation, text processing, config generation. Full standard library (`os.path`, `json`, `re`, `csv`, `sqlite3`, `pathlib`). Does NOT support C extensions (no numpy/pandas), pip install, subprocess, or networking. Pre-warm the CPython module since initialization is heavier than other tools.
+
+**JavaScript (quickjs.wasm):** QuickJS compiled to WASI. ES2023 support, ~1-2MB module size, near-instant instantiation. Covers JSON processing, text manipulation, simple automation. Does NOT support Node.js APIs, npm packages, or JIT compilation (interpreter only — fine for short scripts).
+
+**Not WASIX:** We considered WASIX (Wasmer's POSIX extension) which adds `fork()`/`exec()` to run arbitrary bash inside WASM. We rejected it because: (1) vendor lock-in to Wasmer runtime, (2) immature `fork()` implementation, (3) re-introduces the process-spawning attack surface that WASM eliminates, (4) poor compatibility with real-world tools that expect full Linux ABI.
+
+#### Tier 2: Container Fallback (Long Tail)
+
+For the remaining ~10% of tool calls that need a full Linux environment:
 
 **Option A: Sidecar execution container**
 
@@ -287,17 +335,18 @@ Each worker pod has a sidecar container with bash/coreutils. Tool calls are disp
 
 **Option B: Keep sandbox pods for bash (hybrid)**
 
-WASM handles the agent conversation loop (lightweight, instant start). When the agent needs bash/file tools, dispatch to a sandbox pod via NATS (same as the container architecture). This means:
+WASM handles the agent conversation loop (lightweight, instant start). When the agent needs tools that aren't covered by the WASM Tool Executor, dispatch to a sandbox pod via NATS (same as the container architecture). This means:
 - Agent loop: WASM sandbox (fast, cheap)
-- Code execution: Linux container sandbox (when needed, per-turn affinity)
+- WASM tools: ripgrep, coreutils, diff, sqlite, git-readonly, python, quickjs (fast, in-process)
+- Full code execution: Linux container sandbox (when needed, per-turn affinity)
 
-This is a good middle ground — most conversations don't use bash at all, and we avoid the complexity of running bash inside WASM.
+Most tool calls are handled by WASM modules with zero container overhead. We only spin up containers for complex operations (running `npm test`, shell pipelines, C-extension-dependent Python, Node.js with npm packages, etc.).
 
 **Option C: WASI process model (future)**
 
 WASI Preview 3 may include a process model that allows spawning subprocesses. When available, this would let the WASM sandbox run bash directly, with the host runtime controlling which binaries are available.
 
-**Recommendation: Option B for now, migrate to C when WASI matures.**
+**Recommendation: Tier 1 (WASM Tool Executor) for the fast path. Option B for the Tier 2 container fallback. Migrate Tier 2 to Option C when WASI matures.**
 
 ## Security Model
 
