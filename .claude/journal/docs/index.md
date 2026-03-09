@@ -4,6 +4,8 @@ Documentation, plans, architecture docs, website updates, GitHub Pages.
 
 ## Entries
 
+- 2026-03-08 20:41 — Harden unified WASM sandbox plan against current AX seams [plans.md](plans.md)
+- 2026-03-08 20:23 — Review and consolidate WASM sandbox architecture plans [plans.md](plans.md)
 - 2026-03-08 14:08 — Specify concrete Wasm hostcall ABI for capsules [plans.md](plans.md)
 - 2026-03-08 13:39 — Design hybrid Wasm + pod sandbox strategy for GKE Autopilot [plans.md](plans.md)
 - 2026-03-05 22:30 — Add Kubernetes deployment instructions to README.md [website.md](website.md)

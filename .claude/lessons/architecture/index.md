@@ -4,6 +4,7 @@ Design patterns, provider contracts, import hygiene, event bus design, and works
 
 ## Entries
 
+- Anchor fast-path designs at the existing IPC seam [entries.md](entries.md)
 - Prefer structural layout fixes over runtime workarounds [entries.md](entries.md)
 - Provider contract pattern IS the plugin framework — packaging is the missing piece [entries.md](entries.md)
 - Cross-provider imports should go through shared-types.ts, not sibling directories [entries.md](entries.md)

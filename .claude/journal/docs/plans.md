@@ -2,6 +2,30 @@
 
 Architecture analysis, gap analysis, design documents, implementation plans.
 
+## [2026-03-08 22:00] — Produce unified WASM sandbox architecture plan
+
+**Task:** Analyze two overlapping WASM design documents (autopilot fast sandbox + WASM agent platform), identify strengths/weaknesses, resolve tensions, and produce a single unified plan.
+**What I did:** Deep-read both design documents alongside the existing k8s compute architecture, security hardening spec, credential proxy plan, sandbox provider types, IPC client, and provider-map. Produced a comprehensive unified plan with 5 Architecture Decision Records resolving key tensions (agent loop location, tool tiering, security model, k8s architecture, routing design), detailed critiques of both original docs, a concrete 8-week implementation roadmap, risk analysis, and explicit lists of what to cut from each proposal.
+**Files touched:** docs/plans/2026-03-08-unified-wasm-sandbox-plan.md (new), .claude/journal/docs/plans.md (updated)
+**Outcome:** Success — unified plan resolves all identified tensions with opinionated, pragmatic decisions backed by codebase analysis.
+**Notes:** Core decision: WASM for tool execution only, agent stays native Node.js. Takes autopilot doc's hostcall API + security model, platform doc's k8s topology + HTTP proxy insight. Cuts agent-in-WASM, three-lane routing, signed capability tokens, python.wasm/quickjs.wasm from initial scope.
+
+## [2026-03-08 20:41] — Harden unified WASM sandbox plan against current AX seams
+
+**Task:** Review `docs/plans/2026-03-08-unified-wasm-sandbox-plan.md`, critique implementation gaps, and improve the plan so it matches the current AX architecture.
+**What I did:** Cross-checked the draft against the actual `sandbox_*` IPC actions, `createSandboxToolHandlers()`, the NATS sandbox worker, provider-map/config blast radius, and the current credential + taint model. Rewrote the plan to anchor Tier 1 behind the existing sandbox IPC surface, deny raw WASI filesystem/HTTP in v1, add a k8s credential-boundary rollout gate, tighten fallback semantics, and add explicit parity/security/classifier/operational test requirements.
+**Files touched:** docs/plans/2026-03-08-unified-wasm-sandbox-plan.md (updated), .claude/journal/docs/plans.md (updated), .claude/journal/docs/index.md (updated), .claude/lessons/architecture/entries.md (updated), .claude/lessons/architecture/index.md (updated)
+**Outcome:** Success — plan is now grounded in AX's real host/IPC/sandbox seams instead of assuming new tools or looser security boundaries.
+**Notes:** Biggest correction: initial WASM scope must fit the current tool catalog (`bash`, `read_file`, `write_file`, `edit_file`) and should attach at the host-side sandbox handler seam before any provider-kind or tool-catalog expansion.
+
+## [2026-03-08 20:23] — Review and consolidate WASM sandbox architecture plans
+
+**Task:** Review `2026-03-08-autopilot-fast-sandbox-architecture.md` and `2026-03-08-wasm-agent-platform-design.md`, critique the tradeoffs, and produce a stronger final architecture direction.
+**What I did:** Compared both plans against the existing Kubernetes compute architecture, repository security invariants, and lessons learned. Identified where the hybrid fast-path plan is sound, where the full WASM-worker replacement overreaches, and synthesized a safer final direction: keep pod isolation for agent sessions, adopt the direct HTTP credential proxy first, and limit WASM to explicit deterministic tool capsules behind a routed execution policy.
+**Files touched:** docs/plans/2026-03-08-autopilot-fast-sandbox-architecture.md (reviewed), docs/plans/2026-03-08-wasm-agent-platform-design.md (reviewed), docs/plans/2026-03-04-k8s-agent-compute-architecture.md (reviewed), docs/plans/2026-02-10-credential-injecting-proxy.md (reviewed), .claude/journal/docs/plans.md (updated), .claude/journal/docs/index.md (updated)
+**Outcome:** Success — produced a concrete recommendation that preserves AX's pod-level trust boundary while still extracting the low-risk performance wins from the WASM proposals.
+**Notes:** Main recommendation is to treat "direct HTTP proxy" and "WASM fast-path tools" as separate workstreams, and to leave "WASM agent sessions" as a research track until there is a stronger threat model and compatibility proof.
+
 ## [2026-03-08 14:08] — Specify concrete Wasm hostcall ABI for capsules
 
 **Task:** Address feedback requesting implementation-level detail for running untrusted code in Wasm capsules.

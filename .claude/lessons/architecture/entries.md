@@ -1,5 +1,11 @@
 # Architecture
 
+### Anchor fast-path designs at the existing IPC seam
+**Date:** 2026-03-08
+**Context:** Reviewing the unified WASM sandbox plan against AX's current host, IPC, and sandbox implementation.
+**Lesson:** When proposing a new execution fast path, start from the existing agent-visible contract (`sandbox_bash`, `sandbox_read_file`, `sandbox_write_file`, `sandbox_edit_file`) and the real host-side dispatch seam (`createSandboxToolHandlers()`). Do not assume new tools, new IPC actions, or a new provider kind until the fast path is proven; otherwise the plan underestimates blast radius and drifts from the codebase.
+**Tags:** architecture, ipc, sandbox, wasm, tool-catalog, planning
+
 ### Provider-local migrations pattern for shared database connections
 **Date:** 2026-03-05
 **Context:** Refactoring 10+ standalone SQLite connections into a shared DatabaseProvider. Each subsystem (storage, audit, memory, scheduler, files, orchestration) needed its own tables.
