@@ -32,7 +32,7 @@ This creates a lot of moving parts for what is conceptually simple: "give the ag
 | Component | Before | After |
 |-----------|--------|-------|
 | Identity storage | `~/.ax/agents/<id>/agent/identity/*.md` files | `documents` table, collection='identity', key='<agentId>/<filename>' |
-| Skills storage | `~/.ax/agents/<id>/agent/skills/*.md` + user overlay | `documents` table, collection='skills', key='<agentId>/<filename>' for agent-level, key='<agentId>/users/<userId>/<filename>' for user-level |
+| Skills storage | `~/.ax/agents/<id>/agent/skills/*.md` + user overlay | `documents` table, collection='skills', key='<agentId>/<path>' for agent-level (path supports subdirectories, e.g. `ops/deploy`), key='<agentId>/users/<userId>/<path>' for user-level |
 | Identity loading | `identity-loader.ts` reads from filesystem via `readFileSync` | `identity-loader.ts` reads from stdin payload (host loads from DB, sends via stdin) |
 | Skills loading | `loadSkills()` reads `readdirSync` + `readFileSync` from mounted dir | Host loads from DB, sends merged skill list via stdin payload |
 | Skill merging | overlayfs (Linux) or fallback (macOS) | DB query with user-level keys shadowing agent-level keys |
@@ -69,9 +69,10 @@ interface AgentPayload {
     heartbeat: string;
   };
   skills: Array<{
-    name: string;
+    name: string;        // leaf name (e.g. 'deploy')
+    path: string;        // full relative path supporting subdirectories (e.g. 'ops/deploy')
     description: string;
-    content: string;   // full markdown content
+    content: string;     // full markdown content
     scope: 'agent' | 'user';
   }>;
 }
@@ -79,23 +80,50 @@ interface AgentPayload {
 
 #### Migration
 
-- On first boot after upgrade, scan `~/.ax/agents/*/agent/identity/*.md` and `~/.ax/agents/*/agent/skills/*.md` and import into DocumentStore
+- On first boot after upgrade, scan `~/.ax/agents/*/agent/identity/*.md` and recursively scan `~/.ax/agents/*/agent/skills/**/*.md` (preserving subdirectory structure in DB keys) and import into DocumentStore
 - Migration runs once, writes a `migrated_storage_v1` flag to DB
 - After migration, filesystem files become inert (not deleted, just ignored)
 
 #### Skill merge logic (replaces overlayfs)
 
 ```sql
--- Agent-level skills
+-- Agent-level skills (includes subdirectories via path-like keys)
 SELECT key, content FROM documents
 WHERE collection = 'skills' AND key LIKE '<agentId>/%' AND key NOT LIKE '<agentId>/users/%'
+-- e.g. key = 'main/deploy', 'main/ops/deploy-checklist', 'main/coding/python-style'
 
--- User-level skills (shadow agent-level by filename)
+-- User-level skills (shadow agent-level by matching relative path)
 SELECT key, content FROM documents
 WHERE collection = 'skills' AND key LIKE '<agentId>/users/<userId>/%'
+-- e.g. key = 'main/users/alice/ops/deploy-checklist' shadows 'main/ops/deploy-checklist'
 ```
 
-User-level skills with the same filename override agent-level. Pure DB query, no overlayfs.
+User-level skills with the same relative path override agent-level. The relative path is everything after `<agentId>/` (or `<agentId>/users/<userId>/`), and can include `/` for subdirectory nesting. Pure DB query, no overlayfs.
+
+#### Subdirectory support
+
+Skills keys use `/` as a logical path separator within the `key` column. This is purely a convention — the DB treats keys as opaque strings.
+
+```
+key format:  <agentId>/<relative-path>
+examples:    main/deploy
+             main/ops/deploy-checklist
+             main/coding/python-style
+             main/users/alice/ops/deploy-checklist   (user override)
+```
+
+**Listing skills in a "subdirectory":**
+```sql
+SELECT key FROM documents WHERE collection = 'skills' AND key LIKE 'main/ops/%';
+```
+
+**Migration:** The filesystem migration (Phase 1) must walk subdirectories recursively, preserving the relative path structure:
+```
+~/.ax/agents/main/agent/skills/ops/deploy-checklist.md
+  → collection='skills', key='main/ops/deploy-checklist'
+```
+
+**IPC:** The `skill_read` and `skill_propose` schemas accept the full relative path (e.g. `ops/deploy-checklist`), not just a flat filename. The host prepends `<agentId>/` when querying the DB.
 
 ### Phase 2: Drop File-Based StorageProvider
 

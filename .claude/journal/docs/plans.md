@@ -2,6 +2,14 @@
 
 Architecture analysis, gap analysis, design documents, implementation plans.
 
+## [2026-03-11 12:30] — Add subdirectory support to skills key scheme in storage plan
+
+**Task:** Update simplify-storage-architecture.md to explicitly support subdirectories in skill keys
+**What I did:** Updated skills key scheme to use path-like keys (e.g. `main/ops/deploy-checklist`), added `path` field to stdin payload, documented subdirectory listing queries, updated migration to recursively scan skill directories, updated merge logic to shadow by relative path
+**Files touched:** docs/plans/simplify-storage-architecture.md
+**Outcome:** Success — plan now documents subdirectory support as a first-class feature of DB-backed skills
+**Notes:** DB schema already supports this (key is opaque TEXT). The current filesystem code (`loadSkills`, `safePath`) would need changes but the plan is about the target architecture.
+
 ## [2026-03-11 12:00] — Clarify storage simplification plan for K8s and DB backends
 
 **Task:** Update simplify-storage-architecture.md to fix two inaccuracies
