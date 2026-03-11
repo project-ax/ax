@@ -2,6 +2,14 @@
 
 Architecture analysis, gap analysis, design documents, implementation plans.
 
+## [2026-03-11 12:00] — Clarify storage simplification plan for K8s and DB backends
+
+**Task:** Update simplify-storage-architecture.md to fix two inaccuracies
+**What I did:** (1) Changed "SQLite-only storage" to clarify that both SQLite and Postgres remain behind the StorageProvider contract — only the file-based backend is dropped. (2) Added deployment-specific callout to Phase 3 clarifying that K8s lightweight turns still route through agent-runtime pods, preserving the stateless host invariant.
+**Files touched:** docs/plans/simplify-storage-architecture.md
+**Outcome:** Success — plan now accurately reflects both deployment modes and DB backend flexibility
+**Notes:** Important to keep plan docs consistent with the K8s agent compute architecture decision from 2026-03-04.
+
 ## [2026-03-08 22:00] — Produce unified WASM sandbox architecture plan
 
 **Task:** Analyze two overlapping WASM design documents (autopilot fast sandbox + WASM agent platform), identify strengths/weaknesses, resolve tensions, and produce a single unified plan.

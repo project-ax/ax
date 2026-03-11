@@ -19,7 +19,7 @@ This creates a lot of moving parts for what is conceptually simple: "give the ag
 
 1. **DB as source of truth** for identity and skills (eliminates filesystem mounting)
 2. **Hybrid sandbox lifecycle** — lightweight for chat/web-fetch, full sandbox for code execution
-3. **SQLite-only storage** — drop the file-based StorageProvider
+3. **Drop the file-based StorageProvider** — the `DatabaseProvider` interface supports both SQLite (local/single-agent) and PostgreSQL (K8s/multi-tenant). This plan eliminates the *file-based* backend, not the choice of database engine. SQLite and Postgres remain interchangeable behind the `StorageProvider` contract.
 
 ## Architecture
 
@@ -117,6 +117,13 @@ User-level skills with the same filename override agent-level. Pure DB query, no
 
 **Goal:** Most turns don't need a sandbox at all. Only spawn one when the agent needs to execute code.
 
+> **Deployment-specific behavior:** This phase applies differently depending on the deployment mode.
+>
+> - **Local (single-user):** The host process handles lightweight turns directly — running LLM calls and IPC tools without spawning an agent process. This is the "fast path" described below.
+> - **K8s (multi-tenant):** Lightweight turns still route through `ax-agent-runtime` pods (per the [K8s agent compute architecture](2026-03-04-k8s-agent-compute-architecture.md)). The agent-runtime pod handles the LLM call and IPC tools — the host never runs LLM calls directly. The optimization here is that the agent-runtime pod skips sandbox creation for lightweight turns, not that we bypass agent-runtime entirely. This preserves the invariant that the host pod is stateless ingress only.
+>
+> In both modes, the **turn classification** and **session sandbox pool** logic are identical — the difference is only *where* the lightweight turn executes.
+
 #### Turn classification
 
 ```
@@ -124,14 +131,16 @@ Inbound message
     ↓
 Does this turn require code execution?
     ├─ NO  → "lightweight turn" (no sandbox)
+    │         Local:  host handles directly
+    │         K8s:    agent-runtime handles, no sandbox spawned
     └─ YES → "sandbox turn" (spawn or reuse session sandbox)
 ```
 
 **Lightweight turn (no sandbox):**
-- Host runs the LLM call directly (via proxy or LLM provider)
-- IPC tools (web fetch, memory, identity read/write, skills) handled host-side
+- LLM call runs directly (local: host process, K8s: agent-runtime pod)
+- IPC tools (web fetch, memory, identity read/write, skills) handled without sandbox
 - No filesystem workspace needed
-- Agent process not spawned — host acts as the agent
+- Agent sandbox process not spawned
 - Conversation history loaded from DB, response saved to DB
 
 **Sandbox turn (session-scoped sandbox):**
