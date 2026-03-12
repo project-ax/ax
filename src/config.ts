@@ -69,6 +69,7 @@ const ConfigSchema = z.strictObject({
   sandbox: z.strictObject({
     timeout_sec: z.number().int().min(1).max(3600),
     memory_mb: z.number().int().min(64).max(8192),
+    mode: z.enum(['always', 'auto', 'never']).optional().default('always'),
   }),
   scheduler: z.strictObject({
     active_hours: z.strictObject({

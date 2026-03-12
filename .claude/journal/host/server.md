@@ -2,6 +2,14 @@
 
 Server core, completions pipeline, file handling, bootstrap, admin gate, session management.
 
+## [2026-03-12 01:37] — Phase 3: Hybrid Sandbox Lifecycle infrastructure
+
+**Task:** Implement sandbox pool, turn classification, and config for hybrid sandbox lifecycle
+**What I did:** Integrated SandboxPool into server.ts (import, instantiation, passing to CompletionDeps, shutdown on server close). Created comprehensive tests for SandboxPool (add/get/remove lifecycle, idle eviction, shutdown, lastUsedAt updates) and needsSandbox turn classification. The sandbox.mode config, sandbox-pool.ts, and needsSandbox function were already implemented from a prior session.
+**Files touched:** src/host/server.ts (modified), tests/host/sandbox-pool.test.ts (created)
+**Outcome:** Success — all 206 test files pass (2392 tests), build clean
+**Notes:** This is infrastructure-only. Default mode is 'always' so no behavior change. The actual lightweight turn path (skipping sandbox) is future work.
+
 ## [2026-03-02 12:45] — Add HTTP bootstrap admin claiming to handleCompletions
 
 **Task:** Fix bug where the first HTTP user wasn't added to the admins file during bootstrap. The bootstrap admin claiming only existed in the channel handler (Slack, Discord), not in the HTTP completions path.

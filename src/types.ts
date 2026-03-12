@@ -91,6 +91,7 @@ export interface Config {
   sandbox: {
     timeout_sec: number;
     memory_mb: number;
+    mode?: 'always' | 'auto' | 'never';
   };
   scheduler: {
     active_hours: {

@@ -29,6 +29,7 @@ import { maybeSummarizeHistory, type SummarizationConfig } from './history-summa
 import { recallMemoryForMessage, type MemoryRecallConfig } from './memory-recall.js';
 import { createEmbeddingClient } from '../utils/embedding-client.js';
 import type { IdentityFiles, SkillSummary } from '../agent/prompt/types.js';
+import type { SandboxPool } from './sandbox-pool.js';
 
 // ── DB-backed identity/skills loading ──
 
@@ -150,6 +151,8 @@ export interface CompletionDeps {
   eventBus?: EventBus;
   /** Maps sessionId → workspace directory path. Shared with sandbox tool IPC handlers. */
   workspaceMap?: Map<string, string>;
+  /** Session-scoped sandbox pool for reusing sandboxes across turns. */
+  sandboxPool?: SandboxPool;
 }
 
 export interface ExtractedFile {
@@ -257,6 +260,19 @@ export function extractImageDataBlocks(
   return { blocks: converted, extractedFiles };
 }
 
+/**
+ * Classify whether a turn needs a full sandbox or can be handled as a
+ * lightweight turn (no sandbox). Based on agent type and config override.
+ */
+export function needsSandbox(config: Config): boolean {
+  const mode = config.sandbox.mode ?? 'always';
+  if (mode === 'always') return true;
+  if (mode === 'never') return false;
+  // 'auto': coding agents need sandbox, chat agents don't
+  const agentType = config.agent ?? 'pi-coding-agent';
+  return agentType === 'pi-coding-agent' || agentType === 'claude-code';
+}
+
 export async function processCompletion(
   deps: CompletionDeps,
   content: string | ContentBlock[],
@@ -271,6 +287,11 @@ export async function processCompletion(
   const { config, providers, db, conversationStore, router, taintBudget, sessionCanaries, ipcSocketPath, ipcSocketDir, logger, eventBus } = deps;
   const sessionId = preProcessed?.sessionId ?? randomUUID();
   const reqLogger = logger.child({ reqId: requestId.slice(-8) });
+
+  // Classify whether this turn needs a sandbox (infrastructure for future lightweight path)
+  const agentType = config.agent ?? 'pi-coding-agent';
+  const sandboxNeeded = needsSandbox(config);
+  reqLogger.debug('turn_classification', { sandboxNeeded, mode: config.sandbox.mode ?? 'always', agentType });
 
   // Extract text for scanning/logging; structured content may contain image refs
   const textContent = typeof content === 'string'
@@ -464,7 +485,6 @@ export async function processCompletion(
     //   → single process, source changes picked up without rebuilding.
     // Production: node dist/agent/runner.js
     //   → no tsx dependency, no extra process layers.
-    const agentType = config.agent ?? 'pi-coding-agent';
 
     // Start credential-injecting proxy for claude-code agents only.
     // claude-code talks to Anthropic directly via the proxy; all other agents

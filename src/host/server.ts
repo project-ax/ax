@@ -33,6 +33,7 @@ import { createOrchestrator, type Orchestrator } from './orchestration/orchestra
 import { sendError, sendSSEChunk, readBody } from './server-http.js';
 import type { OpenAIChatRequest, OpenAIChatResponse, OpenAIStreamChunk } from './server-http.js';
 import { processCompletion, type CompletionDeps } from './server-completions.js';
+import { SandboxPool } from './sandbox-pool.js';
 import { cleanStaleWorkspaces } from './server-lifecycle.js';
 import { runStorageMigration } from './storage-migration.js';
 import { ChannelDeduplicator, registerChannelHandler, connectChannelWithRetry } from './server-channels.js';
@@ -301,6 +302,9 @@ export async function createServer(
   // Populated by processCompletion() before agent spawn, consumed by sandbox tool IPC handlers.
   const workspaceMap = new Map<string, string>();
 
+  // Session-scoped sandbox pool: reuse sandboxes across turns for the same session.
+  const sandboxPool = new SandboxPool();
+
   // Deduplication
   const deduplicator = new ChannelDeduplicator({
     windowMs: opts.dedupeWindowMs,
@@ -326,6 +330,7 @@ export async function createServer(
     fileStore,
     eventBus,
     workspaceMap,
+    sandboxPool,
   };
 
   // Delegation callback: spawn a child agent via processCompletion with
@@ -1027,6 +1032,9 @@ export async function createServer(
       });
       httpServer = null;
     }
+
+    // Shut down sandbox pool — kill all pooled sandboxes, clear eviction timer
+    await sandboxPool.shutdown();
 
     // Stop orchestrator (disableAutoState first to unsubscribe event listener)
     disableAutoState();
