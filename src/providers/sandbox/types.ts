@@ -2,9 +2,7 @@
 
 export interface SandboxConfig {
   workspace: string;
-  skills: string;
   ipcSocket: string;
-  agentDir?: string;
   timeoutSec?: number;
   memoryMB?: number;
   command: string[];

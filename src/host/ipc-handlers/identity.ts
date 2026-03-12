@@ -24,6 +24,14 @@ export function createIdentityHandlers(providers: ProviderRegistry, opts: Identi
 
   return {
     identity_read: async (req: any, _ctx: IPCContext) => {
+      // Try DB first, fall back to filesystem
+      try {
+        const dbContent = await providers.storage.documents.get('identity', `${agentName}/${req.file}`);
+        if (dbContent !== undefined) {
+          return { content: dbContent, file: req.file };
+        }
+      } catch { /* fall through to filesystem */ }
+
       if (!agentDir) {
         return { content: '', file: req.file };
       }
@@ -84,20 +92,27 @@ export function createIdentityHandlers(providers: ProviderRegistry, opts: Identi
       }
 
       // 3. Auto-apply (balanced + clean, or yolo)
-      if (!agentDir) {
-        return { ok: false, error: 'agentDir not configured' };
+      // Write to filesystem if agentDir is available
+      if (agentDir) {
+        mkdirSync(agentDir, { recursive: true });
+        const filePath = join(agentDir, req.file);
+        writeFileSync(filePath, req.content, 'utf-8');
       }
-      mkdirSync(agentDir, { recursive: true });
-      const filePath = join(agentDir, req.file);
-      writeFileSync(filePath, req.content, 'utf-8');
+
+      // Also write to DocumentStore (DB) for the new DB-backed identity system
+      try {
+        await providers.storage.documents.put('identity', `${agentName}/${req.file}`, req.content);
+      } catch { /* non-fatal: DB write failure shouldn't block identity write */ }
 
       // Bootstrap completion: delete BOOTSTRAP.md and claim file once both SOUL.md and IDENTITY.md exist
       if ((req.file === 'SOUL.md' || req.file === 'IDENTITY.md') && !isAgentBootstrapMode(agentName)) {
         const configDir = agentIdentityDir(agentName);
         const topDir = agentDirPath(agentName);
         try { unlinkSync(join(configDir, 'BOOTSTRAP.md')); } catch { /* may not exist */ }
-        try { unlinkSync(join(agentDir, 'BOOTSTRAP.md')); } catch { /* may not exist — agent-readable copy */ }
+        try { unlinkSync(join(agentDir ?? '', 'BOOTSTRAP.md')); } catch { /* may not exist — agent-readable copy */ }
         try { unlinkSync(join(topDir, '.bootstrap-admin-claimed')); } catch { /* may not exist */ }
+        // Also clean up BOOTSTRAP.md in DB
+        try { await providers.storage.documents.delete('identity', `${agentName}/BOOTSTRAP.md`); } catch { /* non-fatal */ }
       }
 
       await providers.audit.log({
@@ -161,10 +176,15 @@ export function createIdentityHandlers(providers: ProviderRegistry, opts: Identi
         return { queued: true, reason: req.reason };
       }
 
-      // 3. Write to per-user dir
+      // 3. Write to per-user dir (filesystem)
       const userDir = agentUserDir(agentName, req.userId);
       mkdirSync(userDir, { recursive: true });
       writeFileSync(join(userDir, 'USER.md'), req.content, 'utf-8');
+
+      // Also write to DocumentStore (DB) for the new DB-backed identity system
+      try {
+        await providers.storage.documents.put('identity', `${agentName}/users/${req.userId}/USER.md`, req.content);
+      } catch { /* non-fatal: DB write failure shouldn't block user write */ }
 
       await providers.audit.log({
         action: 'user_write',

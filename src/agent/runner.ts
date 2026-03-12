@@ -7,6 +7,7 @@ import type {
 import { IPCClient } from './ipc-client.js';
 import { getLogger, truncate } from '../logger.js';
 import type { ContentBlock } from '../types.js';
+import type { IdentityFiles, SkillSummary } from './prompt/types.js';
 
 const logger = getLogger().child({ component: 'runner' });
 
@@ -54,6 +55,10 @@ export interface AgentConfig {
   userWorkspace?: string;
   /** USER_BOOTSTRAP.md content from host (not in sandbox mount). */
   userBootstrapContent?: string;
+  /** Preloaded identity files from DB (via stdin payload). */
+  preloadedIdentity?: Partial<IdentityFiles>;
+  /** Preloaded skill summaries from DB (via stdin payload). */
+  preloadedSkills?: SkillSummary[];
 }
 
 /** Sanitize a sender name: only alphanumeric, underscore, dot, dash; max 100 chars. */
@@ -194,8 +199,9 @@ function parseArgs(): AgentConfig {
     }
   }
 
-  // Workspace, skills, and agentDir are set via canonical env vars by the sandbox
-  // provider (e.g. AX_WORKSPACE=/workspace). No CLI arg fallback.
+  // Workspace is set via canonical env var by the sandbox provider
+  // (e.g. AX_WORKSPACE=/workspace). No CLI arg fallback.
+  // Identity and skills are received via stdin payload from DB.
   ipcSocket = ipcSocket || process.env.AX_IPC_SOCKET || '';
   const workspace = process.env.AX_WORKSPACE || '';
   const skills = process.env.AX_SKILLS || '';
@@ -244,6 +250,10 @@ export interface StdinPayload {
   userWorkspace?: string;
   /** USER_BOOTSTRAP.md content from host (not in sandbox mount). */
   userBootstrapContent?: string;
+  /** Preloaded identity files from DB. */
+  identity?: Partial<IdentityFiles>;
+  /** Preloaded skill summaries from DB. */
+  skills?: SkillSummary[];
 }
 
 /**
@@ -285,6 +295,9 @@ export function parseStdinPayload(data: string): StdinPayload {
         agentWorkspace: typeof parsed.agentWorkspace === 'string' ? parsed.agentWorkspace : undefined,
         userWorkspace: typeof parsed.userWorkspace === 'string' ? parsed.userWorkspace : undefined,
         userBootstrapContent: typeof parsed.userBootstrapContent === 'string' ? parsed.userBootstrapContent : undefined,
+        identity: parsed.identity && typeof parsed.identity === 'object' && !Array.isArray(parsed.identity)
+          ? parsed.identity as Partial<IdentityFiles> : undefined,
+        skills: Array.isArray(parsed.skills) ? parsed.skills as SkillSummary[] : undefined,
       };
     }
   } catch {
@@ -348,6 +361,8 @@ if (isMain) {
     config.agentWorkspace = process.env.AX_AGENT_WORKSPACE || payload.agentWorkspace;
     config.userWorkspace = process.env.AX_USER_WORKSPACE || payload.userWorkspace;
     config.userBootstrapContent = payload.userBootstrapContent;
+    config.preloadedIdentity = payload.identity;
+    config.preloadedSkills = payload.skills;
     return run(config);
   }).catch((err) => {
     logger.error('main_error', { error: (err as Error).message, stack: (err as Error).stack });

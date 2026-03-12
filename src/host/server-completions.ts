@@ -8,13 +8,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { isValidSessionId, workspaceDir, agentIdentityDir, agentWorkspaceDir, agentSkillsDir, userSkillsDir, userWorkspaceDir } from '../paths.js';
-import { mergeSkillsOverlay } from '../providers/sandbox/canonical-paths.js';
+import { isValidSessionId, workspaceDir, agentIdentityDir, agentWorkspaceDir, userWorkspaceDir } from '../paths.js';
 import type { Config, ProviderRegistry, ContentBlock, ImageMimeType } from '../types.js';
 import { safePath } from '../utils/safe-path.js';
 import type { InboundMessage } from '../providers/channel/types.js';
 import { deserializeContent } from '../utils/content-serialization.js';
-import type { ConversationStoreProvider, MessageQueueStore } from '../providers/storage/types.js';
+import type { ConversationStoreProvider, MessageQueueStore, DocumentStore } from '../providers/storage/types.js';
 import type { Router } from './router.js';
 import { TaintBudget, thresholdForProfile } from './taint-budget.js';
 import { type Logger, truncate } from '../logger.js';
@@ -29,6 +28,106 @@ import type { EventBus } from './event-bus.js';
 import { maybeSummarizeHistory, type SummarizationConfig } from './history-summarizer.js';
 import { recallMemoryForMessage, type MemoryRecallConfig } from './memory-recall.js';
 import { createEmbeddingClient } from '../utils/embedding-client.js';
+import type { IdentityFiles, SkillSummary } from '../agent/prompt/types.js';
+
+// ── DB-backed identity/skills loading ──
+
+/**
+ * Load identity files from the DocumentStore.
+ * Each file is stored as collection='identity', key='<agentId>/<filename>'.
+ * USER.md is stored per-user: key='<agentId>/users/<userId>/USER.md'.
+ */
+export async function loadIdentityFromDB(
+  documents: DocumentStore,
+  agentId: string,
+  userId: string,
+): Promise<Partial<IdentityFiles>> {
+  const result: Partial<IdentityFiles> = {};
+
+  const files: [keyof IdentityFiles, string][] = [
+    ['agents', 'AGENTS.md'],
+    ['soul', 'SOUL.md'],
+    ['identity', 'IDENTITY.md'],
+    ['bootstrap', 'BOOTSTRAP.md'],
+    ['userBootstrap', 'USER_BOOTSTRAP.md'],
+    ['heartbeat', 'HEARTBEAT.md'],
+  ];
+
+  for (const [field, fileName] of files) {
+    const content = await documents.get('identity', `${agentId}/${fileName}`);
+    if (content) result[field] = content;
+  }
+
+  // USER.md is per-user
+  const userContent = await documents.get('identity', `${agentId}/users/${userId}/USER.md`);
+  if (userContent) result.user = userContent;
+
+  return result;
+}
+
+/**
+ * Load skills from the DocumentStore, merging agent-level and user-level skills.
+ * Agent-level keys: '<agentId>/<path>' (but NOT '<agentId>/users/...')
+ * User-level keys: '<agentId>/users/<userId>/<path>' — shadow agent skills by relative path.
+ */
+export async function loadSkillsFromDB(
+  documents: DocumentStore,
+  agentId: string,
+  userId: string,
+): Promise<SkillSummary[]> {
+  const allKeys = await documents.list('skills');
+  const agentPrefix = `${agentId}/`;
+  const userPrefix = `${agentId}/users/${userId}/`;
+
+  // Build a map of relative path → content, agent-level first, user overrides on top
+  const skillMap = new Map<string, { content: string; scope: 'agent' | 'user' }>();
+
+  // Agent-level skills
+  for (const key of allKeys) {
+    if (key.startsWith(agentPrefix) && !key.startsWith(`${agentId}/users/`)) {
+      const relativePath = key.slice(agentPrefix.length);
+      const content = await documents.get('skills', key);
+      if (content) skillMap.set(relativePath, { content, scope: 'agent' });
+    }
+  }
+
+  // User-level skills (shadow agent-level by relative path)
+  for (const key of allKeys) {
+    if (key.startsWith(userPrefix)) {
+      const relativePath = key.slice(userPrefix.length);
+      const content = await documents.get('skills', key);
+      if (content) skillMap.set(relativePath, { content, scope: 'user' });
+    }
+  }
+
+  // Convert to SkillSummary[]
+  const skills: SkillSummary[] = [];
+  for (const [relativePath, { content }] of skillMap) {
+    const lines = content.split('\n');
+    let name = relativePath.replace(/\.md$/i, '');
+    let description = '';
+
+    for (const line of lines) {
+      const h1Match = line.match(/^#\s+(.+)/);
+      if (h1Match) {
+        name = h1Match[1].trim();
+        continue;
+      }
+      if (!description && line.trim() && !line.startsWith('#')) {
+        description = line.trim();
+        break;
+      }
+    }
+
+    skills.push({
+      name,
+      description: description || 'No description',
+      path: relativePath,
+    });
+  }
+
+  return skills;
+}
 
 // ── Agent spawn retry ──
 const MAX_AGENT_RETRIES = 2;
@@ -169,7 +268,7 @@ export async function processCompletion(
   replyOptional?: boolean,
   sessionScope?: 'dm' | 'channel' | 'thread' | 'group',
 ): Promise<CompletionResult> {
-  const { config, providers, db, conversationStore, router, taintBudget, sessionCanaries, ipcSocketPath, ipcSocketDir, agentDir, logger, eventBus } = deps;
+  const { config, providers, db, conversationStore, router, taintBudget, sessionCanaries, ipcSocketPath, ipcSocketDir, logger, eventBus } = deps;
   const sessionId = preProcessed?.sessionId ?? randomUUID();
   const reqLogger = logger.child({ reqId: requestId.slice(-8) });
 
@@ -255,17 +354,8 @@ export async function processCompletion(
   let workspace = '';
   const isPersistent = !!persistentSessionId;
   let proxyCleanup: (() => void) | undefined;
-  let skillsCleanup: (() => void) | undefined;
-  // Skills: merge agent-level and user-level skills via overlayfs.
-  // Agent skills form the lower layer; user skills shadow agent skills of the same name.
   const agentName = config.agent_name ?? 'main';
   const currentUserId = userId ?? process.env.USER ?? 'default';
-  const agentSkills = agentSkillsDir(agentName);
-  const userSkills = userSkillsDir(agentName, currentUserId);
-  mkdirSync(agentSkills, { recursive: true });
-  mkdirSync(userSkills, { recursive: true });
-  const skillsMerge = mergeSkillsOverlay(agentSkills, userSkills);
-  skillsCleanup = skillsMerge.cleanup;
   try {
     if (persistentSessionId) {
       workspace = workspaceDir(persistentSessionId);
@@ -416,9 +506,9 @@ export async function processCompletion(
 
     const maxTokens = config.max_tokens ?? 8192;
 
-    // Workspace/skills/agentDir are NOT passed as CLI args — they're set via
-    // canonical env vars by the sandbox provider (e.g. AX_WORKSPACE=/workspace).
-    // This avoids conflicts between host paths (CLI args) and canonical paths (env vars).
+    // Workspace is NOT passed as a CLI arg — it's set via canonical env vars
+    // by the sandbox provider (e.g. AX_WORKSPACE=/workspace).
+    // Identity and skills are sent via stdin payload from DB.
     const spawnCommand = [process.execPath,
       // Dev mode: load tsx ESM loader so the .ts runner source is compiled on
       // the fly. Production: run compiled dist/agent/runner.js directly.
@@ -455,6 +545,13 @@ export async function processCompletion(
       }
     } catch { /* non-fatal */ }
 
+    // Load identity files and skills from DB (DocumentStore) for the stdin payload.
+    // These are sent to the agent via stdin so no filesystem mount is needed.
+    let preloadedIdentity: Partial<IdentityFiles> | undefined;
+    let preloadedSkills: SkillSummary[] | undefined;
+    try { preloadedIdentity = await loadIdentityFromDB(providers.storage.documents, agentName, currentUserId); } catch { /* non-fatal */ }
+    try { preloadedSkills = await loadSkillsFromDB(providers.storage.documents, agentName, currentUserId); } catch { /* non-fatal */ }
+
     // Build stdin payload once — reused across retry attempts.
     const taintState = taintBudget.getState(sessionId);
     const stdinPayload = JSON.stringify({
@@ -474,6 +571,9 @@ export async function processCompletion(
       userWorkspace: enterpriseUserWs,
       // Identity content from config dir (not in sandbox mount)
       ...(userBootstrapContent ? { userBootstrapContent } : {}),
+      // Identity and skills from DB (sent to agent via stdin, no mount needed)
+      ...(preloadedIdentity && Object.keys(preloadedIdentity).length > 0 ? { identity: preloadedIdentity } : {}),
+      ...(preloadedSkills && preloadedSkills.length > 0 ? { skills: preloadedSkills } : {}),
     });
 
     // Spawn, run, and collect agent output — with retry on transient crashes.
@@ -481,9 +581,7 @@ export async function processCompletion(
     // Permanent: auth failures, bad config, content filter blocks.
     const sandboxConfig = {
       workspace,
-      skills: skillsMerge.mergedDir,
       ipcSocket: ipcSocketPath,
-      agentDir,
       timeoutSec: config.sandbox.timeout_sec,
       memoryMB: config.sandbox.memory_mb,
       command: spawnCommand,
@@ -776,12 +874,6 @@ export async function processCompletion(
     if (workspace && !isPersistent) {
       try { rmSync(workspace, { recursive: true, force: true }); } catch {
         reqLogger.debug('workspace_cleanup_failed', { workspace });
-      }
-    }
-    // Clean up overlayfs skills merge (unmount if applicable)
-    if (skillsCleanup) {
-      try { skillsCleanup(); } catch {
-        reqLogger.debug('skills_cleanup_failed');
       }
     }
   }

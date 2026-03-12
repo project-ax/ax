@@ -98,60 +98,42 @@ describe('seatbelt sandbox env isolation', () => {
     expect(source).not.toContain('TAVILY_API_KEY');
   });
 
-  test('seatbelt provider passes AGENT_DIR for identity file access', async () => {
+  test('seatbelt provider does not mount identity or skills (served via stdin)', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(resolve('src/providers/sandbox/seatbelt.ts'), 'utf-8');
 
-    // The seatbelt provider must pass AGENT_DIR so the agent can read
-    // identity files (BOOTSTRAP.md, SOUL.md, IDENTITY.md, etc.)
-    expect(source).toContain('AGENT_DIR');
-  });
-
-  test('seatbelt policy allows read access to AGENT_DIR', async () => {
-    const { readFileSync } = await import('node:fs');
-    const policy = readFileSync(resolve('policies/agent.sb'), 'utf-8');
-
-    // The policy must allow read access to the agent identity directory
-    expect(policy).toContain('AGENT_DIR');
-    expect(policy).toContain('(allow file-read*');
-    // Verify it's read-only (no file-write* for AGENT_DIR)
-    expect(policy).not.toMatch(/file-write\*.*AGENT_DIR/);
+    // Identity and skills are now served via stdin payload from DB,
+    // not mounted into the sandbox.
+    expect(source).not.toContain('AGENT_DIR');
+    expect(source).not.toContain('SKILLS');
   });
 });
 
-// ── Agent Dir Passed to All Sandbox Providers ────────────────────────
+// ── Identity/Skills Served via Stdin, Not Mounted ────────────────────
 
-describe('sandbox providers accept agentDir for identity files', () => {
-  test('server passes agentDir to sandbox.spawn()', async () => {
-    const { readFileSync } = await import('node:fs');
-    // processCompletion (and thus sandbox.spawn) is now in server-completions.ts
-    const source = readFileSync(resolve('src/host/server-completions.ts'), 'utf-8');
-
-    // processCompletion must include agentDir in the sandbox config
-    // (may be inline or via a separate sandboxConfig variable)
-    expect(source).toContain('agentDir');
-    expect(source).toMatch(/sandbox\.spawn/);
-  });
-
-  test('bwrap provider mounts agentDir read-only', async () => {
+describe('sandbox providers do not mount identity or skills (served via stdin)', () => {
+  test('bwrap provider does not reference agentDir or skills mounts', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(resolve('src/providers/sandbox/bwrap.ts'), 'utf-8');
-    expect(source).toContain('agentDir');
-    expect(source).toContain('--ro-bind');
+    expect(source).not.toContain('agentDir');
+    expect(source).not.toContain('SKILLS');
+    expect(source).not.toContain('AGENT_DIR');
   });
 
-  test('nsjail provider mounts agentDir read-only', async () => {
+  test('nsjail provider does not reference agentDir or skills mounts', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(resolve('src/providers/sandbox/nsjail.ts'), 'utf-8');
-    expect(source).toContain('agentDir');
-    expect(source).toContain('bindmount_ro');
+    expect(source).not.toContain('agentDir');
+    expect(source).not.toContain('SKILLS');
+    expect(source).not.toContain('AGENT_DIR');
   });
 
-  test('docker provider mounts agentDir read-only', async () => {
+  test('docker provider does not reference agentDir or skills mounts', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(resolve('src/providers/sandbox/docker.ts'), 'utf-8');
-    expect(source).toContain('agentDir');
-    expect(source).toMatch(/:ro/);
+    expect(source).not.toContain('agentDir');
+    expect(source).not.toContain('SKILLS');
+    expect(source).not.toContain('AGENT_DIR');
   });
 });
 
@@ -172,18 +154,16 @@ describe('subprocess sandbox env leak (dev-only fallback)', () => {
 
   test('subprocess sandbox adds AX_ env vars with canonical symlink paths', async () => {
     // Verify subprocess actually spawns with the right env by running a real process.
-    // With canonical paths, AX_WORKSPACE and AX_SKILLS point to symlinks under /tmp/.ax-mounts-*/
+    // Identity and skills are now served via stdin, so AX_SKILLS is no longer set.
     const { mkdirSync, rmSync } = await import('node:fs');
     const ws = '/tmp/test-ws-' + process.pid;
     mkdirSync(ws, { recursive: true });
-    mkdirSync(ws + '/skills', { recursive: true });
     try {
     const provider = await createSubprocess(mockConfig);
     const proc = await provider.spawn({
       workspace: ws,
-      skills: ws + '/skills',
       ipcSocket: '/tmp/test-ipc.sock',
-      command: ['node', '-e', 'console.log(JSON.stringify({ipc:process.env.AX_IPC_SOCKET,ws:process.env.AX_WORKSPACE,sk:process.env.AX_SKILLS}))'],
+      command: ['node', '-e', 'console.log(JSON.stringify({ipc:process.env.AX_IPC_SOCKET,ws:process.env.AX_WORKSPACE}))'],
       timeoutSec: 5,
     });
 
@@ -195,9 +175,8 @@ describe('subprocess sandbox env leak (dev-only fallback)', () => {
 
     const env = JSON.parse(output.trim());
     expect(env.ipc).toBe('/tmp/test-ipc.sock');
-    // AX_WORKSPACE is now the mount root, AX_SKILLS is under mount root
+    // AX_WORKSPACE is the mount root (symlink dir under /tmp)
     expect(env.ws).toMatch(/\/tmp\/\.ax-mounts-[a-f0-9]+$/);
-    expect(env.sk).toMatch(/\/tmp\/\.ax-mounts-[a-f0-9]+\/skills$/);
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }
@@ -282,8 +261,10 @@ describe('server workspace isolation', () => {
     expect(spawnSection).not.toContain("'--skills'");
     expect(spawnSection).not.toContain("'--agent-dir'");
 
-    // Skills dir is the merged overlayfs of agent + user skills.
-    expect(source).toContain("skills: skillsMerge.mergedDir");
+    // Skills and identity are now loaded from DB and sent via stdin payload,
+    // not mounted via overlay filesystem.
+    expect(source).not.toContain("skillsMerge");
+    expect(source).not.toContain("mergeSkillsOverlay");
 
     // Must NOT have temp dir creation or copy logic for skills
     expect(source).not.toContain("wsSkillsDir");

@@ -31,11 +31,12 @@ export interface PromptBuildResult {
  * → no HeartbeatModule → no scheduler tools).
  */
 export function buildSystemPrompt(config: AgentConfig): PromptBuildResult {
-  const skills = loadSkills(config.skills);
+  const skills = config.preloadedSkills ? loadSkills(config.preloadedSkills) : loadSkills(config.skills);
   const identityFiles = loadIdentityFiles({
     agentDir: config.agentDir,
     userId: config.userId,
     userBootstrapContent: config.userBootstrapContent,
+    preloaded: config.preloadedIdentity,
   });
 
   const hasWorkspaceTiers = !!(config.agentWorkspace || config.userWorkspace);

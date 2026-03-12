@@ -173,13 +173,17 @@ function extractSkillMeta(content: string, filename: string): { name: string; de
  * Read markdown skill files from a directory, returning compact summaries
  * for progressive disclosure. The agent loads full content on demand via
  * `skill_read`.
+ *
+ * Also accepts pre-loaded SkillSummary[] (from DB via stdin payload),
+ * returning them as-is without filesystem access.
  */
-export function loadSkills(skillsDir: string): SkillSummary[] {
+export function loadSkills(skillsDirOrData: string | SkillSummary[]): SkillSummary[] {
+  if (Array.isArray(skillsDirOrData)) return skillsDirOrData;
   try {
-    return readdirSync(skillsDir)
+    return readdirSync(skillsDirOrData)
       .filter(f => f.endsWith('.md'))
       .map(f => {
-        const content = readFileSync(join(skillsDir, f), 'utf-8');
+        const content = readFileSync(join(skillsDirOrData, f), 'utf-8');
         const { name, description } = extractSkillMeta(content, f);
         return { name, description, path: f };
       });

@@ -34,6 +34,7 @@ import { sendError, sendSSEChunk, readBody } from './server-http.js';
 import type { OpenAIChatRequest, OpenAIChatResponse, OpenAIStreamChunk } from './server-http.js';
 import { processCompletion, type CompletionDeps } from './server-completions.js';
 import { cleanStaleWorkspaces } from './server-lifecycle.js';
+import { runStorageMigration } from './storage-migration.js';
 import { ChannelDeduplicator, registerChannelHandler, connectChannelWithRetry } from './server-channels.js';
 import { initTracing, shutdownTracing } from '../utils/tracing.js';
 import { handleFileUpload, handleFileDownload } from './server-files.js';
@@ -168,6 +169,11 @@ export async function createServer(
   const db = providers.storage.messages;
   const conversationStore = providers.storage.conversations;
   const sessionStore = providers.storage.sessions;
+
+  // Run one-time migration: import identity/skills from filesystem into DB
+  const agentNameForMigration = config.agent_name ?? 'main';
+  await runStorageMigration(providers.storage.documents, [agentNameForMigration]);
+
   const fileStore = await FileStore.create(providers.database);
   const taintBudget = new TaintBudget({
     threshold: thresholdForProfile(config.profile),

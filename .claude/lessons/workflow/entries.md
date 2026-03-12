@@ -1,5 +1,11 @@
 # Workflow
 
+### Parallel subagents can reset the git branch and lose all work
+**Date:** 2026-03-12
+**Context:** Dispatched 3 parallel subagents to implement different phases of a storage architecture simplification. One agent reset the branch, destroying all committed work from the other agents.
+**Lesson:** When dispatching multiple subagents that work on the same repo, either use git worktrees for isolation or dispatch them sequentially. A single comprehensive agent is safer than parallel agents for tightly-coupled changes in the same repo.
+**Tags:** subagents, git, parallel, branch-reset
+
 ### npm 11.x requires complete lock file entries for ALL declared optional dependencies
 **Date:** 2026-03-04
 **Context:** CI (Node 24 / npm 11.x) failed on every PR with "Missing: sqlite-vec-linux-arm64@ from lock file". The upstream `sqlite-vec@0.1.6` declares `sqlite-vec-linux-arm64@0.1.6` as an optional dependency, but that version was never published to npm. Simply removing the broken stub worked on npm 10.x but not npm 11.x.

@@ -260,4 +260,20 @@ describe('loadSkills', () => {
   test('returns empty array when directory does not exist', () => {
     expect(loadSkills('/nonexistent/path')).toEqual([]);
   });
+
+  test('returns pre-loaded SkillSummary[] as-is when given an array', () => {
+    const preloaded = [
+      { name: 'Deploy', description: 'Deploy the app', path: 'deploy.md' },
+      { name: 'Review', description: 'Code review', path: 'review.md' },
+    ];
+    const skills = loadSkills(preloaded);
+    expect(skills).toBe(preloaded); // same reference, no copy
+    expect(skills).toHaveLength(2);
+    expect(skills[0].name).toBe('Deploy');
+  });
+
+  test('returns empty array when given empty array', () => {
+    const skills = loadSkills([]);
+    expect(skills).toEqual([]);
+  });
 });

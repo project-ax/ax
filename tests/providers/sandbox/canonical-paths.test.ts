@@ -22,7 +22,6 @@ import type { SandboxConfig } from '../../../src/providers/sandbox/types.js';
 function mockSandboxConfig(overrides?: Partial<SandboxConfig>): SandboxConfig {
   return {
     workspace: '/home/alice/.ax/data/workspaces/main/cli/default',
-    skills: '/home/alice/.ax/data/workspaces/main/cli/default/skills',
     ipcSocket: '/tmp/ax-ipc-abc123/agent.sock',
     command: ['node', 'runner.js'],
     ...overrides,
@@ -38,20 +37,17 @@ describe('CANONICAL constants', () => {
     expect(CANONICAL.scratch).toBe('/workspace/scratch');
   });
 
-  test('skills is /workspace/skills (merged overlayfs mount)', () => {
-    expect(CANONICAL.skills).toBe('/workspace/skills');
-  });
-
-  test('identity is /workspace/identity (identity files)', () => {
-    expect(CANONICAL.identity).toBe('/workspace/identity');
-  });
-
   test('agent is /workspace/agent (agent workspace)', () => {
     expect(CANONICAL.agent).toBe('/workspace/agent');
   });
 
   test('user is /workspace/user (per-user persistent storage)', () => {
     expect(CANONICAL.user).toBe('/workspace/user');
+  });
+
+  test('does not include skills or identity (served via stdin)', () => {
+    expect((CANONICAL as any).skills).toBeUndefined();
+    expect((CANONICAL as any).identity).toBeUndefined();
   });
 });
 
@@ -61,25 +57,24 @@ describe('canonicalEnv', () => {
     const env = canonicalEnv(config);
 
     expect(env.AX_WORKSPACE).toBe('/workspace');
-    expect(env.AX_SKILLS).toBe('/workspace/skills');
     expect(env.AX_IPC_SOCKET).toBe(config.ipcSocket);
+    // Skills and identity are no longer in env
+    expect(env.AX_SKILLS).toBeUndefined();
+    expect(env.AX_AGENT_DIR).toBeUndefined();
   });
 
   test('includes enterprise fields only when present', () => {
     const config = mockSandboxConfig();
     const envBasic = canonicalEnv(config);
 
-    expect(envBasic.AX_AGENT_DIR).toBeUndefined();
     expect(envBasic.AX_AGENT_WORKSPACE).toBeUndefined();
     expect(envBasic.AX_USER_WORKSPACE).toBeUndefined();
 
     const envFull = canonicalEnv(mockSandboxConfig({
-      agentDir: '/home/alice/.ax/agents/main/agent',
       agentWorkspace: '/home/alice/.ax/agents/main/agent/workspace',
       userWorkspace: '/home/alice/.ax/agents/main/users/alice/workspace',
     }));
 
-    expect(envFull.AX_AGENT_DIR).toBe('/workspace/identity');
     expect(envFull.AX_AGENT_WORKSPACE).toBe('/workspace/agent');
     expect(envFull.AX_USER_WORKSPACE).toBe('/workspace/user');
   });
@@ -113,26 +108,14 @@ describe('createCanonicalSymlinks', () => {
     expect(readlinkSync(scratchLink)).toBe(config.workspace);
   });
 
-  test('creates skills symlink', () => {
-    const config = mockSandboxConfig();
-    const { mountRoot, cleanup } = createCanonicalSymlinks(config);
-    cleanupFn = cleanup;
-
-    const skillsLink = join(mountRoot, 'skills');
-    expect(symlinkExists(skillsLink)).toBe(true);
-    expect(readlinkSync(skillsLink)).toBe(config.skills);
-  });
-
   test('creates enterprise tier symlinks when configured', () => {
     const config = mockSandboxConfig({
-      agentDir: '/home/alice/.ax/agents/main/agent',
       agentWorkspace: '/home/alice/.ax/agents/main/agent/workspace',
       userWorkspace: '/home/alice/.ax/agents/main/users/alice/workspace',
     });
     const { mountRoot, cleanup } = createCanonicalSymlinks(config);
     cleanupFn = cleanup;
 
-    expect(readlinkSync(join(mountRoot, 'identity'))).toBe(config.agentDir);
     expect(readlinkSync(join(mountRoot, 'agent'))).toBe(config.agentWorkspace);
     expect(readlinkSync(join(mountRoot, 'user'))).toBe(config.userWorkspace);
   });
@@ -142,9 +125,17 @@ describe('createCanonicalSymlinks', () => {
     const { mountRoot, cleanup } = createCanonicalSymlinks(config);
     cleanupFn = cleanup;
 
-    expect(existsSync(join(mountRoot, 'identity'))).toBe(false);
     expect(existsSync(join(mountRoot, 'agent'))).toBe(false);
     expect(existsSync(join(mountRoot, 'user'))).toBe(false);
+  });
+
+  test('does not create skills or identity symlinks', () => {
+    const config = mockSandboxConfig();
+    const { mountRoot, cleanup } = createCanonicalSymlinks(config);
+    cleanupFn = cleanup;
+
+    expect(existsSync(join(mountRoot, 'skills'))).toBe(false);
+    expect(existsSync(join(mountRoot, 'identity'))).toBe(false);
   });
 
   test('cleanup removes mount root', () => {
@@ -176,13 +167,14 @@ describe('symlinkEnv', () => {
     const env = symlinkEnv(config, mountRoot);
 
     expect(env.AX_WORKSPACE).toBe(mountRoot);
-    expect(env.AX_SKILLS).toBe(join(mountRoot, 'skills'));
     expect(env.AX_IPC_SOCKET).toBe(config.ipcSocket);
+    // Skills and identity no longer in env
+    expect(env.AX_SKILLS).toBeUndefined();
+    expect(env.AX_AGENT_DIR).toBeUndefined();
   });
 
   test('includes enterprise fields only when present', () => {
     const config = mockSandboxConfig({
-      agentDir: '/home/alice/.ax/agents/main/agent',
       agentWorkspace: '/home/alice/.ax/agents/main/agent/workspace',
       userWorkspace: '/home/alice/.ax/agents/main/users/alice/workspace',
     });
@@ -191,7 +183,6 @@ describe('symlinkEnv', () => {
 
     const env = symlinkEnv(config, mountRoot);
 
-    expect(env.AX_AGENT_DIR).toBe(join(mountRoot, 'identity'));
     expect(env.AX_AGENT_WORKSPACE).toBe(join(mountRoot, 'agent'));
     expect(env.AX_USER_WORKSPACE).toBe(join(mountRoot, 'user'));
   });

@@ -47,29 +47,43 @@ export interface IdentityLoadOptions {
    * When provided, skips reading USER_BOOTSTRAP.md from disk (it's not in the sandbox mount).
    */
   userBootstrapContent?: string;
+  /** Preloaded identity files from DB (via stdin payload). Takes precedence over filesystem. */
+  preloaded?: Partial<IdentityFiles>;
 }
 
 export function loadIdentityFiles(opts: IdentityLoadOptions): IdentityFiles {
-  const { agentDir, userId } = opts;
+  const { agentDir, userId, preloaded } = opts;
 
   // Enterprise paths take precedence over legacy agentDir layout
   const idDir = opts.identityDir ?? agentDir;
   const load = (name: string) => idDir ? capContent(readFile(idDir, name), name) : '';
 
-  // USER.md is per-user: load from explicit userDir, or agentDir/users/<userId>
+  // Helper: use preloaded content from DB (via stdin payload) when available,
+  // falling back to filesystem read.
+  const preloadOrRead = (field: keyof IdentityFiles, fileName: string): string => {
+    const preloadedValue = preloaded?.[field];
+    if (preloadedValue && preloadedValue.trim()) return capContent(preloadedValue, fileName);
+    return load(fileName);
+  };
+
+  // USER.md is per-user: prefer preloaded, then explicit userDir, then agentDir/users/<userId>
   let user = '';
-  if (opts.userDir) {
+  if (preloaded?.user && preloaded.user.trim()) {
+    user = capContent(preloaded.user, 'USER.md');
+  } else if (opts.userDir) {
     user = capContent(readFile(opts.userDir, 'USER.md'), 'USER.md');
   } else if (agentDir && userId) {
     user = capContent(readFile(join(agentDir, 'users', userId), 'USER.md'), 'USER.md');
   }
 
   // USER_BOOTSTRAP.md is shown when the user has no USER.md yet.
-  // Prefer host-provided content (via stdin payload) over disk read — the file
-  // lives in agentConfigDir which is not in the sandbox mount.
+  // Prefer preloaded, then host-provided content (via stdin payload),
+  // then disk read — the file lives in agentConfigDir which is not in the sandbox mount.
   let userBootstrap = '';
   if (!user) {
-    if (opts.userBootstrapContent) {
+    if (preloaded?.userBootstrap && preloaded.userBootstrap.trim()) {
+      userBootstrap = capContent(preloaded.userBootstrap, 'USER_BOOTSTRAP.md');
+    } else if (opts.userBootstrapContent) {
       userBootstrap = capContent(opts.userBootstrapContent, 'USER_BOOTSTRAP.md');
     } else if (idDir) {
       userBootstrap = capContent(readFile(idDir, 'USER_BOOTSTRAP.md'), 'USER_BOOTSTRAP.md');
@@ -77,12 +91,12 @@ export function loadIdentityFiles(opts: IdentityLoadOptions): IdentityFiles {
   }
 
   return {
-    agents: load('AGENTS.md'),
-    soul: load('SOUL.md'),
-    identity: load('IDENTITY.md'),
+    agents: preloadOrRead('agents', 'AGENTS.md'),
+    soul: preloadOrRead('soul', 'SOUL.md'),
+    identity: preloadOrRead('identity', 'IDENTITY.md'),
     user,
-    bootstrap: load('BOOTSTRAP.md'),
+    bootstrap: preloadOrRead('bootstrap', 'BOOTSTRAP.md'),
     userBootstrap,
-    heartbeat: load('HEARTBEAT.md'),
+    heartbeat: preloadOrRead('heartbeat', 'HEARTBEAT.md'),
   };
 }

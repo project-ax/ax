@@ -134,4 +134,88 @@ describe('loadIdentityFiles', () => {
     expect(files.user).toBe('# Alice');
     expect(files.heartbeat).toBe('# Heartbeat');
   });
+
+  // ── Preloaded identity tests ───────────────────────────────────────
+  test('uses preloaded identity values when provided', () => {
+    // Write files to disk — they should be ignored when preloaded is provided
+    writeFileSync(join(agentDir, 'SOUL.md'), '# Disk Soul');
+    writeFileSync(join(agentDir, 'IDENTITY.md'), '# Disk Identity');
+
+    const files = loadIdentityFiles({
+      agentDir,
+      preloaded: {
+        soul: '# DB Soul',
+        identity: '# DB Identity',
+      },
+    });
+    expect(files.soul).toBe('# DB Soul');
+    expect(files.identity).toBe('# DB Identity');
+  });
+
+  test('falls back to filesystem when preloaded values are empty', () => {
+    writeFileSync(join(agentDir, 'SOUL.md'), '# Disk Soul');
+    writeFileSync(join(agentDir, 'IDENTITY.md'), '# Disk Identity');
+
+    const files = loadIdentityFiles({
+      agentDir,
+      preloaded: {
+        soul: '   ', // whitespace only — should fall back
+        identity: '',  // empty — should fall back
+      },
+    });
+    expect(files.soul).toBe('# Disk Soul');
+    expect(files.identity).toBe('# Disk Identity');
+  });
+
+  test('mixes preloaded and filesystem values', () => {
+    writeFileSync(join(agentDir, 'AGENTS.md'), '# Disk Agents');
+    writeFileSync(join(agentDir, 'HEARTBEAT.md'), '# Disk Heartbeat');
+
+    const files = loadIdentityFiles({
+      agentDir,
+      preloaded: {
+        soul: '# DB Soul',
+        // agents not preloaded — falls back to disk
+      },
+    });
+    expect(files.soul).toBe('# DB Soul');
+    expect(files.agents).toBe('# Disk Agents');
+    expect(files.heartbeat).toBe('# Disk Heartbeat');
+  });
+
+  test('preloaded user takes precedence over filesystem user', () => {
+    const userDir = join(agentDir, 'users', 'bob');
+    mkdirSync(userDir, { recursive: true });
+    writeFileSync(join(userDir, 'USER.md'), '# Disk Bob');
+
+    const files = loadIdentityFiles({
+      agentDir,
+      userId: 'bob',
+      preloaded: {
+        user: '# DB Bob',
+      },
+    });
+    expect(files.user).toBe('# DB Bob');
+  });
+
+  test('preloaded userBootstrap used when user is absent', () => {
+    const files = loadIdentityFiles({
+      preloaded: {
+        userBootstrap: '# DB User Bootstrap',
+      },
+    });
+    expect(files.userBootstrap).toBe('# DB User Bootstrap');
+    expect(files.user).toBe('');
+  });
+
+  test('preloaded userBootstrap skipped when user exists', () => {
+    const files = loadIdentityFiles({
+      preloaded: {
+        user: '# DB User',
+        userBootstrap: '# DB User Bootstrap',
+      },
+    });
+    expect(files.user).toBe('# DB User');
+    expect(files.userBootstrap).toBe('');
+  });
 });

@@ -246,5 +246,86 @@ describe('parseStdinPayload with taint state', () => {
   });
 });
 
+describe('parseStdinPayload with identity/skills', () => {
+  test('extracts identity object from payload', () => {
+    const payload = JSON.stringify({
+      message: 'hello',
+      history: [],
+      taintRatio: 0,
+      taintThreshold: 1,
+      profile: 'balanced',
+      sandboxType: 'subprocess',
+      identity: {
+        soul: '# Soul content',
+        identity: '# Identity content',
+      },
+    });
+    const result = parseStdinPayload(payload);
+    expect(result.identity).toEqual({
+      soul: '# Soul content',
+      identity: '# Identity content',
+    });
+  });
+
+  test('extracts skills array from payload', () => {
+    const payload = JSON.stringify({
+      message: 'hello',
+      history: [],
+      taintRatio: 0,
+      taintThreshold: 1,
+      profile: 'balanced',
+      sandboxType: 'subprocess',
+      skills: [
+        { name: 'Deploy', description: 'Deploy the app', path: 'deploy.md' },
+      ],
+    });
+    const result = parseStdinPayload(payload);
+    expect(result.skills).toHaveLength(1);
+    expect(result.skills![0].name).toBe('Deploy');
+  });
+
+  test('identity defaults to undefined when absent', () => {
+    const payload = JSON.stringify({
+      message: 'hello',
+      history: [],
+      taintRatio: 0,
+      taintThreshold: 1,
+      profile: 'balanced',
+      sandboxType: 'subprocess',
+    });
+    const result = parseStdinPayload(payload);
+    expect(result.identity).toBeUndefined();
+    expect(result.skills).toBeUndefined();
+  });
+
+  test('identity rejected when not an object', () => {
+    const payload = JSON.stringify({
+      message: 'hello',
+      history: [],
+      taintRatio: 0,
+      taintThreshold: 1,
+      profile: 'balanced',
+      sandboxType: 'subprocess',
+      identity: 'not an object',
+    });
+    const result = parseStdinPayload(payload);
+    expect(result.identity).toBeUndefined();
+  });
+
+  test('skills rejected when not an array', () => {
+    const payload = JSON.stringify({
+      message: 'hello',
+      history: [],
+      taintRatio: 0,
+      taintThreshold: 1,
+      profile: 'balanced',
+      sandboxType: 'subprocess',
+      skills: 'not an array',
+    });
+    const result = parseStdinPayload(payload);
+    expect(result.skills).toBeUndefined();
+  });
+});
+
 // buildSystemPrompt tests removed — behavior is now covered by
 // tests/agent/prompt/modules/identity.test.ts (and other module tests)

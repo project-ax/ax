@@ -30,7 +30,7 @@ providers:
   channels: []
   web: none
   scanner: patterns
-  storage: file
+  storage: database
   eventbus: inprocess
 
 # ── History / Memory / Embeddings ───────────────────────────

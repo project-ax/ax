@@ -51,12 +51,6 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         // Workspace (read-write) — mounted at canonical /scratch
         '--bind', config.workspace, CANONICAL.scratch,
 
-        // Skills (read-only) — mounted at canonical /skills
-        '--ro-bind', config.skills, CANONICAL.skills,
-
-        // Agent identity directory (read-only) — SOUL.md, etc.
-        ...(config.agentDir ? ['--ro-bind', config.agentDir, CANONICAL.identity] : []),
-
         // Enterprise mounts — canonical paths
         ...(config.agentWorkspace ? ['--ro-bind', config.agentWorkspace, CANONICAL.agent] : []),
         ...(config.userWorkspace ? ['--ro-bind', config.userWorkspace, CANONICAL.user] : []),
