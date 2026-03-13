@@ -15,12 +15,13 @@ import type { SchedulerProvider, CronDelivery } from './providers/scheduler/type
 import type { StorageProvider } from './providers/storage/types.js';
 import type { EventBusProvider } from './providers/eventbus/types.js';
 import type { DatabaseProvider } from './providers/database/types.js';
+import type { WorkspaceProvider } from './providers/workspace/types.js';
 import type {
   MemoryProviderName, ScannerProviderName, ChannelProviderName,
   WebProviderName, BrowserProviderName, CredentialProviderName,
   SkillsProviderName, AuditProviderName, SandboxProviderName,
   SchedulerProviderName, StorageProviderName, EventBusProviderName,
-  DatabaseProviderName,
+  DatabaseProviderName, WorkspaceProviderName,
 } from './host/provider-map.js';
 
 /** Allowed image MIME types (matches Anthropic vision API). */
@@ -85,6 +86,7 @@ export interface Config {
     storage: StorageProviderName;
     database?: DatabaseProviderName;
     eventbus: EventBusProviderName;
+    workspace: WorkspaceProviderName;
     screener?: string;
   };
   channel_config?: Record<string, Partial<ChannelAccessConfig>>;
@@ -121,6 +123,13 @@ export interface Config {
     max_concurrent?: number;
     max_depth?: number;
   };
+  workspace: {
+    basePath: string;
+    maxFileSize: number;
+    maxFiles: number;
+    maxCommitSize: number;
+    ignorePatterns: string[];
+  };
   webhooks?: {
     enabled: boolean;
     token: string;
@@ -152,5 +161,6 @@ export interface ProviderRegistry {
   storage: StorageProvider;
   database?: DatabaseProvider;
   eventbus: EventBusProvider;
+  workspace: WorkspaceProvider;
   screener?: SkillScreenerProvider;
 }

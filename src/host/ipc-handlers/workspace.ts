@@ -1,9 +1,14 @@
 /**
- * IPC handlers: enterprise workspace write operations (workspace_write, workspace_write_file).
+ * IPC handlers: enterprise workspace operations.
  *
  * Two-tier workspace model:
  * - agent: shared agent workspace (read-only in sandbox, write via host IPC)
  * - user:  per-user persistent workspace (read-write)
+ *
+ * Three-scope workspace provider model (workspace_mount):
+ * - agent:   shared persistent workspace
+ * - user:    per-user persistent workspace
+ * - session: temporary scratch for the current session
  *
  * Read/list operations are handled directly by local tools in the sandbox
  * since tiers are mounted/symlinked into the agent's filesystem.
@@ -12,6 +17,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import type { ProviderRegistry } from '../../types.js';
 import type { IPCContext } from '../ipc-server.js';
+import type { WorkspaceScope } from '../../providers/workspace/types.js';
 import { agentWorkspaceDir, userWorkspaceDir } from '../../paths.js';
 import { safePath } from '../../utils/safe-path.js';
 
@@ -112,6 +118,36 @@ export function createWorkspaceHandlers(providers: ProviderRegistry, opts: Works
       });
 
       return { written: true, tier: req.tier, path: req.path, size: data.length };
+    },
+
+    workspace_mount: async (req: any, ctx: IPCContext) => {
+      const requestedScopes = req.scopes as WorkspaceScope[];
+
+      // Determine which scopes are not yet active
+      const currentScopes = providers.workspace.activeMounts(ctx.sessionId);
+      const newScopes = requestedScopes.filter(s => !currentScopes.includes(s));
+
+      if (newScopes.length === 0) {
+        // All requested scopes already active — return current state
+        return {
+          mounted: currentScopes,
+          paths: {},
+        };
+      }
+
+      // Mount new scopes (additive)
+      const mounts = await providers.workspace.mount(ctx.sessionId, newScopes);
+
+      await providers.audit.log({
+        action: 'workspace_mount',
+        sessionId: ctx.sessionId,
+        args: { scopes: newScopes, allScopes: [...currentScopes, ...newScopes] },
+      });
+
+      return {
+        mounted: [...currentScopes, ...newScopes],
+        paths: mounts.paths,
+      };
     },
 
   };

@@ -115,6 +115,12 @@ function mockRegistry(documents?: DocumentStore): ProviderRegistry {
       sessions: {} as any,
       close() {},
     },
+    workspace: {
+      async mount() { return { paths: {} }; },
+      async commit() { return { scopes: {} }; },
+      async cleanup() {},
+      activeMounts() { return []; },
+    },
   } as ProviderRegistry;
 }
 

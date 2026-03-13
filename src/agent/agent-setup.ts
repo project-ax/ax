@@ -43,6 +43,7 @@ export function buildSystemPrompt(config: AgentConfig): PromptBuildResult {
   });
 
   const hasWorkspaceTiers = !!(config.agentWorkspace || config.userWorkspace);
+  const hasWorkspaceScopes = !!config.workspaceProvider && config.workspaceProvider !== 'none';
   const hasGovernance = config.profile === 'paranoid' || config.profile === 'balanced';
 
   const promptBuilder = new PromptBuilder();
@@ -68,6 +69,7 @@ export function buildSystemPrompt(config: AgentConfig): PromptBuildResult {
     hasHeartbeat: !!identityFiles.heartbeat?.trim(),
     hasSkills: skills.length > 0,
     hasWorkspaceTiers,
+    hasWorkspaceScopes,
     hasGovernance,
   };
 

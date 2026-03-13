@@ -22,6 +22,12 @@ describe('image_generate handler', () => {
         },
         async models() { return ['mock-model']; },
       },
+    workspace: {
+      async mount() { return { paths: {} }; },
+      async commit() { return { scopes: {} }; },
+      async cleanup() {},
+      activeMounts() { return []; },
+    },
     } as unknown as ProviderRegistry;
   }
 

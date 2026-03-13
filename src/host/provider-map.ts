@@ -90,6 +90,11 @@ const _PROVIDER_MAP = {
     inprocess: '../providers/eventbus/inprocess.js',
     nats:      '../providers/eventbus/nats.js',
   },
+  workspace: {
+    none:  '../providers/workspace/none.js',
+    local: '../providers/workspace/local.js',
+    gcs:   '../providers/workspace/gcs.js',
+  },
 } as const;
 
 // Re-export with the same name and looser type for backwards compatibility.
@@ -124,6 +129,7 @@ export type SchedulerProviderName  = keyof ProviderMapType['scheduler'];
 export type ScreenerProviderName   = keyof ProviderMapType['screener'];
 export type StorageProviderName    = keyof ProviderMapType['storage'];
 export type EventBusProviderName   = keyof ProviderMapType['eventbus'];
+export type WorkspaceProviderName  = keyof ProviderMapType['workspace'];
 
 /** Union of all provider names for a given kind. */
 export type ProviderNameFor<K extends ProviderKind> = keyof ProviderMapType[K];

@@ -15,7 +15,7 @@ import { Type, type TSchema } from '@sinclair/typebox';
 export type ToolCategory =
   | 'memory' | 'web' | 'audit' | 'identity'
   | 'scheduler' | 'skill' | 'delegation' | 'image'
-  | 'workspace' | 'governance' | 'sandbox';
+  | 'workspace' | 'workspace_scopes' | 'governance' | 'sandbox';
 
 export interface ToolSpec {
   name: string;
@@ -281,6 +281,19 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     },
   },
 
+  // ── Workspace Scopes ──
+  {
+    name: 'workspace_mount',
+    label: 'Mount Workspace',
+    description:
+      'Mount workspace scopes for file persistence. Scopes: session (temporary), user (private), agent (shared). Additive — call multiple times to add scopes.',
+    parameters: Type.Object({
+      scopes: Type.Array(Type.String({ description: 'Scopes to mount: "session", "user", or "agent"' })),
+    }),
+    category: 'workspace_scopes',
+    singletonAction: 'workspace_mount',
+  },
+
   // ── Governance ──
   {
     name: 'governance',
@@ -463,6 +476,8 @@ export interface ToolFilterContext {
   hasSkills: boolean;
   /** Enterprise workspace tiers enabled */
   hasWorkspaceTiers: boolean;
+  /** Workspace scoped mounts available (workspace provider \!= 'none') */
+  hasWorkspaceScopes: boolean;
   /** Enterprise governance enabled */
   hasGovernance: boolean;
 }
@@ -477,6 +492,7 @@ export function filterTools(ctx: ToolFilterContext): readonly ToolSpec[] {
       case 'scheduler':  return ctx.hasHeartbeat;
       case 'skill':      return ctx.hasSkills;
       case 'workspace':  return ctx.hasWorkspaceTiers;
+      case 'workspace_scopes': return ctx.hasWorkspaceScopes;
       case 'governance': return ctx.hasGovernance;
       default:           return true;
     }

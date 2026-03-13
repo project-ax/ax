@@ -85,6 +85,9 @@ export async function loadProviders(config: Config, opts?: LoadProvidersOptions)
   // Load eventbus provider (in-process pub/sub; Phase 2 adds NATS for k8s)
   const eventbus = await loadProvider('eventbus', config.providers.eventbus, config);
 
+  // Load workspace provider (default: none = no-op stub)
+  const workspace = await loadProvider('workspace', config.providers.workspace, config);
+
   return {
     llm:         tracedLlm,
     image,
@@ -101,6 +104,7 @@ export async function loadProviders(config: Config, opts?: LoadProvidersOptions)
     storage,
     database,
     eventbus,
+    workspace,
     screener,
   };
 }

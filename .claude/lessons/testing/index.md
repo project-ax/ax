@@ -13,6 +13,7 @@ Lessons about test patterns, infrastructure, mocking strategies, and test enviro
 - When adding new prompt modules, update integration test module count [patterns.md](patterns.md)
 - Use createHttpServer for isolated SSE endpoint tests instead of full AxServer [patterns.md](patterns.md)
 - Tool count tests are scattered across many test files [infrastructure.md](infrastructure.md)
+- Adding a new tool category requires updating ToolFilterContext in test filter objects [infrastructure.md](infrastructure.md)
 - Tool count is hardcoded in multiple test files — update all of them [infrastructure.md](infrastructure.md)
 - Set AX_HOME in tests that use workspace/identity/scratch paths [infrastructure.md](infrastructure.md)
 - scratchDir requires valid session ID format [infrastructure.md](infrastructure.md)

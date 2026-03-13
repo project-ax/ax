@@ -151,16 +151,16 @@ describe('ipc-tools', () => {
     expect(tool!.description).toContain('cron');
   });
 
-  test('total tool count is 14 without filter', () => {
+  test('total tool count is 15 without filter', () => {
     const client = createMockClient();
     const tools = createIPCTools(client as any);
-    expect(tools.length).toBe(14);
+    expect(tools.length).toBe(15);
   });
 
   test('filter excludes scheduler tool when hasHeartbeat is false', () => {
     const client = createMockClient();
     const tools = createIPCTools(client as any, {
-      filter: { hasHeartbeat: false, hasSkills: true, hasWorkspaceTiers: true, hasGovernance: true },
+      filter: { hasHeartbeat: false, hasSkills: true, hasWorkspaceTiers: true, hasWorkspaceScopes: true, hasGovernance: true },
     });
     const names = tools.map((t) => t.name);
     expect(names).not.toContain('scheduler');
@@ -172,7 +172,7 @@ describe('ipc-tools', () => {
   test('filter excludes enterprise tools when flags are false', () => {
     const client = createMockClient();
     const tools = createIPCTools(client as any, {
-      filter: { hasHeartbeat: true, hasSkills: true, hasWorkspaceTiers: false, hasGovernance: false },
+      filter: { hasHeartbeat: true, hasSkills: true, hasWorkspaceTiers: false, hasWorkspaceScopes: false, hasGovernance: false },
     });
     const names = tools.map((t) => t.name);
     expect(names).not.toContain('workspace');
@@ -207,7 +207,7 @@ describe('ipc-tools', () => {
   test('filter with all flags false returns only core tools', () => {
     const client = createMockClient();
     const tools = createIPCTools(client as any, {
-      filter: { hasHeartbeat: false, hasSkills: false, hasWorkspaceTiers: false, hasGovernance: false },
+      filter: { hasHeartbeat: false, hasSkills: false, hasWorkspaceTiers: false, hasWorkspaceScopes: false, hasGovernance: false },
     });
     const names = tools.map((t) => t.name);
     // memory(1) + web(1) + audit(1) + identity(1) + agent(1) + image(1) + sandbox(4) = 10 tools

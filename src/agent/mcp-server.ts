@@ -229,6 +229,15 @@ export function createIPCMcpServer(client: IPCClient, opts?: MCPServerOptions): 
       },
     ),
 
+    // ── Workspace Scopes ──
+    tool('workspace_mount',
+      'Mount workspace scopes for file persistence. Scopes: session (temporary), user (private), agent (shared). Additive — call multiple times to add scopes.',
+      {
+        scopes: z.array(z.string()).describe('Scopes to mount: "session", "user", or "agent"'),
+      },
+      (args) => ipcCall('workspace_mount', args),
+    ),
+
     // ── Governance ──
     tool('governance',
       'Enterprise governance: propose identity changes, list proposals, list agents.\n\n' +

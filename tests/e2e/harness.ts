@@ -691,6 +691,12 @@ export class TestHarness {
           close() {},
         };
       })(),
+      workspace: {
+        async mount() { return { paths: {} }; },
+        async commit() { return { scopes: {} }; },
+        async cleanup() {},
+        activeMounts() { return []; },
+      },
     } as ProviderRegistry;
   }
 }

@@ -51,6 +51,12 @@
 **Lesson:** When adding new IPC tools, expect to update hardcoded tool counts in: tests/agent/tool-catalog.test.ts, tests/agent/ipc-tools.test.ts, tests/agent/mcp-server.test.ts, tests/sandbox-isolation.test.ts, and tests/agent/tool-catalog-sync.test.ts. Search for the old count (e.g. "25") across all test files before committing.
 **Tags:** tools, testing, ipc, tool-catalog
 
+### Adding a new tool category requires updating ToolFilterContext in test filter objects
+**Date:** 2026-03-13
+**Context:** Added workspace_scopes category with hasWorkspaceScopes filter. Updated 12 test files with workspace mocks but missed 3 files (sandbox-isolation, mcp-server, tool-catalog) that had hardcoded expected tool lists and filter context objects.
+**Lesson:** When adding a new tool category with a new ToolFilterContext boolean field, update ALL of these: (1) expected tool name arrays in tests/sandbox-isolation.test.ts, tests/agent/mcp-server.test.ts, tests/agent/tool-catalog.test.ts; (2) hardcoded tool count `.toBe(N)` assertions; (3) explicit `filter: { ... }` objects in mcp-server.test.ts — these must include the new boolean field. Search: `grep -r 'hasWorkspace\|hasHeartbeat\|hasSkills\|hasGovernance' tests/` to find all filter context instances.
+**Tags:** tools, testing, tool-catalog, ToolFilterContext, filter, mcp-server
+
 ### Tool count is hardcoded in multiple test files — update all of them
 **Date:** 2026-02-22
 **Context:** After adding 6 enterprise tools (17→23), tests failed in 5 different files that each hardcoded the expected tool count

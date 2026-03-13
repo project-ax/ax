@@ -174,7 +174,7 @@ describe('IPC MCP Server', () => {
       'memory', 'web', 'audit', 'identity',
       'scheduler', 'skill',
       'agent', 'image',
-      'workspace', 'governance',
+      'workspace', 'workspace_mount', 'governance',
       'bash', 'read_file', 'write_file', 'edit_file',
     ];
 
@@ -182,13 +182,13 @@ describe('IPC MCP Server', () => {
     for (const name of expectedTools) {
       expect(registeredNames, `expected tool "${name}" to be registered`).toContain(name);
     }
-    expect(registeredNames.length).toBe(14);
+    expect(registeredNames.length).toBe(15);
   });
 
   test('filter excludes scheduler and skill tools when flags are false', () => {
     const client = createMockClient();
     const server = createIPCMcpServer(client, {
-      filter: { hasHeartbeat: false, hasSkills: false, hasWorkspaceTiers: true, hasGovernance: true },
+      filter: { hasHeartbeat: false, hasSkills: false, hasWorkspaceTiers: true, hasWorkspaceScopes: true, hasGovernance: true },
     });
     const tools = getTools(server);
     const names = Object.keys(tools);
@@ -206,7 +206,7 @@ describe('IPC MCP Server', () => {
   test('filter with all flags false returns only core tools', () => {
     const client = createMockClient();
     const server = createIPCMcpServer(client, {
-      filter: { hasHeartbeat: false, hasSkills: false, hasWorkspaceTiers: false, hasGovernance: false },
+      filter: { hasHeartbeat: false, hasSkills: false, hasWorkspaceTiers: false, hasWorkspaceScopes: false, hasGovernance: false },
     });
     const tools = getTools(server);
     const names = Object.keys(tools);
@@ -220,6 +220,7 @@ describe('IPC MCP Server', () => {
     expect(names).not.toContain('scheduler');
     expect(names).not.toContain('skill');
     expect(names).not.toContain('workspace');
+    expect(names).not.toContain('workspace_mount');
     expect(names).not.toContain('governance');
   });
 

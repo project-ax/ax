@@ -607,6 +607,22 @@ export async function processCompletion(
     mkdirSync(enterpriseAgentWs, { recursive: true });
     mkdirSync(enterpriseUserWs, { recursive: true });
 
+    // Workspace provider: auto-mount previously remembered scopes
+    const rememberedScopes = providers.workspace.activeMounts(sessionId);
+    if (rememberedScopes.length > 0) {
+      try {
+        await providers.workspace.mount(sessionId, rememberedScopes);
+        eventBus?.emit({
+          type: 'workspace.mount',
+          requestId,
+          timestamp: Date.now(),
+          data: { sessionId, scopes: rememberedScopes, agentId: agentName },
+        });
+      } catch (err) {
+        reqLogger.warn('workspace_automount_failed', { error: (err as Error).message, scopes: rememberedScopes });
+      }
+    }
+
     // ── Load identity from DocumentStore ──
     // Identity files are keyed as <agentName>/<filename> and <agentName>/users/<userId>/<filename>
     const identityPayload = await loadIdentityFromDB(providers.storage.documents, agentName, currentUserId, reqLogger);
@@ -632,6 +648,7 @@ export async function processCompletion(
       agentId: agentName,
       agentWorkspace: enterpriseAgentWs,
       userWorkspace: enterpriseUserWs,
+      workspaceProvider: config.providers.workspace,
       // Identity and skills from DocumentStore (not filesystem)
       identity: identityPayload,
       skills: skillsPayload,
@@ -765,6 +782,33 @@ export async function processCompletion(
       }
       if (nonDiagLines.length > 0) {
         reqLogger.warn('agent_stderr', { stderr: nonDiagLines.join('\n').slice(0, 500) });
+      }
+    }
+
+    // Workspace provider: commit changes after agent turn
+    if (providers.workspace.activeMounts(sessionId).length > 0) {
+      try {
+        const commitResult = await providers.workspace.commit(sessionId);
+        for (const [scope, scopeResult] of Object.entries(commitResult.scopes)) {
+          if (scopeResult && scopeResult.status === 'committed') {
+            eventBus?.emit({
+              type: 'workspace.commit',
+              requestId,
+              timestamp: Date.now(),
+              data: { sessionId, scope, agentId: agentName, filesChanged: scopeResult.filesChanged, bytesChanged: scopeResult.bytesChanged },
+            });
+          }
+          if (scopeResult && scopeResult.rejections?.length) {
+            eventBus?.emit({
+              type: 'workspace.commit.rejected',
+              requestId,
+              timestamp: Date.now(),
+              data: { sessionId, scope, rejections: scopeResult.rejections },
+            });
+          }
+        }
+      } catch (err) {
+        reqLogger.warn('workspace_commit_failed', { error: (err as Error).message });
       }
     }
 
@@ -930,6 +974,12 @@ export async function processCompletion(
     if (proxyCleanup) {
       try { proxyCleanup(); } catch {
         reqLogger.debug('proxy_cleanup_failed');
+      }
+    }
+    // Workspace provider: cleanup session scope for ephemeral sessions
+    if (!isPersistent) {
+      try { await providers.workspace.cleanup(sessionId); } catch {
+        reqLogger.debug('workspace_provider_cleanup_failed', { sessionId });
       }
     }
     if (workspace && !isPersistent) {

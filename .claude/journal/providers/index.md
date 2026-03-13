@@ -4,6 +4,8 @@ Provider implementations: image, channel, skills, sandbox, memory, LLM.
 
 ## Entries
 
+- 2026-03-13 — Integrate workspace provider into AX infrastructure (types, provider-map, IPC, tools, lifecycle) [workspace.md](workspace.md)
+- 2026-03-13 — Implement workspace provider category: types, none, shared orchestration, local backend [workspace.md](workspace.md)
 - 2026-03-05 21:00 — Rename promptfoo scanner to guardian + add LLM-based injection detection [scanner.md](scanner.md)
 - 2026-03-06 11:50 — Wire SummaryStore into cortex provider [memory.md](memory.md)
 - 2026-03-05 00:00 — Rename MemoryFS types to Cortex in cortex provider [memory.md](memory.md)

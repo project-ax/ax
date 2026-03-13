@@ -72,6 +72,12 @@ function mockProviders(): ProviderRegistry {
       sessions: {} as any,
       close: vi.fn(),
     },
+    workspace: {
+      async mount() { return { paths: {} }; },
+      async commit() { return { scopes: {} }; },
+      async cleanup() {},
+      activeMounts() { return []; },
+    },
   } as unknown as ProviderRegistry;
 }
 

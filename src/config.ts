@@ -62,6 +62,7 @@ const ConfigSchema = z.strictObject({
     database: providerEnum('database').optional().default('sqlite'),
     storage: providerEnum('storage').optional().default('database'),
     eventbus: providerEnum('eventbus').optional().default('inprocess'),
+    workspace: providerEnum('workspace').optional().default('none'),
     screener: z.string().optional(),
   }),
   channel_config: z.record(z.string(), ChannelAccessConfigSchema).optional(),
@@ -112,6 +113,22 @@ const ConfigSchema = z.strictObject({
     max_concurrent: z.number().int().min(1).max(10).default(3),
     max_depth: z.number().int().min(1).max(5).default(2),
   }).optional(),
+  workspace: z.strictObject({
+    basePath: z.string().default('~/.ax/workspaces'),
+    maxFileSize: z.number().int().min(1).default(10_485_760),
+    maxFiles: z.number().int().min(1).default(500),
+    maxCommitSize: z.number().int().min(1).default(52_428_800),
+    ignorePatterns: z.array(z.string()).default([
+      '.git/', 'node_modules/', 'venv/', '__pycache__/',
+      '*.log', '*.tmp', 'build/', 'dist/',
+    ]),
+  }).default({
+    basePath: '~/.ax/workspaces',
+    maxFileSize: 10_485_760,
+    maxFiles: 500,
+    maxCommitSize: 52_428_800,
+    ignorePatterns: ['.git/', 'node_modules/', 'venv/', '__pycache__/', '*.log', '*.tmp', 'build/', 'dist/'],
+  }),
   webhooks: z.strictObject({
     enabled: z.boolean(),
     token: z.string().min(1),

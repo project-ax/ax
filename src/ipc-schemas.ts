@@ -288,6 +288,10 @@ export const SchedulerListJobsSchema = ipcAction('scheduler_list_jobs', {});
 
 // ── Enterprise: Workspace ──────────────────────────────
 
+export const WorkspaceMountSchema = ipcAction('workspace_mount', {
+  scopes: z.array(z.enum(['agent', 'user', 'session'])),
+});
+
 /** Safe path segment: no slashes, dots-only, or nulls. */
 const pathSegment = safeString(255).check(
   z.refine((s: string) => !/[/\\]/.test(s) && s !== '.' && s !== '..', 'Invalid path segment')
