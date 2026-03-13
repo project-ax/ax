@@ -552,6 +552,136 @@ helm install ax ./charts/ax -f my-values.yaml --namespace ax --create-namespace 
 
 Note: kind doesn't support gVisor, so sandbox pods run without runtime isolation. Fine for development — not recommended for production.
 
+### GCS Workspace Provider (Kubernetes)
+
+AX supports Google Cloud Storage as a persistent workspace backend — files your agent creates survive pod restarts, rescheduling, and even cluster recreation. Here's how to set it up.
+
+#### Prerequisites
+
+- A GCS bucket (the agent needs read/write access)
+- GKE with [Workload Identity](https://cloud.google.com/kubernetes-engine/docs/how-to/workload-identity) enabled (recommended), or a service account key
+
+#### 1. Create a GCS Bucket
+
+```bash
+# Pick a globally unique name
+export GCS_BUCKET=ax-workspaces-yourproject
+
+gcloud storage buckets create gs://$GCS_BUCKET \
+  --location=us-central1 \
+  --uniform-bucket-level-access
+```
+
+#### 2. Set Up GCS Authentication
+
+**Option A: GKE Workload Identity (recommended)**
+
+This is the zero-secrets approach. The Kubernetes service account gets mapped to a GCP IAM service account that has bucket access.
+
+```bash
+# Create a GCP service account for AX
+gcloud iam service-accounts create ax-workspace \
+  --display-name="AX Workspace Writer"
+
+# Grant it access to the bucket
+gcloud storage buckets add-iam-policy-binding gs://$GCS_BUCKET \
+  --member="serviceAccount:ax-workspace@YOUR_PROJECT.iam.gserviceaccount.com" \
+  --role="roles/storage.objectUser"
+
+# Bind the GCP SA to the Kubernetes SA
+gcloud iam service-accounts add-iam-policy-binding \
+  ax-workspace@YOUR_PROJECT.iam.gserviceaccount.com \
+  --role="roles/iam.workloadIdentityUser" \
+  --member="serviceAccount:YOUR_PROJECT.svc.id.goog[ax/ax-agent-runtime]"
+```
+
+Then annotate the agent-runtime service account in your values file:
+
+```yaml
+# my-values.yaml
+agentRuntime:
+  env:
+    - name: GCS_WORKSPACE_BUCKET
+      value: "ax-workspaces-yourproject"
+```
+
+And add the Workload Identity annotation to the service account template (or patch it after install):
+
+```bash
+kubectl annotate serviceaccount ax-agent-runtime -n ax \
+  iam.gke.io/gcp-service-account=ax-workspace@YOUR_PROJECT.iam.gserviceaccount.com
+```
+
+**Option B: Service Account Key (non-GKE clusters)**
+
+If you're not on GKE, create a key file and mount it:
+
+```bash
+# Create and download a key
+gcloud iam service-accounts keys create gcs-key.json \
+  --iam-account=ax-workspace@YOUR_PROJECT.iam.gserviceaccount.com
+
+# Create a Kubernetes secret from it
+kubectl create secret generic ax-gcs-credentials \
+  --namespace ax \
+  --from-file=key.json=gcs-key.json
+```
+
+Then add the secret mount and env var to your values:
+
+```yaml
+agentRuntime:
+  env:
+    - name: GCS_WORKSPACE_BUCKET
+      value: "ax-workspaces-yourproject"
+    - name: GOOGLE_APPLICATION_CREDENTIALS
+      value: "/etc/gcs/key.json"
+```
+
+You'll also need to add a volume and volumeMount to the agent-runtime deployment (post-install patch or chart template override).
+
+#### 3. Configure AX for GCS Workspaces
+
+Add the workspace provider to your Helm values:
+
+```yaml
+# my-values.yaml
+config:
+  providers:
+    workspace: gcs
+  workspace:
+    bucket: "ax-workspaces-yourproject"
+    # prefix: "production/"  # optional — namespaces objects within the bucket
+    # maxFileSize: 10485760  # optional — 10MB default
+    # maxFiles: 1000         # optional
+```
+
+Or skip the config-level `bucket` and set `GCS_WORKSPACE_BUCKET` as an env var on the agent-runtime pods (shown above). The env var works as a fallback when `workspace.bucket` isn't in config.
+
+#### 4. Deploy
+
+```bash
+helm upgrade --install ax ./charts/ax -f my-values.yaml --namespace ax --create-namespace
+```
+
+#### 5. Verify Workspaces Are Working
+
+```bash
+# Port-forward to the host
+kubectl port-forward -n ax svc/ax-host 8080:80 &
+
+# Send a message asking the agent to create a file
+curl -X POST http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"Mount your agent workspace and write a file called hello.txt with the text \"it works\""}]}'
+
+# Check the GCS bucket
+gcloud storage ls gs://$GCS_BUCKET/agent/
+# You should see: gs://ax-workspaces-yourproject/agent/main/hello.txt
+```
+
+Workspace files are organized in GCS as `<prefix>/<scope>/<id>/<path>` — where scope is `agent`, `user`, or `session`, and id is the agent name or session identifier.
+
 ### FluxCD GitOps
 
 For GitOps deployments, AX includes FluxCD overlays in `flux/`:

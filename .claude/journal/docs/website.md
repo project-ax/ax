@@ -2,6 +2,14 @@
 
 README.md updates, docs/web site updates, dashboard, warning banners, GitHub Pages deployment, skill syncs.
 
+## [2026-03-13 16:30] — Add GCS workspace K8s setup instructions to README
+
+**Task:** Add instructions to README.md for setting up a K8s AX cluster with GCS as the workspace provider
+**What I did:** Added a new "GCS Workspace Provider (Kubernetes)" section to README.md between "Local Development with kind" and "FluxCD GitOps". Covers bucket creation, GKE Workload Identity and service account key auth options, Helm config, deploy, and verification steps.
+**Files touched:** README.md
+**Outcome:** Success
+**Notes:** The GCS provider reads bucket name from `workspace.bucket` config or `GCS_WORKSPACE_BUCKET` env var. Auth via Application Default Credentials (Workload Identity on GKE, or `GOOGLE_APPLICATION_CREDENTIALS` elsewhere).
+
 ## [2026-03-13 15:00] — Sync all ax/* skills with codebase changes
 
 **Task:** Update all .claude/skills/ax/ skills to reflect codebase changes since last sync
