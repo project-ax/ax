@@ -1,5 +1,11 @@
 # Architecture
 
+### Seatbelt sandbox-exec -D parameters must always be defined
+**Date:** 2026-03-13
+**Context:** Removing the `skills` field from SandboxConfig. Seatbelt uses `-D SKILLS=...` in its policy file, and removing it entirely would break the seatbelt policy parser.
+**Lesson:** When removing a sandbox config field that's used as a seatbelt `-D` parameter, set it to `/dev/null` rather than omitting it entirely. The seatbelt policy file references all `-D` variables and will fail to parse if any are undefined. The safe no-op path `/dev/null` is already the established convention (used for AGENT_WORKSPACE and USER_WORKSPACE when absent).
+**Tags:** sandbox, seatbelt, canonical-paths, security
+
 ### Anchor fast-path designs at the existing IPC seam
 **Date:** 2026-03-08
 **Context:** Reviewing the unified WASM sandbox plan against AX's current host, IPC, and sandbox implementation.

@@ -19,7 +19,6 @@ describe('sandbox-subprocess', () => {
     const provider = await create(mockConfig);
     const proc = await provider.spawn({
       workspace: '/tmp',
-      skills: '/tmp',
       ipcSocket: '/tmp/test.sock',
       command: ['echo', 'hello from sandbox'],
       timeoutSec: 10,
@@ -41,7 +40,6 @@ describe('sandbox-subprocess', () => {
     const provider = await create(mockConfig);
     const proc = await provider.spawn({
       workspace: '/tmp',
-      skills: '/tmp',
       ipcSocket: '/tmp/test.sock',
       command: ['sleep', '60'],
       timeoutSec: 30,
@@ -56,7 +54,6 @@ describe('sandbox-subprocess', () => {
     const provider = await create(mockConfig);
     const proc = await provider.spawn({
       workspace: '/tmp',
-      skills: '/tmp',
       ipcSocket: '/tmp/test.sock',
       command: ['sleep', '60'],
       timeoutSec: 1,
@@ -70,7 +67,6 @@ describe('sandbox-subprocess', () => {
     const provider = await create(mockConfig);
     const proc = await provider.spawn({
       workspace: '/tmp',
-      skills: '/tmp',
       ipcSocket: '/tmp/test.sock',
       command: ['sleep', '60'],
     });

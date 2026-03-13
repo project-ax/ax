@@ -6,7 +6,7 @@
  * - --memory + --pids-limit: resource limits
  * - --read-only: immutable root filesystem (writable /tmp)
  * - --cap-drop=ALL: drop all Linux capabilities
- * - Volume mounts: workspace (rw), skills (ro), IPC socket
+ * - Volume mounts: workspace (rw), IPC socket
  * - Optional gVisor runtime (--runtime=runsc) for strong syscall filtering
  * - Named containers for debuggability (ax-agent-<short-uuid>)
  * - Works on Linux and macOS (Docker Desktop)
@@ -80,7 +80,6 @@ export async function create(_config: Config): Promise<SandboxProvider> {
 
         // Volume mounts — canonical paths so the LLM sees simple /scratch
         '-v', `${config.workspace}:${CANONICAL.scratch}:rw`,
-        '-v', `${config.skills}:${CANONICAL.skills}:ro`,
         '-v', `${socketDir}:${socketDir}:rw`,
         ...(config.agentDir ? ['-v', `${config.agentDir}:${CANONICAL.identity}:ro`] : []),
         // Enterprise mounts — canonical paths

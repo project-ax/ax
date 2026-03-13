@@ -75,7 +75,6 @@ function mockConfig(): Config {
 function mockSandboxConfig(): SandboxConfig {
   return {
     workspace: '/tmp/test-workspace',
-    skills: '/tmp/test-skills',
     ipcSocket: '/tmp/test-ipc.sock',
     timeoutSec: 30,
     memoryMB: 256,

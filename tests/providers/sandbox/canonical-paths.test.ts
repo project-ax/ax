@@ -22,7 +22,6 @@ import type { SandboxConfig } from '../../../src/providers/sandbox/types.js';
 function mockSandboxConfig(overrides?: Partial<SandboxConfig>): SandboxConfig {
   return {
     workspace: '/home/alice/.ax/data/workspaces/main/cli/default',
-    skills: '/home/alice/.ax/data/workspaces/main/cli/default/skills',
     ipcSocket: '/tmp/ax-ipc-abc123/agent.sock',
     command: ['node', 'runner.js'],
     ...overrides,
@@ -36,10 +35,6 @@ describe('CANONICAL constants', () => {
 
   test('scratch is /workspace/scratch (session workspace)', () => {
     expect(CANONICAL.scratch).toBe('/workspace/scratch');
-  });
-
-  test('skills is /workspace/skills (merged overlayfs mount)', () => {
-    expect(CANONICAL.skills).toBe('/workspace/skills');
   });
 
   test('identity is /workspace/identity (identity files)', () => {
@@ -61,7 +56,6 @@ describe('canonicalEnv', () => {
     const env = canonicalEnv(config);
 
     expect(env.AX_WORKSPACE).toBe('/workspace');
-    expect(env.AX_SKILLS).toBe('/workspace/skills');
     expect(env.AX_IPC_SOCKET).toBe(config.ipcSocket);
   });
 
@@ -111,16 +105,6 @@ describe('createCanonicalSymlinks', () => {
     const scratchLink = join(mountRoot, 'scratch');
     expect(symlinkExists(scratchLink)).toBe(true);
     expect(readlinkSync(scratchLink)).toBe(config.workspace);
-  });
-
-  test('creates skills symlink', () => {
-    const config = mockSandboxConfig();
-    const { mountRoot, cleanup } = createCanonicalSymlinks(config);
-    cleanupFn = cleanup;
-
-    const skillsLink = join(mountRoot, 'skills');
-    expect(symlinkExists(skillsLink)).toBe(true);
-    expect(readlinkSync(skillsLink)).toBe(config.skills);
   });
 
   test('creates enterprise tier symlinks when configured', () => {
@@ -176,7 +160,6 @@ describe('symlinkEnv', () => {
     const env = symlinkEnv(config, mountRoot);
 
     expect(env.AX_WORKSPACE).toBe(mountRoot);
-    expect(env.AX_SKILLS).toBe(join(mountRoot, 'skills'));
     expect(env.AX_IPC_SOCKET).toBe(config.ipcSocket);
   });
 

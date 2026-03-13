@@ -5,7 +5,7 @@
  * - --unshare-net: NO network access (security invariant)
  * - --unshare-pid, --unshare-ipc: PID and IPC namespace isolation
  * - --die-with-parent: kill agent if host dies
- * - Bind-mounts: workspace (rw), skills (ro), IPC socket dir (rw)
+ * - Bind-mounts: workspace (rw), IPC socket dir (rw)
  * - Timeout enforced via setTimeout + SIGKILL (same as seatbelt)
  */
 
@@ -50,9 +50,6 @@ export async function create(_config: Config): Promise<SandboxProvider> {
 
         // Workspace (read-write) — mounted at canonical /scratch
         '--bind', config.workspace, CANONICAL.scratch,
-
-        // Skills (read-only) — mounted at canonical /skills
-        '--ro-bind', config.skills, CANONICAL.skills,
 
         // Agent identity directory (read-only) — SOUL.md, etc.
         ...(config.agentDir ? ['--ro-bind', config.agentDir, CANONICAL.identity] : []),

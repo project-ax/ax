@@ -3,7 +3,7 @@
  *
  * Uses nsjail with:
  * - clone_newnet: NO network access (security invariant)
- * - Bind-mounts: workspace (rw), skills (ro), IPC socket
+ * - Bind-mounts: workspace (rw), IPC socket
  * - Seccomp-bpf policy via Kafel language (policies/agent.kafel)
  * - Memory and time limits enforced at kernel level
  */
@@ -38,9 +38,6 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         // Mount workspace (read-write) — canonical /scratch
         '--bindmount', `${config.workspace}:${CANONICAL.scratch}`,
         '--cwd', CANONICAL.root,
-
-        // Mount skills (read-only) — canonical /skills
-        '--bindmount_ro', `${config.skills}:${CANONICAL.skills}`,
 
         // Mount agent identity directory (read-only) — SOUL.md, etc.
         ...(config.agentDir ? ['--bindmount_ro', `${config.agentDir}:${CANONICAL.identity}`] : []),

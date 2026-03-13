@@ -172,16 +172,15 @@ describe('subprocess sandbox env leak (dev-only fallback)', () => {
 
   test('subprocess sandbox adds AX_ env vars with canonical symlink paths', async () => {
     // Verify subprocess actually spawns with the right env by running a real process.
-    // With canonical paths, AX_WORKSPACE and AX_SKILLS point to symlinks under /tmp/.ax-mounts-*/
+    // With canonical paths, AX_WORKSPACE points to symlinks under /tmp/.ax-mounts-*/
+    // Skills are now sent via stdin payload, so AX_SKILLS is no longer set.
     const { mkdirSync, rmSync } = await import('node:fs');
     const ws = '/tmp/test-ws-' + process.pid;
     mkdirSync(ws, { recursive: true });
-    mkdirSync(ws + '/skills', { recursive: true });
     try {
     const provider = await createSubprocess(mockConfig);
     const proc = await provider.spawn({
       workspace: ws,
-      skills: ws + '/skills',
       ipcSocket: '/tmp/test-ipc.sock',
       command: ['node', '-e', 'console.log(JSON.stringify({ipc:process.env.AX_IPC_SOCKET,ws:process.env.AX_WORKSPACE,sk:process.env.AX_SKILLS}))'],
       timeoutSec: 5,
@@ -195,9 +194,9 @@ describe('subprocess sandbox env leak (dev-only fallback)', () => {
 
     const env = JSON.parse(output.trim());
     expect(env.ipc).toBe('/tmp/test-ipc.sock');
-    // AX_WORKSPACE is now the mount root, AX_SKILLS is under mount root
+    // AX_WORKSPACE is now the mount root; AX_SKILLS is no longer set (skills come via stdin)
     expect(env.ws).toMatch(/\/tmp\/\.ax-mounts-[a-f0-9]+$/);
-    expect(env.sk).toMatch(/\/tmp\/\.ax-mounts-[a-f0-9]+\/skills$/);
+    expect(env.sk).toBeUndefined();
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }
@@ -282,10 +281,13 @@ describe('server workspace isolation', () => {
     expect(spawnSection).not.toContain("'--skills'");
     expect(spawnSection).not.toContain("'--agent-dir'");
 
-    // Skills dir is the merged overlayfs of agent + user skills.
-    expect(source).toContain("skills: skillsMerge.mergedDir");
+    // Skills are loaded from DocumentStore and sent via stdin payload, not
+    // mounted as a filesystem directory via overlayfs.
+    expect(source).toContain("loadSkillsFromDB");
+    expect(source).toContain("skills: skillsPayload");
 
-    // Must NOT have temp dir creation or copy logic for skills
+    // Must NOT have overlayfs merge or filesystem-based skills
+    expect(source).not.toContain("mergeSkillsOverlay");
     expect(source).not.toContain("wsSkillsDir");
     expect(source).not.toContain("hostSkillsDir");
   });

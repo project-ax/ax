@@ -27,7 +27,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
       const child = spawn('sandbox-exec', [
         '-f', policyPath,
         '-D', `WORKSPACE=${config.workspace}`,
-        '-D', `SKILLS=${config.skills}`,
+        '-D', `SKILLS=/dev/null`,
         '-D', `IPC_SOCKET_DIR=${dirname(config.ipcSocket)}`,
         '-D', `PROJECT_DIR=${projectDir}`,
         '-D', `NODE_DIR=${nodeDir}`,

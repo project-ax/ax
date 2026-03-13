@@ -2,6 +2,24 @@
 
 Enterprise agent architecture: multi-agent, multi-user, governance, registry, workspace tiers.
 
+## [2026-03-13 08:40] — Phase 1B: Host loads identity/skills from DB, sends via stdin
+
+**Task:** Modify server-completions.ts to load identity and skills from DocumentStore instead of filesystem, include in stdin payload sent to agent.
+**What I did:**
+- Added loadIdentityFromDB() and loadSkillsFromDB() helpers to server-completions.ts
+- Added extractSkillMeta() (exported) for skill name/description extraction from content
+- Replaced mergeSkillsOverlay() call with DB-based loading
+- Replaced USER_BOOTSTRAP.md filesystem read with DB-based identity loading
+- Added identity and skills fields to stdin payload JSON
+- Removed `skills` field from SandboxConfig interface
+- Removed skills symlink, AX_SKILLS env var, and mergeSkillsOverlay() from canonical-paths.ts
+- Updated all 6 sandbox providers (subprocess, seatbelt, docker, bwrap, nsjail, k8s)
+- Updated tests: canonical-paths, sandbox-isolation, subprocess, k8s
+- Added new test file: server-completions-db.test.ts (6 tests for extractSkillMeta)
+**Files touched:** src/host/server-completions.ts, src/providers/sandbox/types.ts, src/providers/sandbox/canonical-paths.ts, src/providers/sandbox/{subprocess,seatbelt,docker,bwrap,nsjail,k8s}.ts, tests/providers/sandbox/{canonical-paths,k8s,subprocess}.test.ts, tests/sandbox-isolation.test.ts, tests/host/server-completions-db.test.ts
+**Outcome:** Success — build passes, 206 test files / 2391 tests pass
+**Notes:** AgentConfig on agent-side still has skills field — that's Phase 1C (Task 3). Seatbelt still passes SKILLS=/dev/null for seatbelt policy compatibility.
+
 ## [2026-02-22 02:00] — Rebase onto main and fix build error
 
 **Task:** Rebase feature branch onto latest main to resolve merge conflicts, then update PR

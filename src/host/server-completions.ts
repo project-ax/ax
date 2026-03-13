@@ -4,17 +4,16 @@
  * agent spawning, outbound scanning, and memory persistence.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { isValidSessionId, workspaceDir, agentIdentityDir, agentWorkspaceDir, agentSkillsDir, userSkillsDir, userWorkspaceDir } from '../paths.js';
-import { mergeSkillsOverlay } from '../providers/sandbox/canonical-paths.js';
+import { workspaceDir, agentWorkspaceDir, userWorkspaceDir } from '../paths.js';
 import type { Config, ProviderRegistry, ContentBlock, ImageMimeType } from '../types.js';
 import { safePath } from '../utils/safe-path.js';
 import type { InboundMessage } from '../providers/channel/types.js';
 import { deserializeContent } from '../utils/content-serialization.js';
-import type { ConversationStoreProvider, MessageQueueStore } from '../providers/storage/types.js';
+import type { ConversationStoreProvider, DocumentStore, MessageQueueStore } from '../providers/storage/types.js';
 import type { Router } from './router.js';
 import { TaintBudget, thresholdForProfile } from './taint-budget.js';
 import { type Logger, truncate } from '../logger.js';
@@ -79,6 +78,179 @@ const MIME_TO_EXT: Record<string, string> = {
   'image/gif': '.gif',
   'image/webp': '.webp',
 };
+
+// ── Identity/Skills types for stdin payload ──
+
+/** Identity fields loaded from DocumentStore, keyed by filename. */
+export interface IdentityPayload {
+  agents?: string;
+  soul?: string;
+  identity?: string;
+  user?: string;
+  bootstrap?: string;
+  userBootstrap?: string;
+  heartbeat?: string;
+}
+
+/** A skill loaded from DocumentStore with extracted metadata. */
+export interface SkillPayload {
+  name: string;
+  path: string;
+  description: string;
+  content: string;
+  scope: 'agent' | 'user';
+}
+
+/** Map from identity filename (without .md) to the corresponding IdentityPayload field. */
+const IDENTITY_FILE_MAP: Record<string, keyof IdentityPayload> = {
+  'AGENTS.md': 'agents',
+  'SOUL.md': 'soul',
+  'IDENTITY.md': 'identity',
+  'USER.md': 'user',
+  'BOOTSTRAP.md': 'bootstrap',
+  'USER_BOOTSTRAP.md': 'userBootstrap',
+  'HEARTBEAT.md': 'heartbeat',
+};
+
+/**
+ * Extract skill name and description from markdown content.
+ * Takes the H1 title as the name and the first non-empty, non-heading line
+ * as the description. Falls back to the last segment of the path if no H1 found.
+ */
+export function extractSkillMeta(content: string, path: string): { name: string; description: string } {
+  const lines = content.split('\n');
+  // Default name: last segment of path (e.g. 'deploy' from 'main/deploy')
+  const lastSegment = path.split('/').pop() ?? path;
+  let name = lastSegment.replace(/\.md$/i, '');
+  let description = '';
+
+  for (const line of lines) {
+    const h1Match = line.match(/^#\s+(.+)/);
+    if (h1Match && !name.includes('/')) {
+      name = h1Match[1].trim();
+      continue;
+    }
+    // First non-empty, non-heading line is the description
+    if (!description && line.trim() && !line.startsWith('#')) {
+      description = line.trim();
+      break;
+    }
+  }
+
+  return { name, description: description || 'No description' };
+}
+
+/**
+ * Load identity files from DocumentStore for a given agent and user.
+ * Returns an IdentityPayload with fields populated from matching documents.
+ */
+async function loadIdentityFromDB(
+  documents: DocumentStore,
+  agentName: string,
+  userId: string,
+  logger: Logger,
+): Promise<IdentityPayload> {
+  const identity: IdentityPayload = {};
+
+  try {
+    const allKeys = await documents.list('identity');
+    const agentPrefix = `${agentName}/`;
+    const userPrefix = `${agentName}/users/${userId}/`;
+
+    // Load agent-level identity files
+    for (const key of allKeys) {
+      if (!key.startsWith(agentPrefix)) continue;
+      // Skip user-level keys at this stage
+      if (key.includes('/users/')) continue;
+
+      const filename = key.slice(agentPrefix.length);
+      const field = IDENTITY_FILE_MAP[filename];
+      if (field) {
+        const content = await documents.get('identity', key);
+        if (content) {
+          identity[field] = content;
+        }
+      }
+    }
+
+    // Load user-level identity files (e.g. USER.md)
+    for (const key of allKeys) {
+      if (!key.startsWith(userPrefix)) continue;
+
+      const filename = key.slice(userPrefix.length);
+      const field = IDENTITY_FILE_MAP[filename];
+      if (field) {
+        const content = await documents.get('identity', key);
+        if (content) {
+          identity[field] = content;
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn('identity_load_failed', { error: (err as Error).message });
+  }
+
+  return identity;
+}
+
+/**
+ * Load skills from DocumentStore for a given agent and user.
+ * User-level skills shadow agent-level skills when relative paths match.
+ * Returns an array of SkillPayload with extracted metadata.
+ */
+async function loadSkillsFromDB(
+  documents: DocumentStore,
+  agentName: string,
+  userId: string,
+  logger: Logger,
+): Promise<SkillPayload[]> {
+  try {
+    const allKeys = await documents.list('skills');
+    const agentPrefix = `${agentName}/`;
+    const userPrefix = `${agentName}/users/${userId}/`;
+
+    // Collect agent-level skills keyed by relative path
+    const agentSkills = new Map<string, string>(); // relativePath → key
+    for (const key of allKeys) {
+      if (!key.startsWith(agentPrefix)) continue;
+      if (key.includes('/users/')) continue;
+      const relativePath = key.slice(agentPrefix.length);
+      agentSkills.set(relativePath, key);
+    }
+
+    // Collect user-level skills keyed by relative path
+    const userSkills = new Map<string, string>(); // relativePath → key
+    for (const key of allKeys) {
+      if (!key.startsWith(userPrefix)) continue;
+      const relativePath = key.slice(userPrefix.length);
+      userSkills.set(relativePath, key);
+    }
+
+    // Merge: user skills shadow agent skills with matching relative paths
+    const mergedPaths = new Map<string, { key: string; scope: 'agent' | 'user' }>();
+    for (const [relPath, key] of agentSkills) {
+      mergedPaths.set(relPath, { key, scope: 'agent' });
+    }
+    for (const [relPath, key] of userSkills) {
+      mergedPaths.set(relPath, { key, scope: 'user' }); // shadows agent
+    }
+
+    // Load content and extract metadata
+    const skills: SkillPayload[] = [];
+    for (const [relPath, { key, scope }] of mergedPaths) {
+      const content = await documents.get('skills', key);
+      if (!content) continue;
+
+      const { name, description } = extractSkillMeta(content, relPath);
+      skills.push({ name, path: relPath, description, content, scope });
+    }
+
+    return skills;
+  } catch (err) {
+    logger.warn('skills_load_failed', { error: (err as Error).message });
+    return [];
+  }
+}
 
 /**
  * Try to parse structured agent output.
@@ -255,17 +427,8 @@ export async function processCompletion(
   let workspace = '';
   const isPersistent = !!persistentSessionId;
   let proxyCleanup: (() => void) | undefined;
-  let skillsCleanup: (() => void) | undefined;
-  // Skills: merge agent-level and user-level skills via overlayfs.
-  // Agent skills form the lower layer; user skills shadow agent skills of the same name.
   const agentName = config.agent_name ?? 'main';
   const currentUserId = userId ?? process.env.USER ?? 'default';
-  const agentSkills = agentSkillsDir(agentName);
-  const userSkills = userSkillsDir(agentName, currentUserId);
-  mkdirSync(agentSkills, { recursive: true });
-  mkdirSync(userSkills, { recursive: true });
-  const skillsMerge = mergeSkillsOverlay(agentSkills, userSkills);
-  skillsCleanup = skillsMerge.cleanup;
   try {
     if (persistentSessionId) {
       workspace = workspaceDir(persistentSessionId);
@@ -445,15 +608,13 @@ export async function processCompletion(
     mkdirSync(enterpriseAgentWs, { recursive: true });
     mkdirSync(enterpriseUserWs, { recursive: true });
 
-    // Read USER_BOOTSTRAP.md from the config dir (not in sandbox mount) to pass via stdin
-    let userBootstrapContent: string | undefined;
-    try {
-      const configDir = agentIdentityDir(agentName);
-      const ubPath = join(configDir, 'USER_BOOTSTRAP.md');
-      if (existsSync(ubPath)) {
-        userBootstrapContent = readFileSync(ubPath, 'utf-8');
-      }
-    } catch { /* non-fatal */ }
+    // ── Load identity from DocumentStore ──
+    // Identity files are keyed as <agentName>/<filename> and <agentName>/users/<userId>/<filename>
+    const identityPayload = await loadIdentityFromDB(providers.storage.documents, agentName, currentUserId, reqLogger);
+
+    // ── Load skills from DocumentStore ──
+    // Skills are keyed as <agentName>/<path> (agent-level) and <agentName>/users/<userId>/<path> (user-level)
+    const skillsPayload = await loadSkillsFromDB(providers.storage.documents, agentName, currentUserId, reqLogger);
 
     // Build stdin payload once — reused across retry attempts.
     const taintState = taintBudget.getState(sessionId);
@@ -472,8 +633,9 @@ export async function processCompletion(
       agentId: agentName,
       agentWorkspace: enterpriseAgentWs,
       userWorkspace: enterpriseUserWs,
-      // Identity content from config dir (not in sandbox mount)
-      ...(userBootstrapContent ? { userBootstrapContent } : {}),
+      // Identity and skills from DocumentStore (not filesystem)
+      identity: identityPayload,
+      skills: skillsPayload,
     });
 
     // Spawn, run, and collect agent output — with retry on transient crashes.
@@ -481,7 +643,6 @@ export async function processCompletion(
     // Permanent: auth failures, bad config, content filter blocks.
     const sandboxConfig = {
       workspace,
-      skills: skillsMerge.mergedDir,
       ipcSocket: ipcSocketPath,
       agentDir,
       timeoutSec: config.sandbox.timeout_sec,
@@ -776,12 +937,6 @@ export async function processCompletion(
     if (workspace && !isPersistent) {
       try { rmSync(workspace, { recursive: true, force: true }); } catch {
         reqLogger.debug('workspace_cleanup_failed', { workspace });
-      }
-    }
-    // Clean up overlayfs skills merge (unmount if applicable)
-    if (skillsCleanup) {
-      try { skillsCleanup(); } catch {
-        reqLogger.debug('skills_cleanup_failed');
       }
     }
   }
