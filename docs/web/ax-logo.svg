@@ -1,11 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="128" height="128" fill="none">
-  <rect x="1" y="1" width="30" height="30" rx="8" fill="url(#g)" fill-opacity="0.12" stroke="url(#g)" stroke-width="1.2"/>
-  <!-- "a" -->
-  <path d="M8.5 22V18.5C8.5 16 10 14 12.5 14C15 14 16 15.5 16 17.5V22M16 19H8.5" stroke="url(#g)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <!-- "x" -->
-  <path d="M18.5 14L24.5 22M24.5 14L18.5 22" stroke="url(#g)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" fill="none">
+  <!-- Hexagon (matches dashboard Lucide Hexagon icon) -->
+  <path d="M64 8L113.7 36.7V93.3L64 120L14.3 93.3V36.7L64 8Z"
+        fill="url(#g)" fill-opacity="0.12"
+        stroke="url(#g)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
   <defs>
-    <linearGradient id="g" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
+    <linearGradient id="g" x1="14" y1="8" x2="114" y2="120" gradientUnits="userSpaceOnUse">
       <stop stop-color="#eab308"/>
       <stop offset="1" stop-color="#facc15"/>
     </linearGradient>

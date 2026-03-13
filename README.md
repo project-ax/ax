@@ -2,7 +2,7 @@
   <img src="docs/web/ax-logo.svg" alt="Project AX" width="128">
 </p>
 
-<p align="center"><em>Like OpenClaw but with trust issues</em></p>
+<p align="center"><em>Let your agent cook. In a fireproof kitchen.</em></p>
 <p align="center"><strong>Always-on AI agents that act autonomously</strong></p>
 
 <p align="center">
@@ -35,7 +35,7 @@ Sound familiar? It should. **OpenClaw** proved that AI agents can be genuinely u
 
 We love what OpenClaw does. We just couldn't sleep at night running it.
 
-AX gives you the same power — **multi-channel messaging, web access, browser automation, image generation, long-term memory, extensible skills, plugin ecosystem** — but with security guardrails that are actually enforced by the architecture, not just by good intentions. And at ~10,700 lines of TypeScript across 16 provider categories, it's still small enough to audit in a weekend.
+AX gives you the same power — **multi-channel messaging, web access, browser automation, image generation, long-term memory, extensible skills, plugin ecosystem** — but with security guardrails that are actually enforced by the architecture, not just by good intentions. And at ~34,600 lines of TypeScript across 17 provider categories, it's still small enough to audit in a long weekend.
 
 The best part? **You decide where you sit on the spectrum.** Lock everything down, open everything up, or land somewhere in the middle. We give you the dial. We just make sure the safety net is always there, even when you crank it to 11.
 
@@ -143,6 +143,10 @@ Plug AX into your existing observability stack. Set `OTEL_EXPORTER_OTLP_ENDPOINT
 
 Zero cost when disabled. The heavy OTel SDK packages are lazy-loaded only when tracing is actually configured.
 
+### Agent Workspaces
+
+Persistent file workspaces that give agents a place to read and write files across sessions. Three scopes — **agent** (shared by all sessions for that agent), **user** (per-user across sessions), and **session** (ephemeral per conversation) — are bind-mounted into the sandbox. After each session, changed files go through scanner screening before being persisted. Backends include local filesystem and Google Cloud Storage, so workspaces work the same on your laptop and in Kubernetes.
+
 ### Shared Database & Storage
 
 AX consolidates all persistent state — conversations, memory, audit logs, message queues, session tracking — behind a shared `DatabaseProvider`. One database choice for the whole application. SQLite locally, PostgreSQL in production. Schema is managed through Kysely migrations, and vector search is available when sqlite-vec or pgvector extensions are loaded.
@@ -225,8 +229,8 @@ Every subsystem is a swappable provider. Here's what ships in the box:
 
 | Category | Implementations |
 |----------|----------------|
-| **LLM** | Anthropic, OpenAI, OpenRouter, Groq, router (with fallback), traced (OTel wrapper) |
-| **Image** | OpenAI, OpenRouter, Gemini, router (with fallback) |
+| **LLM** | Anthropic, OpenAI, OpenRouter, Groq, DeepInfra, router (with fallback), traced (OTel wrapper) |
+| **Image** | OpenAI, OpenRouter, Groq, Gemini, router (with fallback) |
 | **Memory** | cortex (vector-backed, LLM-powered extraction and semantic search) |
 | **Scanner** | patterns (regex-only), guardian (regex + LLM classification) |
 | **Channel** | Slack |
@@ -241,8 +245,9 @@ Every subsystem is a swappable provider. Here's what ships in the box:
 | **Database** | SQLite (with sqlite-vec), PostgreSQL (with pgvector) |
 | **Storage** | file, database |
 | **EventBus** | inprocess, NATS JetStream |
+| **Workspace** | none (disabled), local (filesystem), gcs (Google Cloud Storage) |
 
-16 provider categories. 45+ implementations. All swappable.
+17 provider categories. 48+ implementations. All swappable.
 
 ## Quick Start
 
@@ -256,7 +261,7 @@ export ANTHROPIC_API_KEY=your-key-here
 # Run AX
 npm start
 
-# Run tests (170 test files and counting)
+# Run tests (210+ test files and counting)
 npm test
 ```
 
@@ -283,6 +288,7 @@ providers:
   scheduler: none
   database: sqlite
   eventbus: inprocess
+  workspace: none
 ```
 
 For Kubernetes production deployments, the Helm chart renders a ConfigMap with production-ready defaults:
