@@ -1,5 +1,5 @@
 ---
-name: ax/admin-dashboard-ui
+name: admin-dashboard-ui
 description: Use when creating, editing, or reviewing any admin dashboard UI component. Covers the complete design system — colors, typography, components, layout, animations, and patterns.
 ---
 

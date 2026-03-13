@@ -1,5 +1,5 @@
 ---
-name: ax-provider-image
+name: provider-image
 description: Use when modifying image generation providers — Gemini, OpenAI, OpenRouter, router fallback logic, or image model routing in src/providers/image/
 ---
 

@@ -1,5 +1,5 @@
 ---
-name: ax-host
+name: host
 description: Use when modifying the trusted host process — server orchestration, message routing, IPC handler, request lifecycle, event streaming, file handling, plugin loading, or agent delegation in src/host/
 ---
 

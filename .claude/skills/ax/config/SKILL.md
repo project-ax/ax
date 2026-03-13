@@ -1,5 +1,5 @@
 ---
-name: ax-config
+name: config
 description: Use when modifying configuration parsing, path resolution, environment variables, or OAuth token handling in config.ts, paths.ts, or dotenv.ts
 ---
 

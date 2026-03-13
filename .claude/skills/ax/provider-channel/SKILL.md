@@ -1,5 +1,5 @@
 ---
-name: ax-provider-channel
+name: provider-channel
 description: Use when modifying message channel providers — Slack integration, session addressing, or adding new channels (Discord, Telegram) in src/providers/channel/
 ---
 

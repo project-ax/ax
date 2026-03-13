@@ -1,5 +1,5 @@
 ---
-name: ax-provider-development
+name: provider-development
 description: Use as a step-by-step guide when adding a new provider implementation or an entirely new provider category to AX
 ---
 

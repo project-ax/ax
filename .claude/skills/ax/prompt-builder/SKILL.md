@@ -1,5 +1,5 @@
 ---
-name: ax-prompt-builder
+name: prompt-builder
 description: Use when modifying or extending the agent prompt system — adding modules, adjusting priority ordering, token budgeting, or bootstrap mode in src/agent/prompt/
 ---
 

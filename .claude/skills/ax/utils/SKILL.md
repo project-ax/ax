@@ -1,5 +1,5 @@
 ---
-name: ax-utils
+name: utils
 description: Use when working with path validation (safePath), SQLite adapter selection, disabled provider stubs, tracing, asset resolution, embedding client, OpenAI-compat helpers, or skill format utilities in src/utils/
 ---
 

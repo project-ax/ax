@@ -1,5 +1,5 @@
 ---
-name: ax-provider-screener
+name: provider-screener
 description: Use when modifying skill content screeners — static analysis, permission validation, or exfiltration detection in src/providers/screener/
 ---
 

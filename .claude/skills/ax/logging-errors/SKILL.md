@@ -1,5 +1,5 @@
 ---
-name: ax-logging-errors
+name: logging-errors
 description: Use when modifying logging, error handling, or diagnostic messages — logger setup, transports, error diagnosis patterns in src/logger.ts and src/errors.ts
 ---
 

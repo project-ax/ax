@@ -1,5 +1,5 @@
 ---
-name: ax-persistence
+name: persistence
 description: Use when modifying data persistence — conversation history (SQLite), message queue, file store, job store, session store, or SQLite wrapper utilities in conversation-store.ts, file-store.ts, db.ts, job-store.ts, session-store.ts, or utils/sqlite.ts
 ---
 

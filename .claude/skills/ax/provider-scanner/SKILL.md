@@ -1,5 +1,5 @@
 ---
-name: ax-provider-scanner
+name: provider-scanner
 description: Use when modifying input/output security scanners — regex patterns, canary tokens, or LLM-based detection in src/providers/scanner/
 ---
 

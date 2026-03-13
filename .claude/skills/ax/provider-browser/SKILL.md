@@ -1,5 +1,5 @@
 ---
-name: ax-provider-browser
+name: provider-browser
 description: Use when modifying browser automation providers — sandboxed Playwright, page snapshots, or element interaction in src/providers/browser/
 ---
 

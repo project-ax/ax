@@ -1,5 +1,5 @@
 ---
-name: ax-agent
+name: agent
 description: Use when modifying the sandboxed agent process — runner, IPC client, local/IPC tools, tool catalog, prompt building, or identity loading in src/agent/
 ---
 

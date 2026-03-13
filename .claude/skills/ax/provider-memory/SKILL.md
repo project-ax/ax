@@ -1,5 +1,5 @@
 ---
-name: ax-provider-memory
+name: provider-memory
 description: Use when modifying memory/knowledge storage providers — file, SQLite+FTS5, memU knowledge graph, or Cortex (embedding-based) in src/providers/memory/
 ---
 

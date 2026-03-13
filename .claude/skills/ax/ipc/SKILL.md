@@ -1,5 +1,5 @@
 ---
-name: ax-ipc
+name: ipc
 description: Use when modifying IPC protocol between host and agent — schemas, actions, length-prefix framing, or Zod validation in ipc-schemas.ts and ipc-server.ts
 ---
 

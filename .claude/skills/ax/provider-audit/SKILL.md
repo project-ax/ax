@@ -1,5 +1,5 @@
 ---
-name: ax-provider-audit
+name: provider-audit
 description: Use when modifying audit logging providers — JSONL file logs, database-backed logs, or audit entry structure in src/providers/audit/
 ---
 

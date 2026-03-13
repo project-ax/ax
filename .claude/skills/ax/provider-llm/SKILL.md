@@ -1,5 +1,5 @@
 ---
-name: ax-provider-llm
+name: provider-llm
 description: Use when modifying LLM providers — Anthropic, OpenAI, multi-model router, traced wrapper, or mock provider in src/providers/llm/
 ---
 

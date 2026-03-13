@@ -1,5 +1,5 @@
 ---
-name: ax-provider-sandbox
+name: provider-sandbox
 description: Use when modifying agent sandbox isolation -- seatbelt (macOS), nsjail (Linux), bwrap (Linux), Docker, or subprocess providers in src/providers/sandbox/
 ---
 

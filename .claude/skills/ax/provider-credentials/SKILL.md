@@ -1,5 +1,5 @@
 ---
-name: ax-provider-credentials
+name: provider-credentials
 description: Use when modifying credential storage providers — plaintext env vars or OS keychain in src/providers/credentials/
 ---
 

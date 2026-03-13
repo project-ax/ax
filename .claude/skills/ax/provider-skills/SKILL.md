@@ -1,5 +1,5 @@
 ---
-name: ax-provider-skills
+name: provider-skills
 description: Use when modifying skills store providers — readonly file access, git-backed skill proposals with screening & approval gates, AgentSkills format parsing, and manifest generation in src/providers/skills/
 ---
 

@@ -1,5 +1,5 @@
 ---
-name: ax-provider-web
+name: provider-web
 description: Use when modifying web access providers -- proxied HTTP fetch, DNS pinning, taint tagging, or web search in src/providers/web/
 ---
 

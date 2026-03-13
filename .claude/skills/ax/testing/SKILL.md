@@ -1,5 +1,5 @@
 ---
-name: ax-testing
+name: testing
 description: Use when writing or debugging tests — test structure, fixtures, mocking patterns, common assertions, and gotchas for the vitest/bun test suite in tests/
 ---
 

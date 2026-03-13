@@ -1,5 +1,5 @@
 ---
-name: ax-provider-storage
+name: provider-storage
 description: Use when modifying persistent storage — message queues, conversations, sessions, documents, or database storage backend in src/providers/storage/
 ---
 

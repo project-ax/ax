@@ -1,5 +1,5 @@
 ---
-name: ax-cli
+name: cli
 description: Use when modifying CLI commands — chat, send, bootstrap, plugin, or adding new CLI commands in src/cli/
 ---
 

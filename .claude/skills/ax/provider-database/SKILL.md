@@ -1,5 +1,5 @@
 ---
-name: ax-provider-database
+name: provider-database
 description: Use when modifying the shared database connection factory — SQLite, PostgreSQL, vector extensions, or Kysely instance management in src/providers/database/
 ---
 

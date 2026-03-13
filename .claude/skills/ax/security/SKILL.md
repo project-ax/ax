@@ -1,5 +1,5 @@
 ---
-name: ax-security
+name: security
 description: Use when modifying security mechanisms — taint budget, canary tokens, path traversal defense, sandbox isolation, scanner patterns, plugin integrity, or any security-sensitive code paths
 ---
 

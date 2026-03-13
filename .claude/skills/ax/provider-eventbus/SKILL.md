@@ -1,5 +1,5 @@
 ---
-name: ax-provider-eventbus
+name: provider-eventbus
 description: Use when modifying the event bus — in-process pub/sub, NATS JetStream, or streaming event routing in src/providers/eventbus/
 ---
 

@@ -1,5 +1,5 @@
 ---
-name: ax-runners
+name: runners
 description: Use when modifying agent runner implementations — pi-session (pi-coding-agent), claude-code (Agent SDK), LLM transport selection, MCP tool wiring, or stream handling in src/agent/runners/
 ---
 

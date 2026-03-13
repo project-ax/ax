@@ -1,5 +1,5 @@
 ---
-name: ax-onboarding
+name: onboarding
 description: Use when modifying the first-run setup, configuration wizard, bootstrap ritual, or profile defaults in src/onboarding/ and src/cli/bootstrap.ts
 ---
 

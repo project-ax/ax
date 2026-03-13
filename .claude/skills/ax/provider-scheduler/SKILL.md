@@ -1,5 +1,5 @@
 ---
-name: ax-provider-scheduler
+name: provider-scheduler
 description: Use when modifying scheduler providers — cron jobs, heartbeats, proactive hints, or active hours in src/providers/scheduler/
 ---
 

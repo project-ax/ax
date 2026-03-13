@@ -1,5 +1,5 @@
 ---
-name: ax-provider-system
+name: provider-system
 description: Use when adding new provider categories, modifying provider loading, plugin infrastructure, or understanding the provider contract pattern -- registry.ts, provider-map.ts, provider-sdk, and the create(config) convention
 ---
 
