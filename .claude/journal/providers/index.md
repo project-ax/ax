@@ -4,6 +4,9 @@ Provider implementations: image, channel, skills, sandbox, memory, LLM.
 
 ## Entries
 
+- 2026-03-13 — Add GCS workspace backend with 20 tests (TDD, mock GCS bucket) [workspace.md](workspace.md)
+- 2026-03-13 — Design workspace provider acceptance test plan (16 tests: ST/BT/IT, local+k8s) [workspace.md](workspace.md)
+- 2026-03-13 — Add comprehensive workspace provider tests (52 tests: none, shared, local) [workspace.md](workspace.md)
 - 2026-03-13 — Integrate workspace provider into AX infrastructure (types, provider-map, IPC, tools, lifecycle) [workspace.md](workspace.md)
 - 2026-03-13 — Implement workspace provider category: types, none, shared orchestration, local backend [workspace.md](workspace.md)
 - 2026-03-05 21:00 — Rename promptfoo scanner to guardian + add LLM-based injection detection [scanner.md](scanner.md)

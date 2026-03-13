@@ -1,5 +1,29 @@
 # Workspace Provider Journal
 
+## [2026-03-13 11:42] — Add GCS workspace backend
+
+**Task:** Implement GCS workspace backend per the design plan section 9 (`gcs` — Google Cloud Storage).
+**What I did:** Added `@google-cloud/storage` dependency. Added `bucket` and `prefix` fields to `WorkspaceConfig` in types.ts. Created `src/providers/workspace/gcs.ts` with `createGcsBackend()` (exported for testing) and `create()` factory. Created `tests/providers/workspace/gcs.test.ts` with 20 tests using an in-memory mock GCS bucket. TDD approach: wrote tests first (RED), verified failure, then implemented (GREEN).
+**Files touched:** package.json (dep), src/providers/workspace/types.ts, src/providers/workspace/gcs.ts (new), tests/providers/workspace/gcs.test.ts (new)
+**Outcome:** Success — 20 new tests pass, all 2449 tests in full suite pass (209 files).
+**Notes:** The `createGcsBackend()` accepts a `GcsBucketLike` interface for testability — tests pass a Map-backed mock. The GCS SDK is lazily imported in `create()` to avoid requiring it when other backends are used. Diff logic reuses the same snapshot approach as the local backend (hash-based). The provider-map already had the `gcs` entry from the integration step.
+
+## [2026-03-13] — Design workspace provider acceptance test plan
+
+**Task:** Create acceptance test plan for the workspace provider covering both local and k8s environments.
+**What I did:** Read the design plan (docs/plans/2026-03-13-workspace-provider-design.md), all 4 implementation files, 3 unit test files, IPC schemas, IPC handler, tool catalog, server-completions lifecycle, and both local/k8s acceptance fixtures. Designed 16 tests: 8 structural (interface shape, provider-map, registry, IPC schema, tool catalog, orchestration defaults, IPC handler wiring), 5 behavioral (mount via chat, write+persist, none disables tools, oversized file rejection, ignore pattern filtering), 3 integration (cross-session persistence, additive scope escalation, host auto-mount of remembered scopes). Included full k8s execution plan using `workspace: local` on the host pod (GCS backend not yet implemented). Documented fixture changes, config patching strategy, side-effect checks for both environments, and the execution architecture.
+**Files touched:** Created tests/acceptance/workspace/test-plan.md
+**Outcome:** Success — comprehensive test plan ready for review and execution.
+**Notes:** K8s uses `workspace: local` (not gcs) since gcs backend is unimplemented. The local backend runs on the host pod's ephemeral filesystem, which is fine for acceptance tests but NOT for production. BT-3 (none provider test) requires a separate server/namespace since it needs a different config. BT-4 needs `maxFileSize: 100` override for testability.
+
+## [2026-03-13 10:47] — Add comprehensive workspace provider tests
+
+**Task:** Write tests for none.ts, shared.ts, and local.ts workspace providers in tests/providers/workspace/.
+**What I did:** Created 3 test files with 52 total tests: none.test.ts (7 tests: empty returns, no-op behavior, session independence), shared.test.ts (27 tests: scope tracking, structural checks for size/count/commit-size/ignore/binary, scanner integration with mock ScannerProvider, commit result shapes, cleanup behavior, config defaults), local.test.ts (18 tests: mount directory creation, idempotent mount, safePath traversal protection, diff detection for add/modify/delete, commit persistence and re-snapshot, full lifecycle with cross-session persistence).
+**Files touched:** Created tests/providers/workspace/{none.test.ts, shared.test.ts, local.test.ts}
+**Outcome:** Success — all 52 tests pass. Used real filesystem with tmpdir for local.test.ts, mocked backend/scanner for shared.test.ts.
+**Notes:** Followed existing test patterns (vitest, .js extension imports, Config cast, tmpdir+randomUUID for temp dirs). The shared.test.ts tests exercise both structural filter layers and scanner integration by injecting mock backends that return controlled FileChange arrays.
+
 ## [2026-03-13] — Integrate workspace provider into AX infrastructure
 
 **Task:** Wire the workspace provider into 7 integration points: types, provider-map, IPC schemas, agent tools, host IPC handler, host turn lifecycle, and config defaults.

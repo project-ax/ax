@@ -56,6 +56,8 @@ export interface WorkspaceConfig {
   maxFiles: number;
   maxCommitSize: number;
   ignorePatterns: string[];
+  /** Backend-specific options (bucket, prefix, repoUrl, etc.) are read
+   *  directly from the raw config by each backend — not declared here. */
 }
 
 // ═══════════════════════════════════════════════════════
