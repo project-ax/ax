@@ -40,7 +40,7 @@ Validated by `ConfigSchema` (Zod `strictObject` -- rejects unknown keys).
 | `providers.audit` | string | required | Audit provider |
 | `providers.sandbox` | string | required | Sandbox provider |
 | `providers.scheduler` | string | required | Scheduler provider |
-| `providers.storage` | string | required | Storage provider (e.g., `file`, `database`) |
+| `providers.storage` | string | `database` | Storage provider (only `database` supported) |
 | `providers.database` | string | optional | Database provider (e.g., `sqlite`, `postgresql`) |
 | `providers.eventbus` | string | required | Event bus provider (e.g., `inprocess`, `nats`) |
 | `providers.screener` | string | optional | Skill screener provider |

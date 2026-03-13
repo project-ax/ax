@@ -10,12 +10,9 @@
  *     .env              — API keys
  *     registry.json     — agent registry (enterprise)
  *     data/
- *       messages.db     — message queue
- *       conversations.db — conversation history
+ *       ax.db           — shared SQLite database (messages, conversations, sessions, documents, audit)
  *       memory.db       — SQLite memory provider
  *       memory/         — file memory provider
- *       audit.db        — SQLite audit provider
- *       audit/          — file audit provider
  *       workspaces/     — persistent agent workspaces
  *         <uuid>/                        — legacy flat UUID workspace
  *         main/cli/default/              — default CLI chat session

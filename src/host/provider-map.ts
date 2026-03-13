@@ -84,7 +84,6 @@ const _PROVIDER_MAP = {
     postgresql: '../providers/database/postgres.js',
   },
   storage: {
-    file:       '../providers/storage/file.js',
     database:   '../providers/storage/database.js',
   },
   eventbus: {

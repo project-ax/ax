@@ -4,10 +4,12 @@
 // Runs its own migrations against the shared Kysely instance.
 
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { sql, type Kysely } from 'kysely';
 import { runMigrations } from '../../utils/migrator.js';
 import { storageMigrations } from './migrations.js';
 import { serializeContent } from '../../utils/content-serialization.js';
+import { dataFile } from '../../paths.js';
 import type { Config, ContentBlock } from '../../types.js';
 import type { DatabaseProvider } from '../database/types.js';
 import type { SessionAddress, SessionScope } from '../channel/types.js';
@@ -297,6 +299,28 @@ function createDocumentStore(db: Kysely<any>, dbType: 'sqlite' | 'postgresql'): 
   };
 }
 
+/**
+ * One-time check for leftover file-based storage directories.
+ * Logs a warning so users know the old data is no longer used.
+ */
+function warnAboutLegacyFileStorage(): void {
+  const legacyDirs = [
+    dataFile('messages'),
+    dataFile('conversations'),
+    dataFile('sessions'),
+  ];
+  const found = legacyDirs.filter(d => existsSync(d));
+  if (found.length > 0) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      '[ax] Legacy file-based storage directories detected:\n' +
+      found.map(d => `  ${d}`).join('\n') + '\n' +
+      'These are no longer used — all storage is now database-backed.\n' +
+      'You can safely remove them once you have confirmed no data loss.',
+    );
+  }
+}
+
 export interface CreateOptions {
   database?: DatabaseProvider;
 }
@@ -306,6 +330,8 @@ export async function create(
   _name?: string,
   opts?: CreateOptions,
 ): Promise<StorageProvider> {
+  warnAboutLegacyFileStorage();
+
   const database = opts?.database;
   if (!database) {
     throw new Error(

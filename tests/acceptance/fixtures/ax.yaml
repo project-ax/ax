@@ -30,7 +30,8 @@ providers:
   channels: []
   web: none
   scanner: patterns
-  storage: file
+  storage: database
+  database: sqlite
   eventbus: inprocess
 
 # ── History / Memory / Embeddings ───────────────────────────

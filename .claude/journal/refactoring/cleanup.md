@@ -2,6 +2,14 @@
 
 General refactoring, stale reference cleanup, path realignment, dependency updates.
 
+## [2026-03-13 09:15] — Phase 2: Drop file-based StorageProvider
+
+**Task:** Remove `src/providers/storage/file.ts` and all file-based storage code; make database storage the only option.
+**What I did:** (1) Deleted `src/providers/storage/file.ts` and `tests/providers/storage/file.test.ts`. (2) Removed 'file' from storage provider map in `src/host/provider-map.ts`. (3) Changed storage default from 'file' to 'database' and database default from undefined to 'sqlite' in `src/config.ts`. (4) Added legacy file-storage directory warning in `src/providers/storage/database.ts`. (5) Updated `tests/integration/history-smoke.test.ts` to check for SQLite DB file instead of JSONL conversation files. (6) Updated acceptance fixture, README, skill files, and paths.ts comments.
+**Files touched:** `src/providers/storage/file.ts` (deleted), `tests/providers/storage/file.test.ts` (deleted), `src/host/provider-map.ts`, `src/config.ts`, `src/providers/storage/database.ts`, `src/paths.ts`, `tests/integration/history-smoke.test.ts`, `tests/acceptance/fixtures/ax.yaml`, `README.md`, `.claude/skills/ax/provider-storage/SKILL.md`, `.claude/skills/ax/config/SKILL.md`
+**Outcome:** Success — build passes, all 205 test files pass (2378 tests), zero failures.
+**Notes:** StorageProviderName type automatically narrows to just 'database' since it's derived from the provider map. The `database` config field now defaults to 'sqlite' so the storage provider always has a database backend available.
+
 ## [2026-03-05 20:44] — Rename memoryfs → cortex
 
 **Task:** Rename the "memoryfs" memory provider to "cortex" across the entire codebase

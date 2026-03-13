@@ -147,11 +147,10 @@ Zero cost when disabled. The heavy OTel SDK packages are lazy-loaded only when t
 
 AX consolidates all persistent state — conversations, memory, audit logs, message queues, session tracking — behind a shared `DatabaseProvider`. One database choice for the whole application. SQLite locally, PostgreSQL in production. Schema is managed through Kysely migrations, and vector search is available when sqlite-vec or pgvector extensions are loaded.
 
-The `StorageProvider` unifies conversation history, message queues, session tracking, and document storage behind a single interface. Use file-based storage for local development or database-backed storage for production deployments that need to survive pod restarts.
+The `StorageProvider` unifies conversation history, message queues, session tracking, and document storage behind a single interface backed by the database layer.
 
 ```yaml
 database: sqlite          # or postgresql
-storage: file             # or database
 history:
   max_turns: 100
   thread_context_turns: 20
@@ -283,7 +282,6 @@ providers:
   sandbox: subprocess
   scheduler: none
   database: sqlite
-  storage: file
   eventbus: inprocess
 ```
 
@@ -295,7 +293,6 @@ profile: paranoid
 providers:
   sandbox: k8s
   database: postgresql
-  storage: database
   audit: database
   eventbus: nats
   scanner: guardian

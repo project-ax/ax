@@ -1,11 +1,11 @@
 ---
 name: ax-provider-storage
-description: Use when modifying persistent storage — message queues, conversations, sessions, documents, or database/file storage backends in src/providers/storage/
+description: Use when modifying persistent storage — message queues, conversations, sessions, documents, or database storage backend in src/providers/storage/
 ---
 
 ## Overview
 
-Unified persistent storage abstraction with four sub-stores: MessageQueue, ConversationStore, SessionStore, and DocumentStore. Two implementations: database-backed (SQLite/PostgreSQL via shared DatabaseProvider) and file-based (local dev). All operations are async.
+Unified persistent storage abstraction with four sub-stores: MessageQueue, ConversationStore, SessionStore, and DocumentStore. Single database-backed implementation (SQLite/PostgreSQL via shared DatabaseProvider). All operations are async.
 
 ## Interface (`src/providers/storage/types.ts`)
 
@@ -58,28 +58,18 @@ Unified persistent storage abstraction with four sub-stores: MessageQueue, Conve
 | `delete(collection, key)` | Delete document; returns boolean         |
 | `list(collection)`        | List all keys in collection              |
 
-## Implementations
+## Implementation
 
 | Provider   | File          | Backend                | Notes                                      |
 |------------|---------------|------------------------|--------------------------------------------|
-| `file`     | `file.ts`     | Flat files             | JSONL conversations, atomic rename for messages, safePath() for docs |
 | `database` | `database.ts` | Shared DatabaseProvider | SQLite or PostgreSQL via Kysely            |
 
 Provider map entries in `src/host/provider-map.ts`:
 ```
 storage: {
-  file:     '../providers/storage/file.js',
   database: '../providers/storage/database.js',
 }
 ```
-
-## File Provider Details
-
-- Conversations stored as JSONL files (one line per turn, `\n` separator).
-- Message queue uses atomic rename (write to tmp file, then rename to target) to prevent partial reads.
-- Document store uses `safePath()` to prevent path traversal in collection/key names.
-- Session file encodes colons in sessionIds (`:` → `_`) via safePath.
-- Empty session returns `[]`, not an error.
 
 ## Database Provider Details
 
@@ -93,10 +83,10 @@ storage: {
 
 **Adding a new sub-store:**
 1. Define the interface in `types.ts`.
-2. Implement in both `file.ts` and `database.ts`.
+2. Implement in `database.ts`.
 3. Add migration in `migrations.ts` for the database tables.
 4. Expose on `StorageProvider` interface.
-5. Add tests for both implementations.
+5. Add tests.
 
 **Adding a new storage backend:**
 1. Create `src/providers/storage/<name>.ts` implementing `StorageProvider`.
@@ -106,20 +96,15 @@ storage: {
 
 ## Gotchas
 
-- **Both impls are async**: Even the file-based provider wraps sync operations in promises for interface consistency.
 - **Database requires injected DatabaseProvider**: Don't create standalone DB connections — use the shared `DatabaseProvider` from `CreateOptions`.
-- **Atomicity differs**: `replaceTurnsWithSummary` is transactional in database mode but multi-step in file mode. Race conditions possible with file backend under concurrent writes.
-- **safePath for all document ops**: File provider uses `safePath()` on collection and key names. Path traversal in keys is blocked.
-- **JSONL format**: Conversation files use newline-delimited JSON. Don't assume JSON array format.
 - **SQLite autoincrement IDs**: After delete+insert, IDs don't respect logical ordering. Don't rely on ID order for conversation turn ordering.
 - **Creating a MessageQueueStore in tests**: Requires full storage provider setup, not just the sub-store.
 - **Structured content serialization**: Uses JSON detection on load — content can be string or structured object.
+- **Legacy file-storage warning**: On startup, if old `~/.ax/data/messages/`, `conversations/`, or `sessions/` directories exist, a deprecation warning is logged.
 
 ## Key Files
 
 - `src/providers/storage/types.ts` — Interface definitions
-- `src/providers/storage/file.ts` — File-based implementation
 - `src/providers/storage/database.ts` — Database-backed implementation
 - `src/providers/storage/migrations.ts` — Database schema migrations
 - `tests/providers/storage/database.test.ts`
-- `tests/providers/storage/file.test.ts`
