@@ -2,6 +2,16 @@
 
 Sandbox providers, canonical paths, workspace tiers.
 
+## [2026-03-14 12:00] — Add Apple Container sandbox provider
+
+**Task:** Add a new sandbox provider using Apple's `container` CLI for lightweight VM-based isolation on macOS (Apple Silicon).
+**What I did:** Created `apple-container.ts` mirroring the Docker provider pattern. Uses `container run` with `--rm`, `-i`, `--read-only`, `--tmpfs /tmp`, `--memory`, `--cpus`, and `--publish-socket` for IPC socket forwarding. No `--network` flag needed (Apple Container has no network by default). Registered in provider-map.ts, added to onboarding PROVIDER_CHOICES, created test file, updated sandbox skill docs.
+**Files touched:**
+  - Created: src/providers/sandbox/apple-container.ts, tests/providers/sandbox/apple-container.test.ts
+  - Modified: src/host/provider-map.ts, src/onboarding/prompts.ts, .claude/skills/ax/provider-sandbox/SKILL.md
+**Outcome:** Success — all 4 tests pass, no unique build errors (pre-existing @types/node issues only)
+**Notes:** Apple Container uses `--publish-socket` (unique feature) for Unix socket forwarding instead of volume-mounting the socket directory. VM boundary provides stronger isolation than Docker's shared-kernel model, so `--cap-drop`, `--pids-limit`, `--security-opt` are unnecessary.
+
 ## [2026-03-13 09:40] — Remove identity mount from sandbox (Phase 4)
 
 **Task:** Remove the /workspace/identity mount from the sandbox. Identity files now come via stdin payload from DocumentStore.
