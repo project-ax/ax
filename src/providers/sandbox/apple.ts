@@ -80,9 +80,9 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         // boundary.
         '--publish-socket', `${bridgeSocketPath}:${CONTAINER_BRIDGE_SOCK}`,
 
-        // Enterprise mounts — canonical paths
-        ...(config.agentWorkspace ? ['-v', `${config.agentWorkspace}:${CANONICAL.agent}:ro`] : []),
-        ...(config.userWorkspace ? ['-v', `${config.userWorkspace}:${CANONICAL.user}:ro`] : []),
+        // Enterprise mounts — canonical paths (rw per-tier when workspace provider active)
+        ...(config.agentWorkspace ? ['-v', `${config.agentWorkspace}:${CANONICAL.agent}:${config.agentWorkspaceWritable ? 'rw' : 'ro'}`] : []),
+        ...(config.userWorkspace ? ['-v', `${config.userWorkspace}:${CANONICAL.user}:${config.userWorkspaceWritable ? 'rw' : 'ro'}`] : []),
 
         // Working directory — canonical mount root
         '-w', CANONICAL.root,

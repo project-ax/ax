@@ -81,9 +81,9 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         // Volume mounts — canonical paths so the LLM sees simple /scratch
         '-v', `${config.workspace}:${CANONICAL.scratch}:rw`,
         '-v', `${socketDir}:${socketDir}:rw`,
-        // Enterprise mounts — canonical paths (rw when workspace provider active, ro otherwise)
-        ...(config.agentWorkspace ? ['-v', `${config.agentWorkspace}:${CANONICAL.agent}:${config.workspaceMountsWritable ? 'rw' : 'ro'}`] : []),
-        ...(config.userWorkspace ? ['-v', `${config.userWorkspace}:${CANONICAL.user}:${config.workspaceMountsWritable ? 'rw' : 'ro'}`] : []),
+        // Enterprise mounts — canonical paths (rw per-tier when workspace provider active)
+        ...(config.agentWorkspace ? ['-v', `${config.agentWorkspace}:${CANONICAL.agent}:${config.agentWorkspaceWritable ? 'rw' : 'ro'}`] : []),
+        ...(config.userWorkspace ? ['-v', `${config.userWorkspace}:${CANONICAL.user}:${config.userWorkspaceWritable ? 'rw' : 'ro'}`] : []),
 
         // Working directory — canonical mount root
         '-w', CANONICAL.root,

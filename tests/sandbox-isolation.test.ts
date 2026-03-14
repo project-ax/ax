@@ -117,45 +117,51 @@ describe('seatbelt sandbox env isolation', () => {
   });
 });
 
-// ── Writable Workspace Mounts (workspace provider active) ────────────
+// ── Per-Tier Writable Workspace Flags in Sandbox Providers ───────────
 
-describe('writable workspace mounts via workspaceMountsWritable flag', () => {
-  test('docker mounts agent/user workspace as rw when workspaceMountsWritable is true', async () => {
+describe('per-tier writable workspace flags in sandbox providers', () => {
+  test('docker uses per-tier writable flags', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(resolve('src/providers/sandbox/docker.ts'), 'utf-8');
-
-    // When workspaceMountsWritable is true, mounts should be :rw not :ro
-    expect(source).toContain("config.workspaceMountsWritable ? 'rw' : 'ro'");
+    expect(source).toContain("config.agentWorkspaceWritable ? 'rw' : 'ro'");
+    expect(source).toContain("config.userWorkspaceWritable ? 'rw' : 'ro'");
+    expect(source).not.toContain('workspaceMountsWritable');
   });
 
-  test('bwrap uses --bind (rw) instead of --ro-bind when workspaceMountsWritable is true', async () => {
+  test('bwrap uses per-tier writable flags', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(resolve('src/providers/sandbox/bwrap.ts'), 'utf-8');
-
-    expect(source).toContain("config.workspaceMountsWritable ? '--bind' : '--ro-bind'");
+    expect(source).toContain("config.agentWorkspaceWritable ? '--bind' : '--ro-bind'");
+    expect(source).toContain("config.userWorkspaceWritable ? '--bind' : '--ro-bind'");
+    expect(source).not.toContain('workspaceMountsWritable');
   });
 
-  test('nsjail uses --bindmount (rw) instead of --bindmount_ro when workspaceMountsWritable is true', async () => {
+  test('nsjail uses per-tier writable flags', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(resolve('src/providers/sandbox/nsjail.ts'), 'utf-8');
-
-    expect(source).toContain("config.workspaceMountsWritable ? '--bindmount' : '--bindmount_ro'");
+    expect(source).toContain("config.agentWorkspaceWritable ? '--bindmount' : '--bindmount_ro'");
+    expect(source).toContain("config.userWorkspaceWritable ? '--bindmount' : '--bindmount_ro'");
+    expect(source).not.toContain('workspaceMountsWritable');
   });
 
-  test('seatbelt passes AGENT_WORKSPACE_RW and USER_WORKSPACE_RW params', async () => {
+  test('seatbelt uses per-tier writable params', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(resolve('src/providers/sandbox/seatbelt.ts'), 'utf-8');
-
-    expect(source).toContain('AGENT_WORKSPACE_RW=');
-    expect(source).toContain('USER_WORKSPACE_RW=');
-    // When not writable, /dev/null is used (matches nothing in seatbelt policy)
-    expect(source).toContain("'/dev/null'");
+    expect(source).toContain('agentWorkspaceWritable');
+    expect(source).toContain('userWorkspaceWritable');
+    expect(source).not.toContain('workspaceMountsWritable');
   });
 
-  test('seatbelt policy includes write rules for AGENT_WORKSPACE_RW and USER_WORKSPACE_RW', async () => {
+  test('apple container uses per-tier writable flags', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/apple.ts'), 'utf-8');
+    expect(source).toContain("config.agentWorkspaceWritable ? 'rw' : 'ro'");
+    expect(source).toContain("config.userWorkspaceWritable ? 'rw' : 'ro'");
+  });
+
+  test('seatbelt policy includes write rules for per-tier RW params', async () => {
     const { readFileSync } = await import('node:fs');
     const policy = readFileSync(resolve('policies/agent.sb'), 'utf-8');
-
     expect(policy).toContain('(allow file-write* (subpath (param "AGENT_WORKSPACE_RW")))');
     expect(policy).toContain('(allow file-write* (subpath (param "USER_WORKSPACE_RW")))');
   });

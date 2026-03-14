@@ -39,9 +39,9 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         '--bindmount', `${config.workspace}:${CANONICAL.scratch}`,
         '--cwd', CANONICAL.root,
 
-        // Enterprise mounts — canonical paths (rw when workspace provider active, ro otherwise)
-        ...(config.agentWorkspace ? [config.workspaceMountsWritable ? '--bindmount' : '--bindmount_ro', `${config.agentWorkspace}:${CANONICAL.agent}`] : []),
-        ...(config.userWorkspace ? [config.workspaceMountsWritable ? '--bindmount' : '--bindmount_ro', `${config.userWorkspace}:${CANONICAL.user}`] : []),
+        // Enterprise mounts — canonical paths (rw per-tier when workspace provider active)
+        ...(config.agentWorkspace ? [config.agentWorkspaceWritable ? '--bindmount' : '--bindmount_ro', `${config.agentWorkspace}:${CANONICAL.agent}`] : []),
+        ...(config.userWorkspace ? [config.userWorkspaceWritable ? '--bindmount' : '--bindmount_ro', `${config.userWorkspace}:${CANONICAL.user}`] : []),
 
         // Mount IPC socket directory
         '--bindmount', `${resolve(config.ipcSocket, '..')}:${resolve(config.ipcSocket, '..')}`,
