@@ -160,14 +160,14 @@ describe('writable workspace mounts via workspaceMountsWritable flag', () => {
     expect(policy).toContain('(allow file-write* (subpath (param "USER_WORKSPACE_RW")))');
   });
 
-  test('server-completions pre-mounts workspace scopes when provider is active', async () => {
+  test('server-completions uses isAdmin for agent workspace permission', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(resolve('src/host/server-completions.ts'), 'utf-8');
 
-    // Should pre-mount agent and user scopes before sandbox spawn
-    expect(source).toContain("providers.workspace.mount(sessionId, ['agent', 'user']");
-    // Should set workspaceMountsWritable flag in sandbox config
-    expect(source).toContain('workspaceMountsWritable');
+    expect(source).toContain('isAdmin');
+    expect(source).toContain('agentWorkspaceWritable');
+    expect(source).toContain('userWorkspaceWritable');
+    expect(source).not.toContain('workspaceMountsWritable');
   });
 });
 

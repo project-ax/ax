@@ -8,7 +8,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { workspaceDir, agentWorkspaceDir, userWorkspaceDir } from '../paths.js';
+import { workspaceDir, agentWorkspaceDir, userWorkspaceDir, agentDir } from '../paths.js';
+import { isAdmin } from './server.js';
 import type { Config, ProviderRegistry, ContentBlock, ImageMimeType } from '../types.js';
 import { safePath } from '../utils/safe-path.js';
 import type { InboundMessage } from '../providers/channel/types.js';
@@ -653,7 +654,8 @@ export async function processCompletion(
     const hasWorkspaceProvider = config.providers.workspace && config.providers.workspace !== 'none';
     let agentWsPath: string | undefined;
     let userWsPath: string | undefined;
-    let workspaceMountsWritable = false;
+    let agentWorkspaceWritable = false;
+    let userWorkspaceWritable = false;
 
     if (hasWorkspaceProvider) {
       // Pre-mount agent and user scopes so their directories exist before sandbox spawn.
@@ -663,7 +665,8 @@ export async function processCompletion(
         const preMounted = await providers.workspace.mount(sessionId, ['agent', 'user'], mountOpts);
         agentWsPath = preMounted.paths.agent;
         userWsPath = preMounted.paths.user;
-        workspaceMountsWritable = true;
+        userWorkspaceWritable = true;
+        agentWorkspaceWritable = isAdmin(agentDir(agentName), currentUserId);
         eventBus?.emit({
           type: 'workspace.mount',
           requestId,
@@ -688,7 +691,7 @@ export async function processCompletion(
       // Point sandbox tool writes at the workspace provider's agent directory
       // so file changes land in the GCS-mounted (or other backend) path and
       // get committed at end-of-turn.
-      if (agentWsPath && workspaceMountsWritable && deps.workspaceMap) {
+      if (agentWsPath && agentWorkspaceWritable && deps.workspaceMap) {
         deps.workspaceMap.set(requestId, agentWsPath);
       }
     }
@@ -745,7 +748,8 @@ export async function processCompletion(
       command: spawnCommand,
       agentWorkspace: agentWsPath,
       userWorkspace: userWsPath,
-      workspaceMountsWritable,
+      agentWorkspaceWritable,
+      userWorkspaceWritable,
     };
 
     let response = '';
