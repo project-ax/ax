@@ -22,6 +22,7 @@ Sandbox providers isolate agent processes with zero network access, no credentia
 | userWorkspace            | `string?`  | Per-user persistent storage                      |
 | agentWorkspaceWritable   | `boolean?` | rw when admin + workspace provider active        |
 | userWorkspaceWritable    | `boolean?` | rw when workspace provider active                |
+| sessionWorkspace         | `string?`  | Session-scoped persistent workspace (k8s GCS)    |
 
 Note: Identity files and skills are no longer mounted as filesystem directories. They are sent via stdin payload (loaded from DocumentStore by the host).
 
@@ -33,12 +34,13 @@ Note: Identity files and skills are no longer mounted as filesystem directories.
 
 All sandbox providers remap host paths to short canonical paths. The LLM sees these canonical paths regardless of sandbox type:
 
-| Canonical Path       | Mount | Purpose                                      |
-|----------------------|-------|----------------------------------------------|
-| `/workspace`         | ro    | Mount root (read-only), agent HOME/CWD       |
-| `/workspace/scratch` | rw    | Session working files (lost when session ends)|
-| `/workspace/agent`   | ro*   | Agent workspace (*rw for admin users only)    |
-| `/workspace/user`    | ro*   | Per-user storage (*rw when workspace active)  |
+| Canonical Path         | Mount | Purpose                                                    |
+|------------------------|-------|------------------------------------------------------------|
+| `/workspace`           | ro    | Mount root (read-only), agent HOME/CWD                     |
+| `/workspace/scratch`   | rw    | Session working files (lost when session ends)              |
+| `/workspace/agent`     | ro*   | Agent workspace (*rw for admin users only)                  |
+| `/workspace/user`      | ro*   | Per-user storage (*rw when workspace active)                |
+| `/workspace/session`   | rw    | Session-scoped persistent files (survives across k8s pods)  |
 
 Identity files and skills are sent via stdin payload from DocumentStore — not mounted as filesystem directories.
 
@@ -49,6 +51,7 @@ Identity files and skills are sent via stdin payload from DocumentStore — not 
 - `AX_WORKSPACE` — canonical root (`/workspace`)
 - `AX_AGENT_WORKSPACE` — `/workspace/agent` (if agentWorkspace set)
 - `AX_USER_WORKSPACE` — `/workspace/user` (if userWorkspace set)
+- `AX_SESSION_WORKSPACE` — `/workspace/session` (if sessionWorkspace set)
 - `npm_config_cache`, `XDG_CACHE_HOME` — redirected to `/tmp`
 - `AX_HOME` — `/tmp/.ax-agent`
 
@@ -90,6 +93,12 @@ NATS-based sandbox worker running inside k8s pods:
 | `main.ts` | Entry point |
 
 Lifecycle: subscribe to `tasks.sandbox.{tier}` queue group → claim task → set up workspace → execute tools via unique `sandbox.{podId}` subject → release.
+
+### Session Scope Persistence (K8s)
+
+In k8s mode, each conversation's scratch workspace is persisted to GCS under `session/<sessionId>/` so that a different pod can pick up the next turn and see the same files. The host mounts `agent`, `user`, AND `session` scopes via the workspace provider. The claim request includes all three scopes with GCS prefixes. The sandbox worker provisions each scope from GCS, tracks file hashes, and uploads changes to staging on release.
+
+Flow: host mounts session scope → passes `session/<sessionId>/` GCS prefix in claim → k8s pod has session-ws emptyDir volume at `CANONICAL.session` → worker downloads from GCS → agent reads/writes during turn → worker diffs and uploads to staging on release → host commits.
 
 ## Dev/Prod Mode Support
 

@@ -44,6 +44,12 @@ export interface PromptContext {
   agentId?: string;
   /** Whether governance (proposal) system is active. */
   hasGovernance?: boolean;
+  /** Whether the agent workspace tier is mounted (./agent directory). */
+  hasAgentWorkspace?: boolean;
+  /** Whether the user workspace tier is mounted (./user directory). */
+  hasUserWorkspace?: boolean;
+  /** Whether the session workspace tier is mounted (./session directory). */
+  hasSessionWorkspace?: boolean;
 }
 
 export interface IdentityFiles {

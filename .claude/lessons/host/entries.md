@@ -1,5 +1,11 @@
 # Host
 
+### Sandbox tool handlers need their own mountRoot with workspace tier symlinks
+**Date:** 2026-03-14
+**Context:** After adding per-tier workspace permissions (agent/, user/ dirs), the agent still couldn't see these directories. The sandbox provider created a symlink mountRoot internally for the agent subprocess, but the IPC sandbox tool handlers on the host used workspaceMap (pointing to the scratch dir) as their CWD — no agent/ or user/ siblings existed there.
+**Lesson:** When workspace tiers (agent/, user/) are available, processCompletion must create its own symlink mountRoot (via createCanonicalSymlinks) and store it in workspaceMap. The sandbox provider's internal mountRoot is only visible to the agent subprocess, not to the host-side tool handlers. Both sides need their own symlink layout pointing to the same real directories.
+**Tags:** sandbox, workspace, symlinks, mountRoot, ipc-handlers, sandbox-tools, server-completions
+
 ### Admin TCP port must handle EADDRINUSE gracefully
 **Date:** 2026-03-04
 **Context:** When adding the admin dashboard with auto-TCP bind, integration tests started failing because multiple test-spawned servers all tried to bind port 8080. The `admin` config defaults to `enabled: true, port: 8080`, so every server instance tried to claim it.

@@ -21,6 +21,7 @@ export interface SandboxClaimRequest {
   scopes?: {
     agent?: { gcsPrefix: string; readOnly: boolean };
     user?: { gcsPrefix: string; readOnly: boolean };
+    session?: { gcsPrefix: string; readOnly: boolean };
   };
 }
 
@@ -129,6 +130,7 @@ export interface SandboxReleaseResponse {
     scopes: {
       agent?: FileMeta[];
       user?: FileMeta[];
+      session?: FileMeta[];
     };
   };
 }

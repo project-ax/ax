@@ -229,6 +229,13 @@ export async function startWorker(options?: {
         if (!claim.scopes.user.readOnly) scopeHashes.set('user', result.hashes);
         console.log(`[sandbox-worker] user scope: source=${result.source}, files=${result.fileCount}`);
       }
+      if (claim.scopes?.session) {
+        const result = await provisionScope(
+          CANONICAL.session, claim.scopes.session.gcsPrefix, claim.scopes.session.readOnly,
+        );
+        if (!claim.scopes.session.readOnly) scopeHashes.set('session', result.hashes);
+        console.log(`[sandbox-worker] session scope: source=${result.source}, files=${result.fileCount}`);
+      }
 
       // Reply with our pod subject so the host can dispatch tool calls directly
       const ack: SandboxClaimResponse = {
@@ -268,7 +275,7 @@ export async function startWorker(options?: {
             const scopeChanges: Partial<Record<string, FileMeta[]>> = {};
 
             for (const [scope, hashes] of scopeHashes) {
-              const mountPath = scope === 'agent' ? CANONICAL.agent : CANONICAL.user;
+              const mountPath = scope === 'agent' ? CANONICAL.agent : scope === 'user' ? CANONICAL.user : CANONICAL.session;
               const changes = diffScope(mountPath, hashes);
               if (changes.length > 0) {
                 for (const change of changes) {

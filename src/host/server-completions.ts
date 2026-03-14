@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { workspaceDir, agentWorkspaceDir, userWorkspaceDir, agentDir } from '../paths.js';
+import { createCanonicalSymlinks } from '../providers/sandbox/canonical-paths.js';
 import { isAdmin } from './server.js';
 import type { Config, ProviderRegistry, ContentBlock, ImageMimeType } from '../types.js';
 import { safePath } from '../utils/safe-path.js';
@@ -442,6 +443,7 @@ export async function processCompletion(
   let workspace = '';
   const isPersistent = !!persistentSessionId;
   let proxyCleanup: (() => void) | undefined;
+  let toolMountRoot: { mountRoot: string; cleanup: () => void } | undefined;
   const agentName = config.agent_name ?? 'main';
   const currentUserId = userId ?? process.env.USER ?? 'default';
   try {
@@ -654,24 +656,26 @@ export async function processCompletion(
     const hasWorkspaceProvider = config.providers.workspace && config.providers.workspace !== 'none';
     let agentWsPath: string | undefined;
     let userWsPath: string | undefined;
+    let sessionWsPath: string | undefined;
     let agentWorkspaceWritable = false;
     let userWorkspaceWritable = false;
 
     if (hasWorkspaceProvider) {
-      // Pre-mount agent and user scopes so their directories exist before sandbox spawn.
+      // Pre-mount agent, user, and session scopes so their directories exist before sandbox spawn.
       // The sandbox mounts these as read-write; the workspace provider validates at end-of-turn commit.
       try {
         const mountOpts = { userId: currentUserId };
-        const preMounted = await providers.workspace.mount(sessionId, ['agent', 'user'], mountOpts);
+        const preMounted = await providers.workspace.mount(sessionId, ['agent', 'user', 'session'], mountOpts);
         agentWsPath = preMounted.paths.agent;
         userWsPath = preMounted.paths.user;
+        sessionWsPath = preMounted.paths.session;
         userWorkspaceWritable = true;
         agentWorkspaceWritable = isAdmin(agentDir(agentName), currentUserId);
         eventBus?.emit({
           type: 'workspace.mount',
           requestId,
           timestamp: Date.now(),
-          data: { sessionId, scopes: ['agent', 'user'], agentId: agentName },
+          data: { sessionId, scopes: ['agent', 'user', 'session'], agentId: agentName },
         });
       } catch (err) {
         reqLogger.warn('workspace_premount_failed', { error: (err as Error).message });
@@ -688,12 +692,9 @@ export async function processCompletion(
         }
       }
 
-      // Point sandbox tool writes at the workspace provider's agent directory
-      // so file changes land in the GCS-mounted (or other backend) path and
-      // get committed at end-of-turn.
-      if (agentWsPath && agentWorkspaceWritable && deps.workspaceMap) {
-        deps.workspaceMap.set(requestId, agentWsPath);
-      }
+      // Note: sandbox tool writes now go through the mountRoot symlinks
+      // (created below), which resolve to the workspace provider's directories.
+      // No separate workspaceMap override needed here.
     }
 
     // Fallback: legacy enterprise paths (read-only in sandbox when workspace provider is 'none')
@@ -704,6 +705,25 @@ export async function processCompletion(
       mkdirSync(enterpriseUserWs, { recursive: true });
       agentWsPath = agentWsPath ?? enterpriseAgentWs;
       userWsPath = userWsPath ?? enterpriseUserWs;
+    }
+
+    // Create a symlink mountRoot for the sandbox tool IPC handlers.
+    // This mirrors the layout the sandbox provider creates for the agent subprocess
+    // (scratch/, agent/, user/ as siblings), so tools like sandbox_bash see the same
+    // directory structure the agent does.
+    toolMountRoot = createCanonicalSymlinks({
+      workspace,
+      ipcSocket: ipcSocketPath,
+      command: [],
+      agentWorkspace: agentWsPath,
+      userWorkspace: userWsPath,
+      sessionWorkspace: sessionWsPath,
+    });
+
+    // Override the workspaceMap entry to point at the mountRoot instead of the
+    // scratch directory — sandbox tool handlers now see agent/ and user/ as siblings.
+    if (deps.workspaceMap) {
+      deps.workspaceMap.set(requestId, toolMountRoot.mountRoot);
     }
 
     // ── Load identity from DocumentStore ──
@@ -731,6 +751,7 @@ export async function processCompletion(
       agentId: agentName,
       agentWorkspace: agentWsPath,
       userWorkspace: userWsPath,
+      sessionWorkspace: sessionWsPath,
       workspaceProvider: config.providers.workspace,
       // Identity and skills from DocumentStore (not filesystem)
       identity: identityPayload,
@@ -750,6 +771,7 @@ export async function processCompletion(
       userWorkspace: userWsPath,
       agentWorkspaceWritable,
       userWorkspaceWritable,
+      sessionWorkspace: sessionWsPath,
     };
 
     let response = '';
@@ -1113,6 +1135,10 @@ export async function processCompletion(
     // can't access it after the agent finishes.
     if (deps.workspaceMap) {
       deps.workspaceMap.delete(requestId);
+    }
+    // Clean up the symlink mountRoot used by sandbox tool handlers.
+    if (toolMountRoot) {
+      toolMountRoot.cleanup();
     }
     if (proxyCleanup) {
       try { proxyCleanup(); } catch {

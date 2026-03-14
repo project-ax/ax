@@ -9,6 +9,7 @@ Provider-specific lessons covering LLM, skills, sandbox, channel (Slack), and me
 - OpenRouter image generation uses /chat/completions, not /images/generations [llm.md](llm.md)
 - Configure wizard must set config.model for non-claude-code agents [llm.md](llm.md)
 - API key env var naming follows ${PROVIDER.toUpperCase()}_API_KEY convention [llm.md](llm.md)
+- Orchestrator must remember userId from mount for use during commit [workspace.md](workspace.md)
 - Popular OpenClaw skills use clawdbot alias, not openclaw [skills.md](skills.md)
 - Many skills have no metadata block — static analysis is essential [skills.md](skills.md)
 - OpenClaw's security failures validate AX's zero-trust architecture [skills.md](skills.md)

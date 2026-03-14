@@ -206,6 +206,82 @@ describe('Sandbox tool IPC handlers', () => {
     });
   });
 
+  // ── workspace tier access via symlink mountRoot ──
+
+  describe('workspace tier access via mountRoot symlinks', () => {
+    let mountRoot: string;
+    let agentDir: string;
+    let userDir: string;
+    let tierMap: Map<string, string>;
+
+    beforeEach(() => {
+      // Simulate the mountRoot layout that processCompletion creates.
+      // mountRoot/
+      //   scratch/ → workspace (scratch dir)
+      //   agent/   → agentDir
+      //   user/    → userDir
+      mountRoot = mkdtempSync(join(tmpdir(), 'sandbox-mount-'));
+      agentDir = mkdtempSync(join(tmpdir(), 'agent-ws-'));
+      userDir = mkdtempSync(join(tmpdir(), 'user-ws-'));
+
+      const { symlinkSync } = require('node:fs');
+      symlinkSync(workspace, join(mountRoot, 'scratch'));
+      symlinkSync(agentDir, join(mountRoot, 'agent'));
+      symlinkSync(userDir, join(mountRoot, 'user'));
+
+      // The workspaceMap now points to the mountRoot (not scratch)
+      tierMap = new Map([['test-session', mountRoot]]);
+    });
+
+    afterEach(() => {
+      rmSync(mountRoot, { recursive: true, force: true });
+      rmSync(agentDir, { recursive: true, force: true });
+      rmSync(userDir, { recursive: true, force: true });
+    });
+
+    test('sandbox_bash can list agent and user directories', async () => {
+      writeFileSync(join(agentDir, 'README.md'), '# Agent');
+      writeFileSync(join(userDir, 'notes.txt'), 'hello');
+      const handlers = createSandboxToolHandlers(providers, { workspaceMap: tierMap });
+      const result = await handlers.sandbox_bash({ command: 'ls agent user' }, ctx);
+      expect(result.output).toContain('README.md');
+      expect(result.output).toContain('notes.txt');
+    });
+
+    test('sandbox_read_file reads from agent/ tier', async () => {
+      writeFileSync(join(agentDir, 'config.json'), '{"key":"value"}');
+      const handlers = createSandboxToolHandlers(providers, { workspaceMap: tierMap });
+      const result = await handlers.sandbox_read_file({ path: 'agent/config.json' }, ctx);
+      expect(result.content).toBe('{"key":"value"}');
+    });
+
+    test('sandbox_read_file reads from user/ tier', async () => {
+      writeFileSync(join(userDir, 'prefs.txt'), 'dark mode');
+      const handlers = createSandboxToolHandlers(providers, { workspaceMap: tierMap });
+      const result = await handlers.sandbox_read_file({ path: 'user/prefs.txt' }, ctx);
+      expect(result.content).toBe('dark mode');
+    });
+
+    test('sandbox_write_file writes to user/ tier', async () => {
+      const handlers = createSandboxToolHandlers(providers, { workspaceMap: tierMap });
+      const result = await handlers.sandbox_write_file(
+        { path: 'user/new-file.txt', content: 'created' },
+        ctx,
+      );
+      expect(result.written).toBe(true);
+      expect(readFileSync(join(userDir, 'new-file.txt'), 'utf-8')).toBe('created');
+    });
+
+    test('sandbox_bash runs in mountRoot with scratch/agent/user visible', async () => {
+      writeFileSync(join(workspace, 'scratch-file.txt'), 'from scratch');
+      const handlers = createSandboxToolHandlers(providers, { workspaceMap: tierMap });
+      const result = await handlers.sandbox_bash({ command: 'ls' }, ctx);
+      expect(result.output).toContain('scratch');
+      expect(result.output).toContain('agent');
+      expect(result.output).toContain('user');
+    });
+  });
+
   // ── NATS dispatch mode ──
 
   describe('NATS dispatch mode', () => {

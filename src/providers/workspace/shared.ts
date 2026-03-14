@@ -195,12 +195,20 @@ export function createOrchestrator(opts: OrchestratorOptions): WorkspaceProvider
   /** Active scopes per session. */
   const sessionScopes = new Map<string, Set<WorkspaceScope>>();
 
+  /** Remembered userId per session — set during mount, used during commit. */
+  const sessionUserIds = new Map<string, string>();
+
   return {
     async mount(sessionId: string, scopes: WorkspaceScope[], opts?: MountOptions): Promise<WorkspaceMounts> {
       let active = sessionScopes.get(sessionId);
       if (!active) {
         active = new Set();
         sessionScopes.set(sessionId, active);
+      }
+
+      // Remember the userId so commit() can resolve the 'user' scope correctly.
+      if (opts?.userId) {
+        sessionUserIds.set(sessionId, opts.userId);
       }
 
       const ctx: ScopeContext = { sessionId, agentId, userId: opts?.userId };
@@ -224,7 +232,7 @@ export function createOrchestrator(opts: OrchestratorOptions): WorkspaceProvider
         return { scopes: {} };
       }
 
-      const ctx: ScopeContext = { sessionId, agentId };
+      const ctx: ScopeContext = { sessionId, agentId, userId: sessionUserIds.get(sessionId) };
       const scopes: Partial<Record<WorkspaceScope, ScopeCommitResult>> = {};
 
       for (const scope of active) {
@@ -299,6 +307,7 @@ export function createOrchestrator(opts: OrchestratorOptions): WorkspaceProvider
 
     async cleanup(sessionId: string): Promise<void> {
       sessionScopes.delete(sessionId);
+      sessionUserIds.delete(sessionId);
     },
 
     activeMounts(sessionId: string): WorkspaceScope[] {

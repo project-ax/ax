@@ -480,6 +480,63 @@ describe('workspace/shared orchestrator', () => {
     });
   });
 
+  // ── Commit uses remembered userId ──
+
+  describe('commit uses userId from mount', () => {
+    test('commit resolves user scope with the userId provided during mount', async () => {
+      const changes = [textChange('prefs.txt', 'dark mode')];
+      backend = createMockBackend({ diff: vi.fn(async () => changes) });
+      const provider = createOrchestrator({
+        backend, scanner, config: {}, agentId: AGENT_ID,
+      });
+
+      // Mount with userId='alice'
+      await provider.mount('s1', ['agent', 'user'], { userId: 'alice' });
+
+      // Commit should use 'alice' (not 's1') for the user scope
+      await provider.commit('s1');
+
+      // backend.diff should be called with ('user', 'alice')
+      expect(backend.diff).toHaveBeenCalledWith('user', 'alice');
+      // backend.commit should be called with ('user', 'alice', ...)
+      expect(backend.commit).toHaveBeenCalledWith('user', 'alice', expect.any(Array));
+    });
+
+    test('commit without userId falls back to sessionId for user scope', async () => {
+      const changes = [textChange('prefs.txt', 'dark mode')];
+      backend = createMockBackend({ diff: vi.fn(async () => changes) });
+      const provider = createOrchestrator({
+        backend, scanner, config: {}, agentId: AGENT_ID,
+      });
+
+      // Mount without userId
+      await provider.mount('s1', ['user']);
+      await provider.commit('s1');
+
+      expect(backend.diff).toHaveBeenCalledWith('user', 's1');
+    });
+
+    test('cleanup removes remembered userId', async () => {
+      const changes = [textChange('file.txt', 'data')];
+      backend = createMockBackend({ diff: vi.fn(async () => changes) });
+      const provider = createOrchestrator({
+        backend, scanner, config: {}, agentId: AGENT_ID,
+      });
+
+      await provider.mount('s1', ['user'], { userId: 'alice' });
+      await provider.cleanup('s1');
+
+      // Re-mount without userId after cleanup — should not use old 'alice'
+      await provider.mount('s1', ['user']);
+      await provider.commit('s1');
+
+      // The last diff call should use 's1' (sessionId fallback), not 'alice'
+      const diffCalls = (backend.diff as any).mock.calls;
+      const lastCall = diffCalls[diffCalls.length - 1];
+      expect(lastCall).toEqual(['user', 's1']);
+    });
+  });
+
   // ── Cleanup ──
 
   describe('cleanup', () => {
