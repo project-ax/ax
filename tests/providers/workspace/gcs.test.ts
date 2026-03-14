@@ -385,10 +385,11 @@ describe('workspace/gcs backend', () => {
       await backend.commit('session', 'sess-1', sessionChanges);
 
       expect(objects.has('agent/my-agent/agent-file.txt')).toBe(true);
-      expect(objects.has('session/sess-1/session-file.txt')).toBe(true);
+      // 'session' scope maps to 'scratch' folder in GCS
+      expect(objects.has('scratch/sess-1/session-file.txt')).toBe(true);
       // Cross-contamination check
       expect(objects.has('agent/my-agent/session-file.txt')).toBe(false);
-      expect(objects.has('session/sess-1/agent-file.txt')).toBe(false);
+      expect(objects.has('scratch/sess-1/agent-file.txt')).toBe(false);
     });
 
     test('incremental commits accumulate in GCS', async () => {

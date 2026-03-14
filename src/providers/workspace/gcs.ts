@@ -116,12 +116,16 @@ function createLocalTransport(bucket: GcsBucketLike, basePath: string, prefix: s
   /** Build the GCS key prefix for a scope/id pair. */
   function buildGcsPrefix(scope: WorkspaceScope, id: string): string {
     const base = prefix.endsWith('/') ? prefix : prefix ? `${prefix}/` : '';
-    return `${base}${scope}/${id}/`;
+    // 'session' scope backs the scratch workspace — use 'scratch' as the GCS folder name
+    // so the bucket structure matches what the LLM sees (agent/, user/, scratch/).
+    const folder = scope === 'session' ? 'scratch' : scope;
+    return `${base}${folder}/${id}/`;
   }
 
   return {
     async provision(scope: WorkspaceScope, id: string): Promise<string> {
-      const localDir = safePath(basePath, scope, id);
+      const folder = scope === 'session' ? 'scratch' : scope;
+      const localDir = safePath(basePath, folder, id);
       await mkdir(localDir, { recursive: true });
 
       const keyPrefix = buildGcsPrefix(scope, id);
@@ -298,7 +302,7 @@ export function createGcsBackend(bucket: GcsBucketLike, basePath: string, prefix
   const transport = createLocalTransport(bucket, basePath, prefix);
 
   return {
-    mount: (scope, id) => transport.provision(scope, id, `${prefix}${scope}/${id}/`),
+    mount: (scope, id) => transport.provision(scope, id, `${prefix}${scope === 'session' ? 'scratch' : scope}/${id}/`),
     diff: (scope, id) => transport.diff(scope, id),
     commit: (scope, id, changes) => transport.commit(scope, id, changes),
   };
@@ -344,7 +348,7 @@ export async function create(config: Config): Promise<WorkspaceProvider> {
     : createLocalTransport(bucket, basePath, prefix);
 
   const backend: WorkspaceBackend = {
-    mount: (scope, id) => transport.provision(scope, id, `${prefix}${scope}/${id}/`),
+    mount: (scope, id) => transport.provision(scope, id, `${prefix}${scope === 'session' ? 'scratch' : scope}/${id}/`),
     diff: (scope, id) => transport.diff(scope, id),
     commit: (scope, id, changes) => transport.commit(scope, id, changes),
   };
