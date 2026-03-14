@@ -10,6 +10,7 @@ import { runMigrations } from '../../../src/utils/migrator.js';
 import { jobsMigrations } from '../../../src/migrations/jobs.js';
 import type { Config } from '../../../src/types.js';
 import type { InboundMessage } from '../../../src/providers/channel/types.js';
+import type { EventBusProvider, StreamEvent } from '../../../src/providers/eventbus/types.js';
 
 // Default agent_name is 'main', so test jobs use agentId: 'main'
 const AGENT = 'main';
@@ -747,6 +748,132 @@ describe('scheduler-plainjob', () => {
 
     await scheduler2.stop();
     rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // ─── Proactive hints ─────────────────────────────
+
+  describe('proactive hints', () => {
+    function createMockEventBus(): EventBusProvider & { fire(event: StreamEvent): void } {
+      const listeners: Array<(event: StreamEvent) => void> = [];
+      return {
+        emit() {},
+        subscribe(fn) {
+          listeners.push(fn);
+          return () => {
+            const idx = listeners.indexOf(fn);
+            if (idx >= 0) listeners.splice(idx, 1);
+          };
+        },
+        subscribeRequest: () => () => {},
+        listenerCount: () => listeners.length,
+        close() {},
+        fire(event: StreamEvent) {
+          for (const fn of listeners) fn(event);
+        },
+      };
+    }
+
+    function hintEvent(overrides: Partial<StreamEvent['data']> = {}): StreamEvent {
+      return {
+        type: 'memory.proactive_hint',
+        requestId: 'main',
+        timestamp: Date.now(),
+        data: {
+          source: 'memory',
+          kind: 'pending_task',
+          reason: 'Update API keys',
+          suggestedPrompt: 'Update API keys by Friday',
+          confidence: 0.9,
+          scope: 'default',
+          ...overrides,
+        },
+      };
+    }
+
+    test('fires hint as InboundMessage when confidence exceeds threshold', async () => {
+      const eventbus = createMockEventBus();
+      const scheduler = await create(mockConfig, { jobStore: new MemoryJobStore(), eventbus });
+      const received: InboundMessage[] = [];
+
+      await scheduler.start((msg) => received.push(msg));
+      stopFn = () => scheduler.stop();
+
+      eventbus.fire(hintEvent({ confidence: 0.9 }));
+      await new Promise(r => setTimeout(r, 10));
+
+      const hints = received.filter(m => m.sender.startsWith('hint:'));
+      expect(hints).toHaveLength(1);
+      expect(hints[0].sender).toBe('hint:pending_task');
+      expect(hints[0].content).toBe('Update API keys by Friday');
+    });
+
+    test('suppresses hint below confidence threshold', async () => {
+      const eventbus = createMockEventBus();
+      const scheduler = await create(mockConfig, { jobStore: new MemoryJobStore(), eventbus });
+      const received: InboundMessage[] = [];
+
+      await scheduler.start((msg) => received.push(msg));
+      stopFn = () => scheduler.stop();
+
+      eventbus.fire(hintEvent({ confidence: 0.3 }));
+      await new Promise(r => setTimeout(r, 10));
+
+      expect(received.filter(m => m.sender.startsWith('hint:'))).toHaveLength(0);
+    });
+
+    test('cooldown prevents duplicate hint firing', async () => {
+      const eventbus = createMockEventBus();
+      const scheduler = await create(mockConfig, { jobStore: new MemoryJobStore(), eventbus });
+      const received: InboundMessage[] = [];
+
+      await scheduler.start((msg) => received.push(msg));
+      stopFn = () => scheduler.stop();
+
+      eventbus.fire(hintEvent());
+      await new Promise(r => setTimeout(r, 10));
+      expect(received.filter(m => m.sender.startsWith('hint:'))).toHaveLength(1);
+
+      // Same hint again — should be suppressed by cooldown
+      eventbus.fire(hintEvent());
+      await new Promise(r => setTimeout(r, 10));
+      expect(received.filter(m => m.sender.startsWith('hint:'))).toHaveLength(1);
+    });
+
+    test('different hints fire independently (no cross-cooldown)', async () => {
+      const eventbus = createMockEventBus();
+      const scheduler = await create(mockConfig, { jobStore: new MemoryJobStore(), eventbus });
+      const received: InboundMessage[] = [];
+
+      await scheduler.start((msg) => received.push(msg));
+      stopFn = () => scheduler.stop();
+
+      eventbus.fire(hintEvent({ suggestedPrompt: 'Task A' }));
+      eventbus.fire(hintEvent({ suggestedPrompt: 'Task B' }));
+      await new Promise(r => setTimeout(r, 10));
+
+      expect(received.filter(m => m.sender.startsWith('hint:'))).toHaveLength(2);
+    });
+
+    test('stop unsubscribes from eventbus', async () => {
+      const eventbus = createMockEventBus();
+      const scheduler = await create(mockConfig, { jobStore: new MemoryJobStore(), eventbus });
+      const received: InboundMessage[] = [];
+
+      await scheduler.start((msg) => received.push(msg));
+      await scheduler.stop();
+
+      eventbus.fire(hintEvent());
+      await new Promise(r => setTimeout(r, 10));
+
+      expect(received.filter(m => m.sender.startsWith('hint:'))).toHaveLength(0);
+    });
+
+    test('works without eventbus (backward compatible)', async () => {
+      const scheduler = await create(mockConfig, { jobStore: new MemoryJobStore() });
+      await scheduler.start(() => {});
+      await scheduler.stop();
+      // No crash — test passes if we get here
+    });
   });
 
   test('removed jobs do not reappear after restart with KyselyJobStore', async () => {

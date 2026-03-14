@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { SchedulerProvider, CronJobDef, JobStore } from './types.js';
@@ -6,6 +6,8 @@ import { KyselyJobStore } from '../../job-store.js';
 import type { InboundMessage } from '../shared-types.js';
 import type { Config } from '../../types.js';
 import type { DatabaseProvider } from '../database/types.js';
+import type { EventBusProvider } from '../eventbus/types.js';
+import type { ProactiveHint } from '../memory/types.js';
 import { createKyselyDb } from '../../utils/database.js';
 import { runMigrations } from '../../utils/migrator.js';
 import { buildJobsMigrations } from '../../migrations/jobs.js';
@@ -18,6 +20,7 @@ import {
 interface PlainJobSchedulerDeps {
   jobStore?: JobStore;
   database?: DatabaseProvider;
+  eventbus?: EventBusProvider;
 }
 
 export async function create(config: Config, deps: PlainJobSchedulerDeps = {}): Promise<SchedulerProvider> {
@@ -63,6 +66,43 @@ export async function create(config: Config, deps: PlainJobSchedulerDeps = {}): 
   // Filter cron scan to current agent to prevent cross-agent execution
   // in multi-agent deployments sharing a single scheduler.db
   const agentName = config.agent_name ?? 'main';
+
+  // ─── Proactive hint gating ─────────────────────────
+  const confidenceThreshold = config.scheduler.proactive_hint_confidence_threshold ?? 0.7;
+  const cooldownSec = config.scheduler.proactive_hint_cooldown_sec ?? 1800;
+  const cooldownMap = new Map<string, number>();
+  let unsubscribeHints: (() => void) | null = null;
+
+  function hintSignature(hint: ProactiveHint): string {
+    return createHash('sha256')
+      .update(`${hint.kind}:${hint.scope}:${hint.suggestedPrompt}`)
+      .digest('hex')
+      .slice(0, 16);
+  }
+
+  function handleProactiveHint(hint: ProactiveHint): void {
+    if (!onMessageHandler) return;
+    if (hint.confidence < confidenceThreshold) return;
+    if (!isWithinActiveHours(activeHours)) return;
+
+    const sig = hintSignature(hint);
+    const lastFired = cooldownMap.get(sig);
+    if (lastFired !== undefined) {
+      const elapsed = (Date.now() - lastFired) / 1000;
+      if (elapsed < cooldownSec) return;
+    }
+
+    cooldownMap.set(sig, Date.now());
+
+    onMessageHandler({
+      id: randomUUID(),
+      session: schedulerSession(`hint:${hint.kind}`),
+      sender: `hint:${hint.kind}`,
+      content: hint.suggestedPrompt,
+      attachments: [],
+      timestamp: new Date(),
+    });
+  }
 
   function fireHeartbeat(): void {
     if (!onMessageHandler) return;
@@ -173,6 +213,14 @@ export async function create(config: Config, deps: PlainJobSchedulerDeps = {}): 
 
       // Cron check every 60 seconds
       cronTimer = setInterval(checkCronJobs, 60_000);
+
+      // Subscribe to proactive hints from event bus
+      if (deps.eventbus) {
+        unsubscribeHints = deps.eventbus.subscribe((event) => {
+          if (event.type !== 'memory.proactive_hint') return;
+          handleProactiveHint(event.data as ProactiveHint);
+        });
+      }
     },
 
     async stop(): Promise<void> {
@@ -183,6 +231,10 @@ export async function create(config: Config, deps: PlainJobSchedulerDeps = {}): 
       if (cronTimer) {
         clearInterval(cronTimer);
         cronTimer = null;
+      }
+      if (unsubscribeHints) {
+        unsubscribeHints();
+        unsubscribeHints = null;
       }
       for (const timer of onceTimers.values()) clearTimeout(timer);
       onceTimers.clear();
