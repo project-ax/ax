@@ -7,7 +7,7 @@ function mockConfig(): Config {
     providers: {
       memory: 'cortex', scanner: 'patterns',
       channels: ['cli'], web: 'none', browser: 'none',
-      credentials: 'keychain', skills: 'readonly', audit: 'file',
+      credentials: 'keychain', skills: 'database', audit: 'file',
       sandbox: 'apple-container', scheduler: 'none',
     },
     sandbox: { timeout_sec: 30, memory_mb: 256 },

@@ -44,7 +44,7 @@ function mockConfig(profile: 'paranoid' | 'balanced' | 'yolo' = 'balanced'): Con
     providers: {
       memory: 'cortex', scanner: 'patterns',
       channels: [], web: 'none', browser: 'none',
-      credentials: 'keychain', skills: 'readonly', audit: 'file',
+      credentials: 'keychain', skills: 'database', audit: 'file',
       sandbox: 'subprocess', scheduler: 'none',
     },
     sandbox: { timeout_sec: 30, memory_mb: 256 },
@@ -412,8 +412,7 @@ describe('Provider Map', () => {
     expect(PROVIDER_MAP.credentials).toHaveProperty('plaintext');
 
     // Skills providers
-    expect(PROVIDER_MAP.skills).toHaveProperty('readonly');
-    expect(PROVIDER_MAP.skills).toHaveProperty('git');
+    expect(PROVIDER_MAP.skills).toHaveProperty('database');
 
     // Audit providers
     expect(PROVIDER_MAP.audit).toHaveProperty('file');

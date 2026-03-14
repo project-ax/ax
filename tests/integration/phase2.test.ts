@@ -42,7 +42,7 @@ function powerUserConfig(): Config {
     providers: {
       memory: 'cortex', scanner: 'guardian',
       channels: [], web: 'tavily', browser: 'container',
-      credentials: 'keychain', skills: 'git', audit: 'file',
+      credentials: 'keychain', skills: 'database', audit: 'file',
       sandbox: 'docker', scheduler: 'full',
     },
     sandbox: { timeout_sec: 60, memory_mb: 512 },

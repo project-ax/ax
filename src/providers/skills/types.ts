@@ -26,7 +26,7 @@ export interface LogOptions {
 export interface SkillLogEntry {
   id: string;
   skill: string;
-  action: 'propose' | 'approve' | 'reject' | 'revert';
+  action: 'propose' | 'approve' | 'reject' | 'remove';
   timestamp: Date;
   reason?: string;
 }
@@ -37,7 +37,7 @@ export interface SkillStoreProvider {
   propose(proposal: SkillProposal): Promise<ProposalResult>;
   approve(proposalId: string): Promise<void>;
   reject(proposalId: string): Promise<void>;
-  revert(commitId: string): Promise<void>;
+  remove(name: string): Promise<void>;
   log(opts?: LogOptions): Promise<SkillLogEntry[]>;
 }
 

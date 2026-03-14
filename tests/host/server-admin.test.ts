@@ -23,7 +23,7 @@ function makeConfig(overrides: Partial<Config['admin']> = {}): Config {
       web: 'none',
       browser: 'none',
       credentials: 'keychain',
-      skills: 'readonly',
+      skills: 'database',
       audit: 'file',
       sandbox: 'subprocess',
       scheduler: 'none',

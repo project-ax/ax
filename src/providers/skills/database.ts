@@ -1,5 +1,5 @@
 /**
- * Readonly skill store backed by DocumentStore.
+ * Database-backed skill store provider.
  *
  * Skills are stored as documents in the 'skills' collection with keys
  * like '<agentName>/<skillPath>'. The propose() method writes directly
@@ -20,7 +20,7 @@ export async function create(config: Config, _name?: string, opts?: CreateOption
   const documents = opts?.storage?.documents;
 
   if (!documents) {
-    throw new Error('readonly skills provider requires storage provider with DocumentStore');
+    throw new Error('database skills provider requires storage provider with DocumentStore');
   }
 
   return {
@@ -85,8 +85,17 @@ export async function create(config: Config, _name?: string, opts?: CreateOption
       // No-op: proposals are auto-applied in propose()
     },
 
-    async revert(_commitId: string): Promise<void> {
-      throw new Error('Revert not supported in readonly provider.');
+    async remove(name: string): Promise<void> {
+      const key = `${agentName}/${name}.md`;
+      const deleted = await documents.delete('skills', key);
+      if (!deleted) {
+        // Try directory-based key
+        const dirKey = `${agentName}/${name}/SKILL.md`;
+        const dirDeleted = await documents.delete('skills', dirKey);
+        if (!dirDeleted) {
+          throw new Error(`Skill not found: ${name}`);
+        }
+      }
     },
 
     async log(_opts?: LogOptions): Promise<SkillLogEntry[]> {

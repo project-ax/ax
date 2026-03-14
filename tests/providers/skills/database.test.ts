@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach } from 'vitest';
-import { create } from '../../../src/providers/skills/readonly.js';
+import { create } from '../../../src/providers/skills/database.js';
 import type { SkillStoreProvider } from '../../../src/providers/skills/types.js';
 import type { Config } from '../../../src/types.js';
 import type { DocumentStore, StorageProvider } from '../../../src/providers/storage/types.js';
@@ -37,7 +37,7 @@ function mockStorage(documents: DocumentStore): StorageProvider {
 
 const config = { agent_name: 'main' } as Config;
 
-describe('skills-readonly', () => {
+describe('skills-database', () => {
   let skills: SkillStoreProvider;
   let documents: DocumentStore;
 
@@ -83,8 +83,13 @@ describe('skills-readonly', () => {
     await expect(skills.reject('id')).resolves.toBeUndefined();
   });
 
-  test('revert throws', async () => {
-    await expect(skills.revert('id')).rejects.toThrow('not supported');
+  test('remove deletes a skill', async () => {
+    await skills.remove('default');
+    await expect(skills.read('default')).rejects.toThrow('Skill not found');
+  });
+
+  test('remove throws on missing skill', async () => {
+    await expect(skills.remove('nonexistent')).rejects.toThrow('Skill not found');
   });
 
   test('log returns empty array', async () => {

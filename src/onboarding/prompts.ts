@@ -42,7 +42,7 @@ export const PROFILE_DEFAULTS: Record<string, ProfileDefaults> = {
     web: 'none',
     browser: 'none',
     credentials: 'keychain',
-    skills: 'readonly',
+    skills: 'database',
     audit: 'file',
     sandbox: defaultSandbox,
     scheduler: 'full',
@@ -56,7 +56,7 @@ export const PROFILE_DEFAULTS: Record<string, ProfileDefaults> = {
     web: 'fetch',
     browser: 'none',
     credentials: 'keychain',
-    skills: 'git',
+    skills: 'database',
     audit: 'file',
     sandbox: defaultSandbox,
     scheduler: 'full',
@@ -71,7 +71,7 @@ export const PROFILE_DEFAULTS: Record<string, ProfileDefaults> = {
     web: 'fetch',
     browser: 'container',
     credentials: 'keychain',
-    skills: 'git',
+    skills: 'database',
     audit: 'file',
     sandbox: defaultSandbox,
     scheduler: 'full',
@@ -93,8 +93,8 @@ export const PROFILE_DISPLAY_NAMES: Record<ProfileName, string> = {
 };
 
 export const PROFILE_DESCRIPTIONS: Record<ProfileName, string> = {
-  paranoid: 'Maximum security, minimal features — no web, no browser, read-only skills',
-  balanced: 'Balanced security and features — web fetch, git skills, SQLite storage (recommended)',
+  paranoid: 'Maximum security, minimal features — no web, no browser, database skills',
+  balanced: 'Balanced security and features — web fetch, database skills, SQLite storage (recommended)',
   yolo: 'Maximum features — browser automation, extended timeouts (be careful!)',
 };
 
@@ -175,7 +175,7 @@ export const PROVIDER_CHOICES = {
   web: ['none', 'fetch'],
   browser: ['none', 'container'],
   credentials: ['keychain', 'plaintext'],
-  skills: ['readonly', 'git'],
+  skills: ['database'],
   audit: ['file', 'database'],
   sandbox: ['subprocess', 'seatbelt', 'bwrap', 'nsjail', 'docker', 'apple-container'],
   scheduler: ['none', 'full'],

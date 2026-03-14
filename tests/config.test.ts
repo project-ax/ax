@@ -41,7 +41,7 @@ providers:
   web: none
   browser: none
   credentials: env
-  skills: readonly
+  skills: database
   audit: file
   sandbox: subprocess
   scheduler: none
@@ -75,7 +75,7 @@ providers:
   web: none
   browser: none
   credentials: env
-  skills: readonly
+  skills: database
   audit: file
   sandbox: subprocess
   scheduler: none
@@ -110,7 +110,7 @@ providers:
   web: none
   browser: none
   credentials: env
-  skills: readonly
+  skills: database
   audit: file
   sandbox: subprocess
   scheduler: none
@@ -151,7 +151,7 @@ providers:
   web: none
   browser: none
   credentials: env
-  skills: readonly
+  skills: database
   audit: file
   sandbox: subprocess
   scheduler: none
@@ -197,7 +197,7 @@ providers:
   web: none
   browser: none
   credentials: env
-  skills: readonly
+  skills: database
   audit: file
   sandbox: subprocess
   scheduler: none
@@ -239,7 +239,7 @@ providers:
   web: none
   browser: none
   credentials: env
-  skills: readonly
+  skills: database
   audit: file
   sandbox: subprocess
   scheduler: none
@@ -277,7 +277,7 @@ providers:
   web: none
   browser: none
   credentials: env
-  skills: readonly
+  skills: database
   audit: file
   sandbox: subprocess
   scheduler: none
@@ -321,7 +321,7 @@ providers:
   web: none
   browser: none
   credentials: env
-  skills: readonly
+  skills: database
   audit: file
   sandbox: subprocess
   scheduler: none
@@ -367,7 +367,7 @@ providers:
   web: none
   browser: none
   credentials: env
-  skills: readonly
+  skills: database
   audit: file
   sandbox: subprocess
   scheduler: none
@@ -405,7 +405,7 @@ providers:
   web: none
   browser: none
   credentials: plaintext
-  skills: readonly
+  skills: database
   audit: sqlite
   sandbox: subprocess
   scheduler: none
@@ -440,7 +440,7 @@ providers:
   web: none
   browser: none
   credentials: env
-  skills: readonly
+  skills: database
   audit: file
   sandbox: subprocess
   scheduler: none

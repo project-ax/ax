@@ -37,7 +37,7 @@ config:
     web: none
     browser: none
     credentials: env
-    skills: readonly
+    skills: database
     storage: database
     database: postgresql
     eventbus: nats

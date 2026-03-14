@@ -26,7 +26,7 @@ providers:
   web: none
   browser: none
   credentials: env
-  skills: readonly
+  skills: database
   audit: file
   sandbox: subprocess
   scheduler: none
@@ -52,7 +52,7 @@ providers:
   web: none
   browser: none
   credentials: env
-  skills: readonly
+  skills: database
   audit: file
   sandbox: subprocess
   scheduler: none
@@ -82,7 +82,7 @@ providers:
   web: none
   browser: none
   credentials: env
-  skills: readonly
+  skills: database
   audit: file
   sandbox: subprocess
   scheduler: none

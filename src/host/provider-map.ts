@@ -55,8 +55,7 @@ const _PROVIDER_MAP = {
     keychain:  '../providers/credentials/keychain.js',
   },
   skills: {
-    readonly: '../providers/skills/readonly.js',
-    git:      '../providers/skills/git.js',
+    database: '../providers/skills/database.js',
   },
   audit: {
     file:     '../providers/audit/file.js',
