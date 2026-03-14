@@ -5,9 +5,10 @@
 // On release: git add/commit/push if changes, update GCS cache async.
 
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, statSync, readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+import type { FileMeta } from './types.js';
 
 /** Workspace setup configuration. */
 export interface WorkspaceConfig {
@@ -227,6 +228,101 @@ function tryDependencyRestore(workspace: string): void {
       }
     }
   }
+}
+
+// ── Workspace scope provisioning (GCS-backed tiers) ──
+
+const WORKSPACE_BUCKET = process.env.GCS_WORKSPACE_BUCKET ?? '';
+
+export type FileHashMap = Map<string, string>; // relative path -> sha256
+
+export async function provisionScope(
+  mountPath: string,
+  gcsPrefix: string,
+  readOnly: boolean,
+): Promise<{ source: 'gcs' | 'empty'; fileCount: number; hashes: FileHashMap }> {
+  mkdirSync(mountPath, { recursive: true });
+  const hashes: FileHashMap = new Map();
+
+  if (!WORKSPACE_BUCKET) {
+    return { source: 'empty', fileCount: 0, hashes };
+  }
+
+  try {
+    // nosemgrep: javascript.lang.security.detect-child-process — sandbox worker: GCS prefix is host-constructed, not user input
+    execSync(
+      `gsutil -m rsync -r "gs://${WORKSPACE_BUCKET}/${gcsPrefix}" "${mountPath}"`,
+      { timeout: 120_000, stdio: 'pipe' },
+    );
+  } catch {
+    return { source: 'empty', fileCount: 0, hashes };
+  }
+
+  // Snapshot file hashes for diff on release
+  const files = listFilesSync(mountPath);
+  for (const relPath of files) {
+    const content = readFileSync(join(mountPath, relPath));
+    hashes.set(relPath, hashContent(content));
+  }
+
+  if (readOnly) {
+    // nosemgrep: javascript.lang.security.detect-child-process — sandbox worker: mountPath is internal, not user input
+    execSync(`chmod -R a-w "${mountPath}"`, { stdio: 'pipe' });
+  }
+
+  return { source: 'gcs', fileCount: files.length, hashes };
+}
+
+export function diffScope(
+  mountPath: string,
+  baseHashes: FileHashMap,
+): FileMeta[] {
+  const changes: FileMeta[] = [];
+  const currentFiles = listFilesSync(mountPath);
+  const currentSet = new Set(currentFiles);
+
+  for (const relPath of currentFiles) {
+    const content = readFileSync(join(mountPath, relPath));
+    const hash = hashContent(content);
+    const oldHash = baseHashes.get(relPath);
+    if (!oldHash) {
+      changes.push({ path: relPath, type: 'added', size: content.length });
+    } else if (hash !== oldHash) {
+      changes.push({ path: relPath, type: 'modified', size: content.length });
+    }
+  }
+
+  for (const relPath of baseHashes.keys()) {
+    if (!currentSet.has(relPath)) {
+      changes.push({ path: relPath, type: 'deleted', size: 0 });
+    }
+  }
+
+  return changes;
+}
+
+/** Sync helper: list all files recursively under a directory. */
+function listFilesSync(baseDir: string, prefix = ''): string[] {
+  const files: string[] = [];
+  let entries;
+  try {
+    entries = readdirSync(baseDir, { withFileTypes: true });
+  } catch {
+    return files;
+  }
+  for (const entry of entries) {
+    const relPath = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      files.push(...listFilesSync(join(baseDir, entry.name), relPath));
+    } else if (entry.isFile()) {
+      files.push(relPath);
+    }
+  }
+  return files;
+}
+
+function hashContent(content: Buffer): string {
+  return createHash('sha256').update(content).digest('hex');
 }
 
 async function updateGCSCache(workspace: string, cacheKey: string): Promise<void> {

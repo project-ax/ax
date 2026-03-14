@@ -13,7 +13,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 
@@ -26,7 +26,9 @@ import type {
   SandboxWriteFileResponse,
   SandboxEditFileResponse,
 } from './types.js';
-import { provisionWorkspace, releaseWorkspace } from './workspace.js';
+import { provisionWorkspace, releaseWorkspace, provisionScope, diffScope, type FileHashMap } from './workspace.js';
+import { CANONICAL } from '../providers/sandbox/canonical-paths.js';
+import type { SandboxReleaseResponse, FileMeta } from './types.js';
 
 // Default workspace root inside sandbox pods
 const WORKSPACE_ROOT = process.env.SANDBOX_WORKSPACE_ROOT ?? '/workspace';
@@ -210,6 +212,24 @@ export async function startWorker(options?: {
       const workspace = wsResult.path;
       console.log(`[sandbox-worker] workspace ready: source=${wsResult.source}, durationMs=${wsResult.durationMs}`);
 
+      // Provision workspace scopes (GCS-backed tiers)
+      const scopeHashes = new Map<string, FileHashMap>();
+
+      if (claim.scopes?.agent) {
+        const result = await provisionScope(
+          CANONICAL.agent, claim.scopes.agent.gcsPrefix, claim.scopes.agent.readOnly,
+        );
+        if (!claim.scopes.agent.readOnly) scopeHashes.set('agent', result.hashes);
+        console.log(`[sandbox-worker] agent scope: source=${result.source}, files=${result.fileCount}`);
+      }
+      if (claim.scopes?.user) {
+        const result = await provisionScope(
+          CANONICAL.user, claim.scopes.user.gcsPrefix, claim.scopes.user.readOnly,
+        );
+        if (!claim.scopes.user.readOnly) scopeHashes.set('user', result.hashes);
+        console.log(`[sandbox-worker] user scope: source=${result.source}, files=${result.fileCount}`);
+      }
+
       // Reply with our pod subject so the host can dispatch tool calls directly
       const ack: SandboxClaimResponse = {
         type: 'claim_ack',
@@ -238,8 +258,38 @@ export async function startWorker(options?: {
 
         if (req.type === 'release') {
           released = true;
+
+          // Diff scopes and upload changes to GCS staging
+          const STAGING_BUCKET = process.env.GCS_WORKSPACE_BUCKET ?? '';
+          let staging: SandboxReleaseResponse['staging'];
+
+          if (STAGING_BUCKET && scopeHashes.size > 0) {
+            const stagingPrefix = `_staging/${claim.requestId}/`;
+            const scopeChanges: Partial<Record<string, FileMeta[]>> = {};
+
+            for (const [scope, hashes] of scopeHashes) {
+              const mountPath = scope === 'agent' ? CANONICAL.agent : CANONICAL.user;
+              const changes = diffScope(mountPath, hashes);
+              if (changes.length > 0) {
+                for (const change of changes) {
+                  if (change.type !== 'deleted') {
+                    const localPath = join(mountPath, change.path);
+                    const gcsPath = `gs://${STAGING_BUCKET}/${stagingPrefix}${scope}/${change.path}`;
+                    // nosemgrep: javascript.lang.security.detect-child-process — sandbox worker: host-constructed paths, not user input
+                    execSync(`gsutil -q cp "${localPath}" "${gcsPath}"`, { timeout: 30_000, stdio: 'pipe' });
+                  }
+                }
+                scopeChanges[scope] = changes;
+              }
+            }
+
+            if (Object.keys(scopeChanges).length > 0) {
+              staging = { prefix: stagingPrefix, scopes: scopeChanges };
+            }
+          }
+
           if (toolMsg.reply) {
-            toolMsg.respond(encode({ type: 'release_ack' }));
+            toolMsg.respond(encode({ type: 'release_ack', staging } satisfies SandboxReleaseResponse));
           }
           toolSub.unsubscribe();
           break;
