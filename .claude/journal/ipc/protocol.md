@@ -2,6 +2,14 @@
 
 IPC protocol enhancements: heartbeat keep-alive, schema hardening.
 
+## [2026-03-14 11:54] — Restore workspace_write IPC schema
+
+**Task:** Add `workspace_write` IPC schema as part of lazy-sandbox decoupling effort
+**What I did:** Added `WorkspaceWriteSchema` to `src/ipc-schemas.ts` using `ipcAction()` with tier (agent|user), path, and content fields. Added tests in `tests/ipc-schemas-enterprise.test.ts` for valid input and invalid tier rejection. Added `workspace_write` to enterprise actions registry test. Also added `workspace_write` to `knownInternalActions` in `tests/agent/tool-catalog-sync.test.ts` to pass sync test (will be moved to tool catalog in Task 3).
+**Files touched:** `src/ipc-schemas.ts`, `tests/ipc-schemas-enterprise.test.ts`, `tests/agent/tool-catalog-sync.test.ts`
+**Outcome:** Success — all targeted tests pass (20/20)
+**Notes:** Schema follows existing patterns: `safeString(1024)` for path, `safeString(500_000)` for content (matching SandboxWriteFileSchema), `z.enum(['agent', 'user'])` for tier.
+
 ## [2026-03-03 02:50] — Address PR #48 review comments on ipc-schemas.ts
 
 **Task:** Address unresolved review comment on src/ipc-schemas.ts from PR #48

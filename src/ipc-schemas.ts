@@ -292,6 +292,11 @@ export const WorkspaceMountSchema = ipcAction('workspace_mount', {
   scopes: z.array(z.enum(['agent', 'user', 'session'])),
 });
 
+export const WorkspaceWriteSchema = ipcAction('workspace_write', {
+  tier: z.enum(['agent', 'user']),
+  path: safeString(1024),
+  content: safeString(500_000),
+});
 
 // ── Enterprise: Governance ─────────────────────────────
 

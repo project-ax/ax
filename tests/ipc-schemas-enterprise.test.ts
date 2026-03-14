@@ -5,6 +5,7 @@ import {
   ProposalReviewSchema,
   AgentRegistryListSchema,
   AgentRegistryGetSchema,
+  WorkspaceWriteSchema,
   IPC_SCHEMAS,
 } from '../src/ipc-schemas.js';
 
@@ -93,11 +94,33 @@ describe('Enterprise IPC Schemas', () => {
     expect(result.success).toBe(true);
   });
 
+  // ── Workspace schemas ──
+
+  test('WorkspaceWriteSchema accepts valid input', () => {
+    const result = WorkspaceWriteSchema.safeParse({
+      action: 'workspace_write',
+      tier: 'agent',
+      path: 'docs/notes.md',
+      content: 'Hello world',
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test('WorkspaceWriteSchema rejects invalid tier', () => {
+    const result = WorkspaceWriteSchema.safeParse({
+      action: 'workspace_write',
+      tier: 'scratch',
+      path: 'docs/notes.md',
+      content: 'Hello world',
+    });
+    expect(result.success).toBe(false);
+  });
+
   // ── Registry integration ──
 
   test('all enterprise actions are registered in IPC_SCHEMAS', () => {
     const enterpriseActions = [
-      'workspace_mount',
+      'workspace_mount', 'workspace_write',
       'identity_propose', 'proposal_list', 'proposal_review',
       'agent_registry_list', 'agent_registry_get',
     ];
