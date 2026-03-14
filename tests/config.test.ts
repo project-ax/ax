@@ -42,7 +42,7 @@ providers:
   browser: none
   credentials: env
   skills: database
-  audit: file
+  audit: database
   sandbox: subprocess
   scheduler: none
 sandbox:
@@ -76,7 +76,7 @@ providers:
   browser: none
   credentials: env
   skills: database
-  audit: file
+  audit: database
   sandbox: subprocess
   scheduler: none
 sandbox:
@@ -111,7 +111,7 @@ providers:
   browser: none
   credentials: env
   skills: database
-  audit: file
+  audit: database
   sandbox: subprocess
   scheduler: none
 sandbox:
@@ -152,7 +152,7 @@ providers:
   browser: none
   credentials: env
   skills: database
-  audit: file
+  audit: database
   sandbox: subprocess
   scheduler: none
 sandbox:
@@ -198,7 +198,7 @@ providers:
   browser: none
   credentials: env
   skills: database
-  audit: file
+  audit: database
   sandbox: subprocess
   scheduler: none
 sandbox:
@@ -240,7 +240,7 @@ providers:
   browser: none
   credentials: env
   skills: database
-  audit: file
+  audit: database
   sandbox: subprocess
   scheduler: none
 sandbox:
@@ -278,7 +278,7 @@ providers:
   browser: none
   credentials: env
   skills: database
-  audit: file
+  audit: database
   sandbox: subprocess
   scheduler: none
 sandbox:
@@ -322,7 +322,7 @@ providers:
   browser: none
   credentials: env
   skills: database
-  audit: file
+  audit: database
   sandbox: subprocess
   scheduler: none
 sandbox:
@@ -368,7 +368,7 @@ providers:
   browser: none
   credentials: env
   skills: database
-  audit: file
+  audit: database
   sandbox: subprocess
   scheduler: none
 sandbox:
@@ -421,7 +421,7 @@ scheduler:
       expect(() => loadConfig(tmpPath)).toThrow(/providers\.scanner: "promptfoo" is not a valid option/);
       expect(() => loadConfig(tmpPath)).toThrow(/providers\.audit: "sqlite" is not a valid option/);
       expect(() => loadConfig(tmpPath)).toThrow(/Valid values: "patterns", "guardian"/);
-      expect(() => loadConfig(tmpPath)).toThrow(/Valid values: "file", "database"/);
+      expect(() => loadConfig(tmpPath)).toThrow(/Valid values: "database"/);
       expect(() => loadConfig(tmpPath)).toThrow(/Edit your config:/);
     } finally {
       rmSync(tmpPath);
@@ -441,7 +441,7 @@ providers:
   browser: none
   credentials: env
   skills: database
-  audit: file
+  audit: database
   sandbox: subprocess
   scheduler: none
   screener: static

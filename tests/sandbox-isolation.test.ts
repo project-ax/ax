@@ -24,7 +24,7 @@ const mockConfig = {
   providers: {
     memory: 'cortex', scanner: 'patterns',
     channels: ['cli'], web: 'none', browser: 'none',
-    credentials: 'keychain', skills: 'database', audit: 'file',
+    credentials: 'keychain', skills: 'database', audit: 'database',
     sandbox: 'subprocess', scheduler: 'none',
   },
   sandbox: { timeout_sec: 120, memory_mb: 512 },

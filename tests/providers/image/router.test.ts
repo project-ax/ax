@@ -17,7 +17,7 @@ function imageRouterConfig(imageModels: string[]): Config {
     providers: {
       memory: 'cortex', scanner: 'patterns',
       channels: [], web: 'none', browser: 'none',
-      credentials: 'keychain', skills: 'database', audit: 'file',
+      credentials: 'keychain', skills: 'database', audit: 'database',
       sandbox: 'subprocess', scheduler: 'none',
     },
     sandbox: { timeout_sec: 30, memory_mb: 256 },

@@ -20,7 +20,7 @@ models:
 # Local environment providers — compare with ax-k8s.yaml for k8s differences.
 providers:
   memory: cortex
-  audit: file
+  audit: database
   credentials: plaintext
   sandbox: seatbelt
   screener: static

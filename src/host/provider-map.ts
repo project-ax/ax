@@ -58,7 +58,6 @@ const _PROVIDER_MAP = {
     database: '../providers/skills/database.js',
   },
   audit: {
-    file:     '../providers/audit/file.js',
     database: '../providers/audit/database.js',
   },
   sandbox: {

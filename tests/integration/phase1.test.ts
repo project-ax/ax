@@ -44,7 +44,7 @@ function mockConfig(profile: 'paranoid' | 'balanced' | 'yolo' = 'balanced'): Con
     providers: {
       memory: 'cortex', scanner: 'patterns',
       channels: [], web: 'none', browser: 'none',
-      credentials: 'keychain', skills: 'database', audit: 'file',
+      credentials: 'keychain', skills: 'database', audit: 'database',
       sandbox: 'subprocess', scheduler: 'none',
     },
     sandbox: { timeout_sec: 30, memory_mb: 256 },
@@ -350,7 +350,7 @@ describe('Balanced Profile Config', () => {
     expect(config.profile).toBe('balanced');
     expect(config.providers.scanner).toBe('patterns');
     expect(config.providers.memory).toBe('cortex');
-    expect(config.providers.audit).toBe('file');
+    expect(config.providers.audit).toBe('database');
   });
 
   test('standard profile providers can be instantiated', async () => {
@@ -415,7 +415,7 @@ describe('Provider Map', () => {
     expect(PROVIDER_MAP.skills).toHaveProperty('database');
 
     // Audit providers
-    expect(PROVIDER_MAP.audit).toHaveProperty('file');
+    expect(PROVIDER_MAP.audit).toHaveProperty('database');
     expect(PROVIDER_MAP.audit).toHaveProperty('database');
 
     // Sandbox providers

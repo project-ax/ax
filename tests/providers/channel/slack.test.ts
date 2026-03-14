@@ -9,7 +9,7 @@ function testConfig(channelConfig?: Record<string, unknown>): Config {
     providers: {
       memory: 'cortex', scanner: 'patterns', channels: ['slack'],
       web: 'none', browser: 'none', credentials: 'keychain', skills: 'database',
-      audit: 'file', sandbox: 'subprocess', scheduler: 'none',
+      audit: 'database', sandbox: 'subprocess', scheduler: 'none',
     },
     channel_config: channelConfig as any,
     sandbox: { timeout_sec: 30, memory_mb: 512 },

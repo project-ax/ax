@@ -207,7 +207,7 @@ providers:
   browser: none
   credentials: keychain
   skills: database
-  audit: file
+  audit: database
   sandbox: subprocess
   scheduler: none
 
