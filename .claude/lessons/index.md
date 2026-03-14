@@ -89,6 +89,8 @@
 - Tool filtering must align with prompt module shouldInclude() [providers/skills.md](providers/skills.md)
 - child.killed is true after ANY kill() call, not just after the process is dead [providers/sandbox.md](providers/sandbox.md)
 - Never use tsx binary as a process wrapper — use node --import tsx/esm instead [providers/sandbox.md](providers/sandbox.md)
+- Apple Container --publish-socket requires listener-ready signaling [providers/sandbox.md](providers/sandbox.md)
+- Apple Container --tmpfs hides sockets from --publish-socket forwarding [providers/sandbox.md](providers/sandbox.md)
 - Slack url_private URLs require Authorization header — plain fetch fails silently [providers/channel.md](providers/channel.md)
 - Slack file upload: use SDK's files.uploadV2(), not manual 3-step flow [providers/channel.md](providers/channel.md)
 - OS username != channel user ID — admins file seed doesn't help channels [providers/channel.md](providers/channel.md)

@@ -1,4 +1,4 @@
-import { connect, type Socket } from 'node:net';
+import { connect, createServer, type Socket, type Server } from 'node:net';
 import { getLogger, truncate } from '../logger.js';
 
 const logger = getLogger().child({ component: 'ipc-client' });
@@ -18,6 +18,10 @@ export interface IPCClientOptions {
   userId?: string;
   /** Session scope included in every IPC request for memory scoping (dm = user-scoped, channel = agent-scoped). */
   sessionScope?: string;
+  /** If true, listen for an incoming connection instead of connecting out.
+   *  Used by Apple Container sandbox where the host connects into the VM
+   *  via --publish-socket and the agent accepts the connection. */
+  listen?: boolean;
 }
 
 export class IPCClient {
@@ -29,6 +33,9 @@ export class IPCClient {
   private sessionScope?: string;
   private socket: Socket | null = null;
   private connected = false;
+  private listenMode: boolean;
+  private listenServer: Server | null = null;
+  private connectPromise: Promise<void> | null = null;
 
   constructor(opts: IPCClientOptions) {
     this.socketPath = opts.socketPath;
@@ -37,10 +44,56 @@ export class IPCClient {
     this.sessionId = opts.sessionId;
     this.userId = opts.userId;
     this.sessionScope = opts.sessionScope;
+    this.listenMode = opts.listen ?? false;
   }
 
   async connect(): Promise<void> {
     if (this.connected) return;
+    // If a connect/listen is already in progress, return the same promise
+    // instead of starting a second one (prevents EADDRINUSE in listen mode).
+    if (this.connectPromise) return this.connectPromise;
+
+    if (this.listenMode) {
+      // Listen mode: create a server, wait for the host to connect in.
+      // Used by Apple Container sandbox where --publish-socket forwards
+      // host connections into the VM via virtio-vsock.
+      logger.debug('listen_start', { socketPath: this.socketPath });
+      this.connectPromise = new Promise<void>((resolve, reject) => {
+        this.listenServer = createServer();
+        this.listenServer.once('connection', (socket: Socket) => {
+          this.socket = socket;
+          this.connected = true;
+          this.connectPromise = null;
+          // Close the listen server — we only need one connection (the bridge).
+          // Leaving it open would accept kernel-level connections that we never
+          // handle, wasting file descriptors.
+          this.listenServer?.close();
+          this.listenServer = null;
+          process.stderr.write(`[diag] ipc_listen_accepted path=${this.socketPath}\n`);
+          logger.debug('listen_accepted', { socketPath: this.socketPath });
+          socket.on('error', (err) => {
+            this.connected = false;
+            logger.debug('socket_error', { error: err.message });
+          });
+          resolve();
+        });
+        this.listenServer.on('error', (err) => {
+          this.connectPromise = null;
+          process.stderr.write(`[diag] ipc_listen_error error=${err.message}\n`);
+          logger.debug('listen_error', { error: err.message });
+          reject(err);
+        });
+        // Signal readiness via stderr AFTER the server is bound and accepting
+        // connections. The host watches for this signal before connecting the
+        // bridge — without it, the host connects before the listener is ready
+        // and the publish-socket runtime can't forward the connection.
+        this.listenServer.listen(this.socketPath, () => {
+          process.stderr.write(`[signal] ipc_ready\n`);
+          logger.debug('listen_ready', { socketPath: this.socketPath });
+        });
+      });
+      return this.connectPromise;
+    }
 
     logger.debug('connect_start', { socketPath: this.socketPath });
     return new Promise<void>((resolve, reject) => {
@@ -224,6 +277,10 @@ export class IPCClient {
       this.socket.destroy();
       this.socket = null;
       this.connected = false;
+    }
+    if (this.listenServer) {
+      this.listenServer.close();
+      this.listenServer = null;
     }
   }
 }

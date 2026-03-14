@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach } from 'vitest';
-import { createServer, type Server } from 'node:net';
+import { connect, createServer, type Server } from 'node:net';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -187,6 +187,56 @@ describe('IPCClient', () => {
 
     client.disconnect();
   }, 5000);
+
+  test('listen mode: accepts connection and handles call', async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'ipc-test-'));
+    const socketPath = join(tmpDir, 'listen.sock');
+
+    // Create client in listen mode — it will create a server and wait
+    const client = new IPCClient({ socketPath, listen: true });
+    const connectPromise = client.connect();
+
+    // Give the server a moment to start listening, then connect to it
+    // and act as the "host" side — read requests, send responses
+    await new Promise<void>(r => setTimeout(r, 50));
+
+    const hostSocket = connect(socketPath);
+    await new Promise<void>((resolve) => hostSocket.once('connect', resolve));
+
+    // Wait for listen mode to accept the connection
+    await connectPromise;
+
+    // Now set up the host side to handle the request
+    const responsePromise = new Promise<void>((resolve) => {
+      let buffer = Buffer.alloc(0);
+      hostSocket.on('data', (data) => {
+        buffer = Buffer.concat([buffer, data]);
+        while (buffer.length >= 4) {
+          const msgLen = buffer.readUInt32BE(0);
+          if (buffer.length < 4 + msgLen) return;
+          const raw = buffer.subarray(4, 4 + msgLen).toString('utf-8');
+          buffer = buffer.subarray(4 + msgLen);
+
+          const request = JSON.parse(raw);
+          const response = JSON.stringify({ ok: true, echo: request.action });
+          const responseBuf = Buffer.from(response, 'utf-8');
+          const lenBuf = Buffer.alloc(4);
+          lenBuf.writeUInt32BE(responseBuf.length, 0);
+          hostSocket.write(Buffer.concat([lenBuf, responseBuf]));
+          resolve();
+        }
+      });
+    });
+
+    const result = await client.call({ action: 'test_listen' });
+    await responsePromise;
+
+    expect(result.ok).toBe(true);
+    expect(result.echo).toBe('test_listen');
+
+    hostSocket.destroy();
+    client.disconnect();
+  });
 
   test('resolves actual response after multiple heartbeats', async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'ipc-test-'));

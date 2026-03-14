@@ -1,4 +1,4 @@
-import { createServer, type Server, type Socket } from 'node:net';
+import { connect, createServer, type Server, type Socket } from 'node:net';
 import type { ProviderRegistry, AgentType } from '../types.js';
 import type { TaintBudget } from './taint-budget.js';
 import { IPC_SCHEMAS, IPCEnvelopeSchema } from '../ipc-schemas.js';
@@ -363,4 +363,100 @@ export function createIPCServer(
   server.listen(socketPath);
   logger.debug('server_listening', { socketPath });
   return server;
+}
+
+// ═══════════════════════════════════════════════════════
+// Reverse IPC Bridge (Apple Container)
+// ═══════════════════════════════════════════════════════
+
+const BRIDGE_CONNECT_RETRIES = 20;
+const BRIDGE_CONNECT_DELAY_MS = 250;
+
+/**
+ * Connects to a socket path and handles IPC requests — the mirror image of
+ * createIPCServer. Used for Apple Container sandbox where --publish-socket
+ * creates a host-side socket that proxies into the VM via virtio-vsock.
+ *
+ * The host connects OUT to the publish-socket endpoint; the agent inside
+ * the container accepts the connection and sends IPC requests over it.
+ * Same length-prefixed JSON protocol, same handler, just reversed
+ * connection direction.
+ */
+export async function connectIPCBridge(
+  socketPath: string,
+  handler: (raw: string, ctx: IPCContext) => Promise<string>,
+  ctx: IPCContext,
+): Promise<{ close: () => void }> {
+  const socket = await connectWithRetry(socketPath, BRIDGE_CONNECT_RETRIES, BRIDGE_CONNECT_DELAY_MS);
+  logger.debug('bridge_connected', { socketPath });
+
+  let buffer = Buffer.alloc(0);
+
+  socket.on('data', async (data: Buffer) => {
+    buffer = Buffer.concat([buffer, data]);
+
+    while (buffer.length >= 4) {
+      const msgLen = buffer.readUInt32BE(0);
+
+      if (msgLen > 10_000_000) {
+        logger.debug('bridge_message_too_large', { msgLen, limit: 10_000_000 });
+        socket.destroy();
+        return;
+      }
+
+      if (buffer.length < 4 + msgLen) {
+        break;
+      }
+
+      const raw = buffer.subarray(4, 4 + msgLen).toString('utf-8');
+      buffer = buffer.subarray(4 + msgLen);
+
+      logger.debug('bridge_message_received', { msgLen });
+
+      const heartbeatInterval = setInterval(() => {
+        const hb = JSON.stringify({ _heartbeat: true, ts: Date.now() });
+        const hbBuf = Buffer.from(hb, 'utf-8');
+        const hbLenBuf = Buffer.alloc(4);
+        hbLenBuf.writeUInt32BE(hbBuf.length, 0);
+        try { socket.write(Buffer.concat([hbLenBuf, hbBuf])); } catch { /* socket gone */ }
+      }, HEARTBEAT_INTERVAL_MS);
+
+      let response: string;
+      try {
+        response = await handler(raw, ctx);
+      } finally {
+        clearInterval(heartbeatInterval);
+      }
+
+      const responseBuf = Buffer.from(response, 'utf-8');
+      const lenBuf = Buffer.alloc(4);
+      lenBuf.writeUInt32BE(responseBuf.length, 0);
+      logger.debug('bridge_message_response', { responseBytes: responseBuf.length });
+      socket.write(Buffer.concat([lenBuf, responseBuf]));
+    }
+  });
+
+  socket.on('error', (err) => {
+    logger.debug('bridge_socket_error', { error: err.message });
+  });
+
+  return { close: () => socket.destroy() };
+}
+
+/** Connect to a Unix socket with retry — waits for the container to start. */
+async function connectWithRetry(socketPath: string, maxRetries: number, delayMs: number): Promise<Socket> {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await new Promise<Socket>((resolve, reject) => {
+        const socket = connect(socketPath, () => resolve(socket));
+        socket.once('error', reject);
+      });
+    } catch {
+      if (attempt >= maxRetries) {
+        throw new Error(`IPC bridge connect failed after ${maxRetries} attempts: ${socketPath}`);
+      }
+      await new Promise<void>(r => setTimeout(r, delayMs));
+    }
+  }
+  throw new Error('unreachable');
 }

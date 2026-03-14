@@ -2,6 +2,17 @@
 
 Sandbox providers, canonical paths, workspace tiers.
 
+## [2026-03-14 09:30] — Fix Apple Container IPC bridge: timing + tmpfs
+
+**Task:** Fix IPC bridge for Apple Container sandbox — agent inside VM couldn't communicate with host via --publish-socket
+**What I did:** Fixed two independent bugs preventing IPC data flow through --publish-socket:
+1. **Timing**: Host was connecting to the host-side publish-socket BEFORE the agent's listener was ready inside the VM. Added `[signal] ipc_ready` — agent emits via stderr when `net.Server.listen()` completes, host waits for this signal before connecting the bridge.
+2. **tmpfs hiding socket**: `--tmpfs /tmp` created a tmpfs overlay that hid the bridge socket from the publish-socket runtime's in-VM forwarding agent. Removed `--read-only` and `--tmpfs /tmp` (VM boundary provides security isolation).
+**Files touched:**
+  - Modified: src/agent/ipc-client.ts (signal on listen ready), src/host/server-completions.ts (wait for signal before bridge connect), src/providers/sandbox/apple.ts (remove --read-only/--tmpfs)
+**Outcome:** Success — IPC bridge now works end-to-end through virtio-vsock
+**Notes:** Debugging required 7 iterations. Key diagnostic: `[diag] ipc_listen_accepted` never appearing confirmed the runtime wasn't forwarding the host connection. Two root causes masked each other — fixing timing alone didn't help because tmpfs was also blocking, and fixing tmpfs alone didn't help because of timing.
+
 ## [2026-03-14 12:00] — Add Apple Container sandbox provider
 
 **Task:** Add a new sandbox provider using Apple's `container` CLI for lightweight VM-based isolation on macOS (Apple Silicon).

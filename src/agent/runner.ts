@@ -39,6 +39,12 @@ export interface AgentConfig {
   agent?: AgentType;
   model?: string;          // e.g. 'moonshotai/kimi-k2-instruct-0905' (provider prefix already stripped)
   ipcSocket: string;
+  /** If true, the IPC client listens for an incoming connection instead of
+   *  connecting out. Used by Apple Container sandbox (reverse bridge). */
+  ipcListen?: boolean;
+  /** Pre-connected IPC client (created before stdin read in listen mode).
+   *  Runners should use this instead of creating a new IPCClient. */
+  ipcClient?: IPCClient;
   workspace: string;
   proxySocket?: string;
   maxTokens?: number;
@@ -210,6 +216,7 @@ function parseArgs(): AgentConfig {
   // (e.g. AX_WORKSPACE=/workspace). Identity and skills come via stdin payload now.
   ipcSocket = ipcSocket || process.env.AX_IPC_SOCKET || '';
   const workspace = process.env.AX_WORKSPACE || '';
+  const ipcListen = process.env.AX_IPC_LISTEN === '1';
 
   if (!ipcSocket || !workspace) {
     logger.error('missing_args', { message: 'Usage: agent-runner --agent <type> --ipc-socket <path> (AX_WORKSPACE env var required)' });
@@ -217,7 +224,7 @@ function parseArgs(): AgentConfig {
   }
 
   return {
-    agent, ipcSocket, workspace,
+    agent, ipcSocket, ipcListen, workspace,
     model: model || undefined,
     proxySocket: proxySocket || undefined,
     maxTokens: maxTokens || undefined,
@@ -337,6 +344,22 @@ const isMain = process.argv[1]?.endsWith('runner.js') ||
 if (isMain) {
   const config = parseArgs();
   logger.debug('main_start', { agent: config.agent, workspace: config.workspace });
+
+  // In listen mode (Apple Container), start the IPC listener BEFORE reading
+  // stdin. The host waits for "[signal] ipc_ready" in stderr before connecting
+  // the bridge — the runtime only forwards connections when the container-side
+  // listener exists. Starting before stdin maximizes boot time.
+  if (config.ipcListen) {
+    const client = new IPCClient({ socketPath: config.ipcSocket, listen: true });
+    client.connect().then(() => {
+      logger.debug('ipc_listen_ready', { socketPath: config.ipcSocket });
+    }).catch((err) => {
+      logger.error('ipc_listen_failed', { error: (err as Error).message });
+      process.exitCode = 1;
+    });
+    config.ipcClient = client;
+  }
+
   readStdin().then((data) => {
     const payload = parseStdinPayload(data);
     const msgText = typeof payload.message === 'string' ? payload.message : extractText(payload.message);

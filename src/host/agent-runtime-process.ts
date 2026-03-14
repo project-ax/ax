@@ -196,6 +196,7 @@ async function main(): Promise<void> {
     natsDispatcher: sandboxDispatcher,
     requestIdMap,
   });
+  completionDeps.ipcHandler = handleIPC;
 
   const defaultCtx = { sessionId: 'server', agentId: 'system', userId: defaultUserId };
   const ipcServer = createIPCServer(ipcSocketPath, handleIPC, defaultCtx);

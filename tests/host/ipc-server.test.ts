@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { connect } from 'node:net';
-import { createIPCHandler, createIPCServer, HEARTBEAT_INTERVAL_MS, type IPCContext } from '../../src/host/ipc-server.js';
+import { createIPCHandler, createIPCServer, connectIPCBridge, HEARTBEAT_INTERVAL_MS, type IPCContext } from '../../src/host/ipc-server.js';
+import { IPCClient } from '../../src/agent/ipc-client.js';
 import { TaintBudget } from '../../src/host/taint-budget.js';
 import type { ProviderRegistry } from '../../src/types.js';
 import type { DocumentStore } from '../../src/providers/storage/types.js';
@@ -1038,4 +1039,123 @@ describe('IPC Server heartbeat', () => {
   test('HEARTBEAT_INTERVAL_MS is exported and equals 15 seconds', () => {
     expect(HEARTBEAT_INTERVAL_MS).toBe(15_000);
   });
+});
+
+describe('connectIPCBridge (reverse IPC for Apple containers)', () => {
+  test('connects to a listening socket and handles IPC requests', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'ipc-bridge-'));
+    const socketPath = join(tmpDir, 'bridge.sock');
+
+    // Simulate the agent side: listen on the socket and capture the connection
+    const { createServer: createNetServer } = await import('node:net');
+    const agentServer = createNetServer();
+
+    // Set up connection listener BEFORE the bridge connects
+    const agentSocketPromise = new Promise<import('node:net').Socket>((resolve) => {
+      agentServer.once('connection', resolve);
+    });
+
+    agentServer.listen(socketPath);
+    await new Promise<void>(r => agentServer.on('listening', r));
+
+    // The handler echoes the action
+    const handler = async (raw: string) => {
+      const parsed = JSON.parse(raw);
+      return JSON.stringify({ ok: true, echo: parsed.action });
+    };
+
+    // Connect the bridge (host side) — triggers 'connection' on agentServer
+    const bridge = await connectIPCBridge(socketPath, handler, ctx);
+    const agentSocket = await agentSocketPromise;
+
+    // Agent sends a request through the accepted connection
+    const request = JSON.stringify({ action: 'test_bridge' });
+    const reqBuf = Buffer.from(request, 'utf-8');
+    const lenBuf = Buffer.alloc(4);
+    lenBuf.writeUInt32BE(reqBuf.length, 0);
+    agentSocket.write(Buffer.concat([lenBuf, reqBuf]));
+
+    // Read response from the bridge
+    const response = await new Promise<Record<string, unknown>>((resolve) => {
+      let buffer = Buffer.alloc(0);
+      agentSocket.on('data', (data) => {
+        buffer = Buffer.concat([buffer, data]);
+        while (buffer.length >= 4) {
+          const msgLen = buffer.readUInt32BE(0);
+          if (buffer.length < 4 + msgLen) return;
+          const raw = buffer.subarray(4, 4 + msgLen).toString('utf-8');
+          buffer = buffer.subarray(4 + msgLen);
+          const parsed = JSON.parse(raw);
+          if (!parsed._heartbeat) resolve(parsed);
+        }
+      });
+    });
+
+    expect(response.ok).toBe(true);
+    expect(response.echo).toBe('test_bridge');
+
+    bridge.close();
+    agentSocket.destroy();
+    agentServer.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  }, 10000);
+
+  test('round-trip: IPCClient(listen) ↔ connectIPCBridge', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'ipc-roundtrip-'));
+    const socketPath = join(tmpDir, 'roundtrip.sock');
+
+    // Agent side: IPCClient in listen mode
+    const client = new IPCClient({ socketPath, listen: true });
+    const clientReady = client.connect();
+
+    // Give the listen server a moment to start
+    await new Promise<void>(r => setTimeout(r, 50));
+
+    // Host side: connectIPCBridge connects and handles requests
+    const handler = async (raw: string) => {
+      const parsed = JSON.parse(raw);
+      if (parsed.action === 'llm_call') {
+        return JSON.stringify({ ok: true, chunks: [{ type: 'text', content: 'Hello from bridge' }] });
+      }
+      return JSON.stringify({ ok: true, echo: parsed.action });
+    };
+    const bridge = await connectIPCBridge(socketPath, handler, ctx);
+
+    // Wait for the client to accept the bridge connection
+    await clientReady;
+
+    // Agent sends an IPC request — should be handled by the bridge
+    const result = await client.call({ action: 'llm_call', messages: [] });
+    expect(result.ok).toBe(true);
+    expect((result as any).chunks[0].content).toBe('Hello from bridge');
+
+    // Second call to verify the connection stays alive
+    const result2 = await client.call({ action: 'skill_list' });
+    expect(result2.ok).toBe(true);
+    expect(result2.echo).toBe('skill_list');
+
+    bridge.close();
+    client.disconnect();
+    rmSync(tmpDir, { recursive: true, force: true });
+  }, 10000);
+
+  test('connectIPCBridge retries on connection failure', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'ipc-retry-'));
+    const socketPath = join(tmpDir, 'delayed.sock');
+
+    const handler = async () => JSON.stringify({ ok: true });
+
+    // Start listening after a delay (simulates container startup time)
+    setTimeout(() => {
+      const { createServer: createNetServer } = require('node:net');
+      const server = createNetServer();
+      server.listen(socketPath);
+    }, 300);
+
+    const bridge = await connectIPCBridge(socketPath, handler, ctx);
+    expect(bridge).toBeDefined();
+
+    bridge.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  }, 10000);
 });

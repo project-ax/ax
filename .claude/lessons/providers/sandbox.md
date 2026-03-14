@@ -1,5 +1,17 @@
 # Provider Lessons: Sandbox
 
+### Apple Container --publish-socket requires listener-ready signaling
+**Date:** 2026-03-14
+**Context:** IPC bridge via --publish-socket hung silently — host connected to host-side socket but the runtime never forwarded to the container's listener. Root cause: host connected before the agent's Node.js process finished booting and called `net.Server.listen()`.
+**Lesson:** The Apple Container runtime only forwards --publish-socket connections when a listener already exists at the container-side path. Use a stderr signal (`[signal] ipc_ready`) emitted from the `listen()` callback. The host MUST wait for this signal before connecting to the host-side socket. This is critical because Node.js takes seconds to boot inside the VM, while the host-side socket is available immediately.
+**Tags:** apple-container, publish-socket, virtio-vsock, timing, IPC
+
+### Apple Container --tmpfs hides sockets from --publish-socket forwarding
+**Date:** 2026-03-14
+**Context:** Even after fixing the timing issue, IPC bridge still failed. `ipc_listen_accepted` never appeared despite the agent's listener being ready and the host connecting to the bridge socket.
+**Lesson:** `--tmpfs /tmp` creates a filesystem overlay that the --publish-socket runtime's in-VM forwarding agent cannot see through. Sockets created on tmpfs are invisible to the forwarding mechanism. Don't use `--read-only` + `--tmpfs` for paths used by --publish-socket. The VM boundary already provides security isolation, so a writable root filesystem is an acceptable trade-off.
+**Tags:** apple-container, tmpfs, publish-socket, filesystem, IPC
+
 ### Provider map path regex must allow digits in provider names
 **Date:** 2026-03-04
 **Context:** Adding `k8s-pod` to sandbox providers caused provider-map.test.ts and phase2.test.ts to fail — their path validation regex was `[a-z-]+` which doesn't match digits.

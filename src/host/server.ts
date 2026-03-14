@@ -391,6 +391,7 @@ export async function createServer(
     agentRegistry,
     workspaceMap,
   });
+  completionDeps.ipcHandler = handleIPC;
 
   // Webhook path prefix (configurable, defaults to '/webhooks/')
   const webhookPrefix = config.webhooks?.path

@@ -19,6 +19,7 @@ import { TaintBudget, thresholdForProfile } from './taint-budget.js';
 import { type Logger, truncate } from '../logger.js';
 import { drainGeneratedImages } from './ipc-handlers/image.js';
 import { startAnthropicProxy } from './proxy.js';
+import { connectIPCBridge } from './ipc-server.js';
 import { diagnoseError } from '../errors.js';
 import { ensureOAuthTokenFreshViaProvider, ensureOAuthTokenFresh, refreshOAuthTokenFromEnv, forceRefreshOAuthViaProvider } from '../dotenv.js';
 import { runnerPath as resolveRunnerPath, tsxLoader, isDevMode } from '../utils/assets.js';
@@ -49,6 +50,8 @@ export interface CompletionDeps {
   eventBus?: EventBus;
   /** Maps sessionId → workspace directory path. Shared with sandbox tool IPC handlers. */
   workspaceMap?: Map<string, string>;
+  /** IPC handler function for reverse bridge connections (Apple containers). */
+  ipcHandler?: (raw: string, ctx: import('./ipc-server.js').IPCContext) => Promise<string>;
 }
 
 export interface ExtractedFile {
@@ -593,17 +596,32 @@ export async function processCompletion(
     // Workspace is NOT passed as a CLI arg — it's set via canonical env vars
     // by the sandbox provider (e.g. AX_WORKSPACE=/workspace).
     // Identity and skills come via stdin payload from DocumentStore.
-    const spawnCommand = [process.execPath,
-      // Dev mode: load tsx ESM loader so the .ts runner source is compiled on
-      // the fly. Production: run compiled dist/agent/runner.js directly.
-      ...(isDevMode() ? ['--import', tsxLoader()] : []),
-      resolveRunnerPath(),
+    //
+    // Container-based sandboxes (docker, apple, k8s) run inside an OCI image
+    // with its own Node binary and pre-built runner at /opt/ax/dist/agent/runner.js.
+    // Host paths (process.execPath, tsx loader, etc.) don't exist in the container.
+    const CONTAINER_SANDBOXES = new Set(['docker', 'apple', 'k8s']);
+    const isContainerSandbox = CONTAINER_SANDBOXES.has(config.providers.sandbox);
+
+    const spawnCommand = isContainerSandbox
+      ? ['/opt/ax/dist/agent/runner.js']
+      : [process.execPath,
+          // Dev mode: load tsx ESM loader so the .ts runner source is compiled on
+          // the fly. Production: run compiled dist/agent/runner.js directly.
+          ...(isDevMode() ? ['--import', tsxLoader()] : []),
+          resolveRunnerPath(),
+        ];
+
+    spawnCommand.push(
       '--agent', agentType,
-      '--ipc-socket', ipcSocketPath,
+      // Container sandboxes set AX_IPC_SOCKET via env var (the sandbox provider
+      // controls the path inside the container). Host-side sandboxes need the
+      // CLI arg because they don't remap the socket path.
+      ...(!isContainerSandbox ? ['--ipc-socket', ipcSocketPath] : []),
       '--max-tokens', String(maxTokens),
       ...(proxySocketPath ? ['--proxy-socket', proxySocketPath] : []),
       ...(deps.verbose ? ['--verbose'] : []),
-    ];
+    );
 
     reqLogger.debug('agent_spawn', {
       agentType,
@@ -732,14 +750,21 @@ export async function processCompletion(
         data: { agentType, attempt, sessionId },
       });
 
-      // Send raw user message to agent (not the taint-tagged queued.content)
-      reqLogger.debug('stdin_write', { payloadBytes: stdinPayload.length });
-      proc.stdin.write(stdinPayload);
-      proc.stdin.end();
+      // Apple containers use an IPC bridge via --publish-socket / virtio-vsock.
+      // The agent listens inside the VM and the host connects in. We must wait
+      // for the agent's "[signal] ipc_ready" on stderr before connecting — the
+      // runtime only forwards connections when the container-side listener exists.
+      let bridge: { close: () => void } | undefined;
 
-      // Collect stdout and stderr in parallel to avoid pipe buffer deadlocks.
-      // Sequential collection can lose data when a stream fills its buffer
-      // while the other stream is being drained.
+      // Start stderr collection immediately — we need to watch for the
+      // ipc_ready signal AND collect all stderr for logging/diagnostics.
+      // Use a callback-based approach so both signal detection and collection
+      // share the same stream.
+      let ipcReadyResolve: (() => void) | undefined;
+      const ipcReadyPromise = proc.bridgeSocketPath
+        ? new Promise<void>((resolve) => { ipcReadyResolve = resolve; })
+        : undefined;
+
       const stdoutDone = (async () => {
         for await (const chunk of proc.stdout) {
           response += chunk.toString();
@@ -750,6 +775,11 @@ export async function processCompletion(
         for await (const chunk of proc.stderr) {
           const text = chunk.toString();
           stderr += text;
+          // Check for IPC ready signal from agent (Apple Container)
+          if (ipcReadyResolve && text.includes('[signal] ipc_ready')) {
+            ipcReadyResolve();
+            ipcReadyResolve = undefined; // only resolve once
+          }
           if (deps.verbose) {
             for (const line of text.split('\n').filter((l: string) => l.trim())) {
               const tagMatch = line.match(/^\[([\w-]+)\]\s*(.*)/);
@@ -761,10 +791,56 @@ export async function processCompletion(
             }
           }
         }
+        // If agent exits before signaling, resolve to avoid hanging
+        ipcReadyResolve?.();
       })();
+
+      if (proc.bridgeSocketPath && deps.ipcHandler) {
+        // Wait for agent's listener to be ready (with timeout).
+        // Clear the timer when the signal wins to avoid leaking the 15s handle.
+        let readyTimerId: ReturnType<typeof setTimeout> | undefined;
+        let signaled = false;
+        const readyTimeout = new Promise<void>(r => { readyTimerId = setTimeout(r, 15_000); });
+        const signalWithCleanup = ipcReadyPromise!.then(() => { signaled = true; });
+        await Promise.race([signalWithCleanup, readyTimeout]);
+        if (readyTimerId !== undefined) clearTimeout(readyTimerId);
+        reqLogger.debug('ipc_agent_ready', {
+          bridgeSocketPath: proc.bridgeSocketPath,
+          signaled, // true = agent signaled, false = 15s timeout (agent may still be booting)
+        });
+
+        try {
+          const bridgeCtx = { sessionId, agentId: agentName, userId: currentUserId };
+          bridge = await connectIPCBridge(proc.bridgeSocketPath, deps.ipcHandler, bridgeCtx);
+          reqLogger.debug('ipc_bridge_connected', { bridgeSocketPath: proc.bridgeSocketPath });
+        } catch (err) {
+          // Bridge connect failed — agent may have crashed or the socket isn't
+          // available. Kill the process to avoid it hanging until enforceTimeout,
+          // then let the retry loop handle the failure.
+          reqLogger.error('ipc_bridge_failed', {
+            error: (err as Error).message,
+            bridgeSocketPath: proc.bridgeSocketPath,
+            signaled,
+          });
+          try { proc.stdin.end(); } catch { /* ignore */ }
+          providers.sandbox.kill(proc.pid);
+        }
+      }
+
+      // Send raw user message to agent (not the taint-tagged queued.content).
+      // Guard: if the bridge connect failed and we killed the process, stdin
+      // is already closed — writing would throw EPIPE.
+      try {
+        reqLogger.debug('stdin_write', { payloadBytes: stdinPayload.length });
+        proc.stdin.write(stdinPayload);
+        proc.stdin.end();
+      } catch {
+        // Process already killed (bridge failure) — stdin write throws EPIPE
+      }
 
       await Promise.all([stdoutDone, stderrDone]);
       exitCode = await proc.exitCode;
+      bridge?.close();
 
       reqLogger.debug('agent_exit', {
         exitCode,
