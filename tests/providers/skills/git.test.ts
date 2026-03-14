@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, rmSync, existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -75,6 +75,57 @@ describe('skills-git provider', () => {
       const skills = await provider.list();
       expect(skills).toHaveLength(0);
     });
+
+    test('lists directory-based skills with SKILL.md', async () => {
+      const skillsPath = agentSkillsDir('main');
+      mkdirSync(join(skillsPath, 'deploy'), { recursive: true });
+      writeFileSync(join(skillsPath, 'deploy', 'SKILL.md'), '# Deploy\nDeploy things.');
+
+      const skills = await provider.list();
+      expect(skills).toHaveLength(1);
+      expect(skills[0].name).toBe('deploy');
+    });
+
+    test('lists both file-based and directory-based skills', async () => {
+      const skillsPath = agentSkillsDir('main');
+      writeFileSync(join(skillsPath, 'greeting.md'), '# Greeting\nSay hello!');
+      mkdirSync(join(skillsPath, 'deploy'), { recursive: true });
+      writeFileSync(join(skillsPath, 'deploy', 'SKILL.md'), '# Deploy\nDeploy things.');
+
+      const skills = await provider.list();
+      expect(skills).toHaveLength(2);
+      const names = skills.map(s => s.name).sort();
+      expect(names).toEqual(['deploy', 'greeting']);
+    });
+
+    test('ignores directories without SKILL.md', async () => {
+      const skillsPath = agentSkillsDir('main');
+      mkdirSync(join(skillsPath, 'empty-dir'), { recursive: true });
+      writeFileSync(join(skillsPath, 'greeting.md'), '# Greeting\nHello');
+
+      const skills = await provider.list();
+      expect(skills).toHaveLength(1);
+      expect(skills[0].name).toBe('greeting');
+    });
+
+    test('reads directory-based skill content', async () => {
+      const skillsPath = agentSkillsDir('main');
+      mkdirSync(join(skillsPath, 'deploy'), { recursive: true });
+      writeFileSync(join(skillsPath, 'deploy', 'SKILL.md'), '# Deploy\n\nDeploy all the things.');
+
+      const content = await provider.read('deploy');
+      expect(content).toBe('# Deploy\n\nDeploy all the things.');
+    });
+
+    test('file-based skill takes precedence over directory-based in read', async () => {
+      const skillsPath = agentSkillsDir('main');
+      writeFileSync(join(skillsPath, 'deploy.md'), '# Deploy File\nFile version.');
+      mkdirSync(join(skillsPath, 'deploy'), { recursive: true });
+      writeFileSync(join(skillsPath, 'deploy', 'SKILL.md'), '# Deploy Dir\nDir version.');
+
+      const content = await provider.read('deploy');
+      expect(content).toBe('# Deploy File\nFile version.');
+    });
   });
 
   describe('propose - auto-approve', () => {
@@ -91,6 +142,24 @@ describe('skills-git provider', () => {
       // File should exist and be committed
       const content = await provider.read('safe-skill');
       expect(content).toBe('# Safe Skill\n\nThis is a safe markdown skill with no code.');
+    });
+
+    test('propose to existing directory-based skill writes to SKILL.md', async () => {
+      const skillsPath = agentSkillsDir('main');
+      mkdirSync(join(skillsPath, 'deploy'), { recursive: true });
+      writeFileSync(join(skillsPath, 'deploy', 'SKILL.md'), '# Deploy v1\nOld content.');
+
+      const result = await provider.propose({
+        skill: 'deploy',
+        content: '# Deploy v2\nUpdated content.',
+        reason: 'Updating deploy skill',
+      });
+
+      expect(result.verdict).toBe('AUTO_APPROVE');
+      const content = await provider.read('deploy');
+      expect(content).toBe('# Deploy v2\nUpdated content.');
+      // Should still be directory-based, not create deploy.md
+      expect(existsSync(join(skillsPath, 'deploy', 'SKILL.md'))).toBe(true);
     });
 
     test('auto-approved skills appear in list', async () => {

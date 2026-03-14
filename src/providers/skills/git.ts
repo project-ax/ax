@@ -74,6 +74,8 @@ const CAPABILITY_PATTERNS: { regex: RegExp; capability: string }[] = [
 interface PendingProposal {
   id: string;
   skill: string;
+  /** Relative filepath within git dir (e.g. "deploy.md" or "deploy/SKILL.md") */
+  gitFilepath: string;
   content: string;
   reason?: string;
   verdict: 'AUTO_APPROVE' | 'NEEDS_REVIEW' | 'REJECT';
@@ -99,12 +101,23 @@ export async function create(config: Config, _name?: string, opts?: { screener?:
     await git.findRoot({ fs, filepath: skillsDir });
   } catch {
     await git.init({ fs, dir: gitDir });
-    // Initial commit with any existing files
-    const existingFiles = fs.readdirSync(skillsDir).filter(f => f.endsWith('.md'));
-    for (const file of existingFiles) {
+    // Initial commit with any existing files (flat .md and directory-based SKILL.md)
+    const existingEntries = fs.readdirSync(skillsDir, { withFileTypes: true });
+    const filesToAdd: string[] = [];
+    for (const entry of existingEntries) {
+      if (entry.isFile() && entry.name.endsWith('.md')) {
+        filesToAdd.push(entry.name);
+      } else if (entry.isDirectory()) {
+        const skillMd = join(entry.name, 'SKILL.md');
+        if (fs.existsSync(join(skillsDir, skillMd))) {
+          filesToAdd.push(skillMd);
+        }
+      }
+    }
+    for (const file of filesToAdd) {
       await git.add({ fs, dir: gitDir, filepath: file });
     }
-    if (existingFiles.length > 0) {
+    if (filesToAdd.length > 0) {
       await git.commit({
         fs, dir: gitDir,
         message: 'Initial skills commit',
@@ -180,7 +193,19 @@ export async function create(config: Config, _name?: string, opts?: { screener?:
   }
 
   async function getDriftStats(): Promise<{ totalFiles: number; totalChanges: number }> {
-    const files = fs.readdirSync(skillsDir).filter(f => f.endsWith('.md'));
+    let totalFiles = 0;
+    try {
+      const entries = fs.readdirSync(skillsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isFile() && entry.name.endsWith('.md')) {
+          totalFiles++;
+        } else if (entry.isDirectory() && fs.existsSync(join(skillsDir, entry.name, 'SKILL.md'))) {
+          totalFiles++;
+        }
+      }
+    } catch {
+      // empty
+    }
     let totalChanges = 0;
 
     try {
@@ -190,35 +215,70 @@ export async function create(config: Config, _name?: string, opts?: { screener?:
       // No commits yet
     }
 
-    return { totalFiles: files.length, totalChanges };
+    return { totalFiles, totalChanges };
   }
 
   return {
     async list(): Promise<SkillMeta[]> {
-      let files: string[];
+      let entries: fs.Dirent[];
       try {
-        files = fs.readdirSync(skillsDir).filter(f => f.endsWith('.md'));
+        entries = fs.readdirSync(skillsDir, { withFileTypes: true });
       } catch {
         return [];
       }
 
-      return files.map(f => ({
-        name: f.replace(/\.md$/, ''),
-        path: safePath(skillsDir, f),
-      }));
+      const results: SkillMeta[] = [];
+      for (const entry of entries) {
+        if (entry.isFile() && entry.name.endsWith('.md')) {
+          // File-based skill: greeting.md → name "greeting"
+          results.push({
+            name: entry.name.replace(/\.md$/, ''),
+            path: safePath(skillsDir, entry.name),
+          });
+        } else if (entry.isDirectory()) {
+          // Directory-based skill: deploy/SKILL.md → name "deploy"
+          const skillMdPath = join(skillsDir, entry.name, 'SKILL.md');
+          if (fs.existsSync(skillMdPath)) {
+            results.push({
+              name: entry.name,
+              path: safePath(skillsDir, entry.name, 'SKILL.md'),
+            });
+          }
+        }
+      }
+      return results;
     },
 
     async read(name: string): Promise<string> {
+      // Try file-based first: {name}.md
       const filePath = safePath(skillsDir, `${name}.md`);
-      return fs.readFileSync(filePath, 'utf-8');
+      if (fs.existsSync(filePath)) {
+        return fs.readFileSync(filePath, 'utf-8');
+      }
+      // Try directory-based: {name}/SKILL.md
+      const dirSkillPath = safePath(skillsDir, name, 'SKILL.md');
+      return fs.readFileSync(dirSkillPath, 'utf-8');
     },
 
     async propose(proposal: SkillProposal): Promise<ProposalResult> {
       const { skill, content, reason } = proposal;
 
+      // Determine if this is a directory-based skill (existing dir with SKILL.md)
+      const dirSkillPath = safePath(skillsDir, skill, 'SKILL.md');
+      const safeSkillDir = safePath(skillsDir, skill);
+      const isDirectorySkill = fs.existsSync(safeSkillDir) &&
+        fs.statSync(safeSkillDir).isDirectory();
+
       // Sanitize skill name via safePath (SC-SEC-004) and extract the safe filename
-      const safeFilePath = safePath(skillsDir, `${skill}.md`);
-      const safeFilename = basename(safeFilePath); // e.g. "my-skill.md"
+      const safeFilePath = isDirectorySkill ? dirSkillPath : safePath(skillsDir, `${skill}.md`);
+      // Git filepath relative to gitDir
+      const safeFilename = isDirectorySkill
+        ? join(basename(safeSkillDir), 'SKILL.md')
+        : basename(safeFilePath); // e.g. "my-skill.md"
+      // Sanitized skill name (directory name for dir-based, stem for file-based)
+      const safeName = isDirectorySkill
+        ? basename(safeSkillDir)
+        : basename(safeFilePath).replace(/\.md$/, '');
 
       // Validate content
       const validation = await validateContent(content);
@@ -226,7 +286,8 @@ export async function create(config: Config, _name?: string, opts?: { screener?:
       const id = randomUUID();
       const pending: PendingProposal = {
         id,
-        skill: safeFilename.replace(/\.md$/, ''), // store sanitized name
+        skill: safeName, // store sanitized name
+        gitFilepath: safeFilename, // relative path for git operations
         content,
         reason,
         verdict: validation.verdict,
@@ -251,6 +312,9 @@ export async function create(config: Config, _name?: string, opts?: { screener?:
 
       if (validation.verdict === 'AUTO_APPROVE') {
         // Auto-approve: write file and commit immediately
+        if (isDirectorySkill) {
+          fs.mkdirSync(join(skillsDir, basename(safeSkillDir)), { recursive: true });
+        }
         fs.writeFileSync(safeFilePath, content, 'utf-8');
 
         await git.add({ fs, dir: gitDir, filepath: safeFilename });
@@ -288,9 +352,12 @@ export async function create(config: Config, _name?: string, opts?: { screener?:
         throw new Error(`Cannot approve a rejected proposal: ${pending.rejectReason}`);
       }
 
-      // Write file and commit (pending.skill is already sanitized)
-      const safeFilename = `${pending.skill}.md`;
-      const filePath = safePath(skillsDir, safeFilename);
+      // Write file and commit using stored git filepath
+      const safeFilename = pending.gitFilepath;
+      const filePath = join(skillsDir, safeFilename);
+      // Ensure parent directory exists for directory-based skills
+      const parentDir = join(filePath, '..');
+      fs.mkdirSync(parentDir, { recursive: true });
       fs.writeFileSync(filePath, pending.content, 'utf-8');
 
       await git.add({ fs, dir: gitDir, filepath: safeFilename });

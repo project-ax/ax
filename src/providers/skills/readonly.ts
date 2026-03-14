@@ -28,17 +28,40 @@ export async function create(config: Config, _name?: string, opts?: CreateOption
       const allKeys = await documents.list('skills');
       const prefix = `${agentName}/`;
       const agentKeys = allKeys.filter(k => k.startsWith(prefix) && !k.includes('/users/'));
-      return agentKeys.map(k => {
+
+      // Deduplicate: directory-based skills (foo/SKILL.md) should appear
+      // as name "foo", not "foo/SKILL". Track seen names to avoid duplicates
+      // if both foo.md and foo/SKILL.md exist (file-based takes precedence).
+      const seen = new Set<string>();
+      const results: SkillMeta[] = [];
+      for (const k of agentKeys) {
         const relPath = k.slice(prefix.length);
-        return { name: relPath.replace(/\.md$/, ''), path: relPath };
-      });
+        let name: string;
+        if (relPath.endsWith('/SKILL.md')) {
+          // Directory-based skill: "deploy/SKILL.md" → name "deploy"
+          name = relPath.replace(/\/SKILL\.md$/, '');
+        } else {
+          // File-based skill: "deploy.md" → name "deploy"
+          name = relPath.replace(/\.md$/, '');
+        }
+        if (!seen.has(name)) {
+          seen.add(name);
+          results.push({ name, path: relPath });
+        }
+      }
+      return results;
     },
 
     async read(name: string): Promise<string> {
       // name could be a flat name ('deploy') or a path ('ops/deploy')
-      // Try with .md suffix first, then without
+      // Try with .md suffix first, then directory-based SKILL.md, then without suffix
       const keyWithMd = `${agentName}/${name}.md`;
       let content = await documents.get('skills', keyWithMd);
+      if (content) return content;
+
+      // Try directory-based: name/SKILL.md
+      const keyDirSkill = `${agentName}/${name}/SKILL.md`;
+      content = await documents.get('skills', keyDirSkill);
       if (content) return content;
 
       const key = `${agentName}/${name}`;

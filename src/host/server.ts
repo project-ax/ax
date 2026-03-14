@@ -11,7 +11,7 @@
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Server as NetServer } from 'node:net';
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -261,12 +261,19 @@ export async function createServer(
   mkdirSync(persistentSkillsDir, { recursive: true });
   try {
     const existingSkills = readdirSync(persistentSkillsDir).filter(f => f.endsWith('.md'));
-    if (existingSkills.length === 0) {
+    const existingDirs = readdirSync(persistentSkillsDir, { withFileTypes: true })
+      .filter(d => d.isDirectory() && existsSync(join(persistentSkillsDir, d.name, 'SKILL.md')));
+    if (existingSkills.length === 0 && existingDirs.length === 0) {
       const seedDir = resolveSeedSkillsDir();
       if (existsSync(seedDir)) {
-        const seedFiles = readdirSync(seedDir).filter(f => f.endsWith('.md'));
-        for (const f of seedFiles) {
-          copyFileSync(join(seedDir, f), join(persistentSkillsDir, f));
+        const seedEntries = readdirSync(seedDir, { withFileTypes: true });
+        for (const entry of seedEntries) {
+          if (entry.isFile() && entry.name.endsWith('.md')) {
+            copyFileSync(join(seedDir, entry.name), join(persistentSkillsDir, entry.name));
+          } else if (entry.isDirectory()) {
+            // Copy directory-based skills recursively
+            cpSync(join(seedDir, entry.name), join(persistentSkillsDir, entry.name), { recursive: true });
+          }
         }
       }
     }

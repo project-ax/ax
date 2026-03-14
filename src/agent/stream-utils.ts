@@ -4,7 +4,7 @@
  * duplicated conversion logic across IPC and proxy LLM transports.
  */
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { TextContent, ToolCall, AssistantMessage } from '@mariozechner/pi-ai';
 
@@ -170,18 +170,31 @@ function extractSkillMeta(content: string, filename: string): { name: string; de
 }
 
 /**
- * Read markdown skill files from a directory, returning compact summaries
- * for progressive disclosure. The agent loads full content on demand via
- * `skill_read`.
+ * Read skill files from a directory, returning compact summaries
+ * for progressive disclosure. Supports both file-based (.md) and
+ * directory-based (subdir/SKILL.md) skills. The agent loads full
+ * content on demand via `skill_read`.
  */
 export function loadSkills(skillsDir: string): SkillSummary[] {
   try {
-    return readdirSync(skillsDir)
-      .filter(f => f.endsWith('.md'))
-      .map(f => {
-        const content = readFileSync(join(skillsDir, f), 'utf-8');
-        const { name, description } = extractSkillMeta(content, f);
-        return { name, description, path: f };
-      });
+    const entries = readdirSync(skillsDir, { withFileTypes: true });
+    const results: SkillSummary[] = [];
+    for (const entry of entries) {
+      if (entry.isFile() && entry.name.endsWith('.md')) {
+        // File-based skill: greeting.md
+        const content = readFileSync(join(skillsDir, entry.name), 'utf-8');
+        const { name, description } = extractSkillMeta(content, entry.name);
+        results.push({ name, description, path: entry.name });
+      } else if (entry.isDirectory()) {
+        // Directory-based skill: deploy/SKILL.md
+        const skillMdPath = join(skillsDir, entry.name, 'SKILL.md');
+        if (existsSync(skillMdPath)) {
+          const content = readFileSync(skillMdPath, 'utf-8');
+          const { name, description } = extractSkillMeta(content, entry.name);
+          results.push({ name, description, path: join(entry.name, 'SKILL.md') });
+        }
+      }
+    }
+    return results;
   } catch { return []; }
 }

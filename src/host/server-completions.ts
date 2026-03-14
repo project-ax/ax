@@ -119,7 +119,14 @@ const IDENTITY_FILE_MAP: Record<string, keyof IdentityPayload> = {
 export function extractSkillMeta(content: string, path: string): { name: string; description: string } {
   const lines = content.split('\n');
   // Default name: last segment of path (e.g. 'deploy' from 'main/deploy')
-  const lastSegment = path.split('/').pop() ?? path;
+  // For directory-based skills (e.g. 'deploy/SKILL.md'), use the parent directory name
+  const segments = path.split('/');
+  let lastSegment: string;
+  if (segments.length >= 2 && segments[segments.length - 1] === 'SKILL.md') {
+    lastSegment = segments[segments.length - 2];
+  } else {
+    lastSegment = segments[segments.length - 1] ?? path;
+  }
   let name = lastSegment.replace(/\.md$/i, '');
   let description = '';
 
@@ -234,13 +241,18 @@ async function loadSkillsFromDB(
       mergedPaths.set(relPath, { key, scope: 'user' }); // shadows agent
     }
 
-    // Load content and extract metadata
+    // Load content and extract metadata.
+    // Deduplicate: file-based (deploy.md) takes precedence over directory-based (deploy/SKILL.md)
+    // when both exist with the same derived name.
     const skills: SkillPayload[] = [];
+    const seenNames = new Set<string>();
     for (const [relPath, { key, scope }] of mergedPaths) {
       const content = await documents.get('skills', key);
       if (!content) continue;
 
       const { name, description } = extractSkillMeta(content, relPath);
+      if (seenNames.has(name)) continue;
+      seenNames.add(name);
       skills.push({ name, path: relPath, description, content, scope });
     }
 

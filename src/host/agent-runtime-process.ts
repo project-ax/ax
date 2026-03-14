@@ -12,7 +12,7 @@
 //   - Publishes events to NATS EventBus, results to results.{requestId}
 
 import { createServer as createHttpServer } from 'node:http';
-import { mkdirSync, mkdtempSync, existsSync, copyFileSync, readFileSync, writeFileSync, unlinkSync, readdirSync, renameSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, existsSync, copyFileSync, cpSync, readFileSync, writeFileSync, unlinkSync, readdirSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -87,16 +87,23 @@ async function main(): Promise<void> {
     }
   }
 
-  // Skills seeding
+  // Skills seeding (file-based .md and directory-based SKILL.md)
   const persistentSkillsDir = agentSkillsDir(agentName);
   mkdirSync(persistentSkillsDir, { recursive: true });
   try {
     const existingSkills = readdirSync(persistentSkillsDir).filter(f => f.endsWith('.md'));
-    if (existingSkills.length === 0) {
+    const existingDirs = readdirSync(persistentSkillsDir, { withFileTypes: true })
+      .filter(d => d.isDirectory() && existsSync(join(persistentSkillsDir, d.name, 'SKILL.md')));
+    if (existingSkills.length === 0 && existingDirs.length === 0) {
       const seedDir = resolveSeedSkillsDir();
       if (existsSync(seedDir)) {
-        for (const f of readdirSync(seedDir).filter(f => f.endsWith('.md'))) {
-          copyFileSync(join(seedDir, f), join(persistentSkillsDir, f));
+        const seedEntries = readdirSync(seedDir, { withFileTypes: true });
+        for (const entry of seedEntries) {
+          if (entry.isFile() && entry.name.endsWith('.md')) {
+            copyFileSync(join(seedDir, entry.name), join(persistentSkillsDir, entry.name));
+          } else if (entry.isDirectory()) {
+            cpSync(join(seedDir, entry.name), join(persistentSkillsDir, entry.name), { recursive: true });
+          }
         }
       }
     }
