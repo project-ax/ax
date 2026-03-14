@@ -121,6 +121,8 @@ function buildPodSpec(
           volumeMounts: [
             { name: 'scratch', mountPath: CANONICAL.scratch },
             { name: 'tmp', mountPath: '/tmp' },
+            { name: 'agent-ws', mountPath: CANONICAL.agent },
+            { name: 'user-ws', mountPath: CANONICAL.user },
           ],
         },
       ],
@@ -128,6 +130,8 @@ function buildPodSpec(
       volumes: [
         { name: 'scratch', emptyDir: { sizeLimit: '1Gi' } },
         { name: 'tmp', emptyDir: { sizeLimit: '64Mi' } },
+        { name: 'agent-ws', emptyDir: { sizeLimit: '1Gi' } },
+        { name: 'user-ws', emptyDir: { sizeLimit: '1Gi' } },
       ],
 
       // Timeout: kill the pod after timeoutSec

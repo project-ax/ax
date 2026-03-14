@@ -558,6 +558,19 @@ describe('MCP server tool registry security', () => {
   });
 });
 
+// ── K8s Pod Spec Workspace Tier Volumes ───────────────────────────────
+
+describe('k8s pod spec workspace tier volumes', () => {
+  test('k8s pod spec always declares agent and user workspace volumes', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/k8s.ts'), 'utf-8');
+    expect(source).toContain("name: 'agent-ws'");
+    expect(source).toContain("name: 'user-ws'");
+    expect(source).toContain('CANONICAL.agent');
+    expect(source).toContain('CANONICAL.user');
+  });
+});
+
 // ── /workspace Root Is Read-Only ──────────────────────────────────────
 
 describe('/workspace root is read-only', () => {

@@ -68,6 +68,7 @@ export interface NATSSandboxDispatcher {
     sessionId: string,
     tool: SandboxToolRequest,
     tier?: string,
+    scopes?: SandboxClaimRequest['scopes'],
   ): Promise<SandboxToolResponse>;
 
   /**
@@ -112,6 +113,7 @@ export async function createNATSSandboxDispatcher(options?: {
     requestId: string,
     sessionId: string,
     tier: string,
+    scopes?: SandboxClaimRequest['scopes'],
   ): Promise<PodAffinity> {
     const existing = affinity.get(requestId);
     if (existing) return existing;
@@ -120,6 +122,7 @@ export async function createNATSSandboxDispatcher(options?: {
       type: 'claim',
       requestId,
       sessionId,
+      ...(scopes ? { scopes } : {}),
     };
 
     logger.debug('claiming_pod', { requestId, sessionId, tier });
@@ -210,9 +213,10 @@ export async function createNATSSandboxDispatcher(options?: {
       sessionId: string,
       tool: SandboxToolRequest,
       tier = 'light',
+      scopes?: SandboxClaimRequest['scopes'],
     ): Promise<SandboxToolResponse> {
       // Ensure we have a claimed pod for this turn
-      const pod = await claimPod(requestId, sessionId, tier);
+      const pod = await claimPod(requestId, sessionId, tier, scopes);
 
       logger.debug('dispatching_tool', {
         requestId,
