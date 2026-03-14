@@ -358,7 +358,7 @@ export async function processCompletion(
   sessionScope?: 'dm' | 'channel' | 'thread' | 'group',
 ): Promise<CompletionResult> {
   const { config, providers, db, conversationStore, router, taintBudget, sessionCanaries, ipcSocketPath, ipcSocketDir, logger, eventBus } = deps;
-  const sessionId = preProcessed?.sessionId ?? randomUUID();
+  const sessionId = preProcessed?.sessionId ?? persistentSessionId ?? randomUUID();
   const reqLogger = logger.child({ reqId: requestId.slice(-8) });
 
   // Extract text for scanning/logging; structured content may contain image refs
