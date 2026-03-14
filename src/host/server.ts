@@ -1054,9 +1054,12 @@ export async function createServer(
     // Flush and shut down OTel tracing
     await shutdownTracing();
 
-    // Clean up sockets
-    try { unlinkSync(socketPath); } catch {
-      logger.debug('socket_cleanup_failed', { socketPath });
+    // Clean up sockets — ENOENT is expected if httpServer.close() already
+    // unlinked the socket file (Node.js behavior varies by version).
+    try { unlinkSync(socketPath); } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        logger.debug('socket_cleanup_failed', { socketPath, error: (err as Error).message });
+      }
     }
     try { rmSync(ipcSocketDir, { recursive: true, force: true }); } catch {
       logger.debug('ipc_dir_cleanup_failed', { ipcSocketDir });
