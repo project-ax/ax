@@ -3,8 +3,8 @@ import { TOOL_CATALOG, TOOL_NAMES, getToolParamKeys, normalizeOrigin, normalizeI
 import type { ToolFilterContext, ToolCategory } from '../../src/agent/tool-catalog.js';
 
 describe('tool-catalog', () => {
-  test('exports exactly 14 tools', () => {
-    expect(TOOL_CATALOG.length).toBe(14);
+  test('exports exactly 15 tools', () => {
+    expect(TOOL_CATALOG.length).toBe(15);
   });
 
   test('TOOL_NAMES matches TOOL_CATALOG names', () => {
@@ -53,10 +53,17 @@ describe('tool-catalog', () => {
   test('contains all expected tool names', () => {
     const expected = [
       'memory', 'web', 'identity', 'scheduler', 'skill',
-      'workspace_mount', 'governance', 'audit', 'agent', 'image',
+      'workspace', 'workspace_mount', 'governance', 'audit', 'agent', 'image',
       'bash', 'read_file', 'write_file', 'edit_file',
     ];
     expect(TOOL_NAMES).toEqual(expected);
+  });
+
+  test('workspace tool exists with write operation', () => {
+    const spec = TOOL_CATALOG.find(s => s.name === 'workspace');
+    expect(spec).toBeDefined();
+    expect(spec!.actionMap).toHaveProperty('write', 'workspace_write');
+    expect(spec!.category).toBe('workspace');
   });
 
   test('skill tool exists in catalog', () => {
@@ -109,7 +116,7 @@ describe('tool-catalog', () => {
     const validCategories: ToolCategory[] = [
       'memory', 'web', 'audit', 'identity',
       'scheduler', 'skill', 'delegation', 'image',
-      'workspace_scopes', 'governance', 'sandbox',
+      'workspace', 'workspace_scopes', 'governance', 'sandbox',
     ];
     for (const spec of TOOL_CATALOG) {
       expect(validCategories, `"${spec.name}" has invalid category "${spec.category}"`).toContain(spec.category);
@@ -120,7 +127,7 @@ describe('tool-catalog', () => {
     const categories: ToolCategory[] = [
       'memory', 'web', 'audit', 'identity',
       'scheduler', 'skill', 'delegation', 'image',
-      'workspace_scopes', 'governance', 'sandbox',
+      'workspace', 'workspace_scopes', 'governance', 'sandbox',
     ];
     for (const cat of categories) {
       const tools = TOOL_CATALOG.filter(s => s.category === cat);
@@ -209,13 +216,13 @@ describe('filterTools', () => {
     const names = result.map(s => s.name);
     // memory(1) + web(1) + audit(1) + identity(1) + delegation(1) + image(1) + sandbox(4) = 10
     const alwaysOn = TOOL_CATALOG.filter(s =>
-      !['scheduler', 'skill', 'workspace_scopes', 'governance'].includes(s.category)
+      !['scheduler', 'skill', 'workspace', 'workspace_scopes', 'governance'].includes(s.category)
     );
     expect(result.length).toBe(alwaysOn.length);
 
     // Verify excluded categories
     for (const spec of result) {
-      expect(['scheduler', 'skill', 'workspace_scopes', 'governance']).not.toContain(spec.category);
+      expect(['scheduler', 'skill', 'workspace', 'workspace_scopes', 'governance']).not.toContain(spec.category);
     }
   });
 

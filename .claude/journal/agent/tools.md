@@ -2,6 +2,14 @@
 
 Tool catalog consolidation, MCP server tools, tool definition generation, prompt module updates.
 
+## [2026-03-14 12:00] — Restore workspace tool in agent catalog (lazy-sandbox Task 3)
+
+**Task:** Add a `workspace` tool to the agent tool catalog so the LLM can write files to persistent workspace tiers (agent/user) without requiring a sandbox.
+**What I did:** Added `'workspace'` to ToolCategory union, added workspace tool entry to TOOL_CATALOG with `Type.Union([write])` and `actionMap: { write: 'workspace_write' }`, added `'workspace'` case to `filterTools` gated on `hasWorkspaceScopes`, added matching MCP tool in `mcp-server.ts`, updated tool counts from 14 to 15 in 5 test files, added workspace tool test, removed `'workspace_write'` from knownInternalActions in sync test since it's now catalog-mapped.
+**Files touched:** Modified: src/agent/tool-catalog.ts, src/agent/mcp-server.ts, tests/agent/tool-catalog.test.ts, tests/agent/tool-catalog-sync.test.ts, tests/agent/mcp-server.test.ts, tests/agent/ipc-tools.test.ts, tests/sandbox-isolation.test.ts
+**Outcome:** Success — all 321 agent tests + 33 sandbox-isolation tests pass
+**Notes:** Workspace tool uses `Type.Union([...])` even with one member for future extensibility. Category is `'workspace'` (distinct from `'workspace_scopes'`). Both gate on `ctx.hasWorkspaceScopes`.
+
 ## [2026-03-04 19:05] — Move bash/file tools from local to IPC (Phase 1, Task 3)
 
 **Task:** Move bash, read_file, write_file, edit_file tools from local (in-process) execution to IPC routing through the host process, as groundwork for k8s sandbox pod dispatch.

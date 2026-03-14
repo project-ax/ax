@@ -15,7 +15,7 @@ import { Type, type TSchema } from '@sinclair/typebox';
 export type ToolCategory =
   | 'memory' | 'web' | 'audit' | 'identity'
   | 'scheduler' | 'skill' | 'delegation' | 'image'
-  | 'workspace_scopes' | 'governance' | 'sandbox';
+  | 'workspace' | 'workspace_scopes' | 'governance' | 'sandbox';
 
 export interface ToolSpec {
   name: string;
@@ -251,6 +251,27 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     },
   },
 
+  // ── Workspace ──
+  {
+    name: 'workspace',
+    label: 'Workspace',
+    description:
+      'Write files to persistent workspace tiers (agent or user) without requiring a sandbox.\n\nOperations:\n' +
+      '- write: Write a text file to a workspace tier (agent or user)',
+    parameters: Type.Union([
+      Type.Object({
+        type: Type.Literal('write'),
+        tier: Type.String({ description: '"agent" or "user"' }),
+        path: Type.String({ description: 'Relative path within the tier (e.g. "docs/notes.md")' }),
+        content: Type.String({ description: 'File content to write' }),
+      }),
+    ]),
+    category: 'workspace',
+    actionMap: {
+      write: 'workspace_write',
+    },
+  },
+
   // ── Workspace Scopes ──
   {
     name: 'workspace_mount',
@@ -459,6 +480,7 @@ export function filterTools(ctx: ToolFilterContext): readonly ToolSpec[] {
     switch (spec.category) {
       case 'scheduler':  return ctx.hasHeartbeat;
       case 'skill':      return ctx.hasSkills;
+      case 'workspace':        return ctx.hasWorkspaceScopes;
       case 'workspace_scopes': return ctx.hasWorkspaceScopes;
       case 'governance': return ctx.hasGovernance;
       default:           return true;
