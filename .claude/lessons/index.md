@@ -38,6 +38,7 @@
 - Changing prompt module output breaks tests in multiple locations [testing/patterns.md](testing/patterns.md)
 - When adding new prompt modules, update integration test module count [testing/patterns.md](testing/patterns.md)
 - Use createHttpServer for isolated SSE endpoint tests instead of full AxServer [testing/patterns.md](testing/patterns.md)
+- Agent stdin payload must parse ALL fields — missing fields cause silent feature loss [testing/infrastructure.md](testing/infrastructure.md)
 - Tool count tests are scattered across many test files [testing/infrastructure.md](testing/infrastructure.md)
 - Tool count is hardcoded in multiple test files — update all of them [testing/infrastructure.md](testing/infrastructure.md)
 - Set AX_HOME in tests that use workspace/identity/scratch paths [testing/infrastructure.md](testing/infrastructure.md)

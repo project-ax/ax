@@ -1,5 +1,29 @@
 # Workspace Provider Journal
 
+## [2026-03-13 14:50] — Wire workspace provider directories into sandbox as writable mounts
+
+**Task:** Close the gap where workspace provider directories (System 2) were not mounted into the sandbox, making them unreachable from the agent process. The removed workspace_write tool had masked this gap.
+**What I did:** Extended WorkspaceProvider.mount() with MountOptions (userId param) for proper user scope resolution. Added workspaceMountsWritable flag to SandboxConfig. Updated server-completions.ts to pre-mount agent+user scopes via workspace provider before sandbox spawn and use those paths (rw) instead of legacy enterprise paths (ro). Updated all 5 sandbox providers: docker (:ro→:rw conditional), bwrap (--ro-bind→--bind conditional), nsjail (--bindmount_ro→--bindmount conditional), seatbelt (new AGENT_WORKSPACE_RW/USER_WORKSPACE_RW params), subprocess (symlinks already work since host dirs are writable). Updated seatbelt policy with conditional write rules. Added 9 new tests (3 for MountOptions userId, 6 for writable mount verification).
+**Files touched:** src/providers/workspace/types.ts, src/providers/workspace/shared.ts, src/providers/workspace/none.ts, src/providers/sandbox/types.ts, src/providers/sandbox/docker.ts, src/providers/sandbox/bwrap.ts, src/providers/sandbox/nsjail.ts, src/providers/sandbox/seatbelt.ts, src/providers/sandbox/canonical-paths.ts, src/host/server-completions.ts, src/host/ipc-handlers/workspace.ts, policies/agent.sb, tests/sandbox-isolation.test.ts, tests/providers/workspace/shared.test.ts
+**Outcome:** Success — 206 test files, 2432 tests pass (9 new tests added)
+**Notes:** When workspace provider is 'none', falls back to legacy enterprise paths mounted read-only (existing behavior). When active, workspace provider's commit() validates all changes at end-of-turn. The seatbelt policy uses /dev/null for writable workspace params when not active, so (subpath "/dev/null") matches nothing useful.
+
+## [2026-03-13 14:01] — Remove workspace_write tool (FIX-2/FIX-4)
+
+**Task:** Remove the `workspace_write` and `workspace_write_file` IPC actions and tool, since the workspace provider's mount/diff/commit pipeline makes them redundant and they bypassed structural checks (FIX-2).
+**What I did:** Removed workspace_write/workspace_write_file from: IPC schemas, IPC handlers, tool catalog (workspace category + hasWorkspaceTiers), agent-setup, prompt types/runtime module (Storage Tiers section), MCP server, manifest generator, skill format parser permission map. Deleted 3 test files (workspace.test.ts, workspace-file.test.ts, workspace-ops.test.ts). Updated 8 test files (tool-catalog, ipc-tools, mcp-server, enterprise-runtime, runtime, ipc-schemas-enterprise, error-handling, sandbox-isolation).
+**Files touched:** src/ipc-schemas.ts, src/host/ipc-handlers/workspace.ts, src/agent/tool-catalog.ts, src/agent/agent-setup.ts, src/agent/prompt/types.ts, src/agent/prompt/modules/runtime.ts, src/agent/mcp-server.ts, src/utils/manifest-generator.ts, src/utils/skill-format-parser.ts, src/host/server-channels.ts, tests/* (8 updated, 3 deleted)
+**Outcome:** Success — 206 test files, 2423 tests pass
+**Notes:** agentWorkspace/userWorkspace config fields retained — still used by sandbox providers for read-only mounts. The workspace provider's commit pipeline is now the only write path. FIX-4 resolved implicitly since the tool is gone entirely.
+
+## [2026-03-13 13:15] — Local acceptance test execution
+
+**Task:** Run all 17 workspace acceptance tests (ST-1 through ST-9, BT-1 through BT-5, IT-1 through IT-3) in a local environment.
+**What I did:** Set up isolated TEST_HOME, patched ax.yaml with workspace: local, ran all structural tests by reading source code, started server and ran behavioral and integration tests. Discovered critical bug: workspaceProvider field not parsed from stdin payload in agent runner, preventing workspace_mount tool from being registered. Also found that workspace_write handler bypasses the commit pipeline (structural limits, ignore patterns not enforced on direct writes).
+**Files touched:** Created tests/acceptance/workspace/results-local.md
+**Outcome:** 9/17 passed (9 PASS, 3 FAIL, 5 PARTIAL). All structural tests pass. Behavioral/integration tests impacted by the workspaceProvider parsing bug and the workspace_write bypass of commit pipeline.
+**Notes:** Two bugs to fix: (1) src/agent/runner.ts parseStdinPayload() missing workspaceProvider extraction + main entry point missing assignment. (2) workspace_write handler should enforce structural limits from config.workspace before writing.
+
 ## [2026-03-13] — Update acceptance test plan for GCS backend
 
 **Task:** Update workspace acceptance test plan now that gcs.ts backend is implemented.

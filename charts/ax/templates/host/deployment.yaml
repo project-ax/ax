@@ -22,6 +22,7 @@ spec:
       containers:
         - name: host
           image: {{ include "ax.image" (dict "image" .Values.host.image "imageDefaults" .Values.imageDefaults "context" $) }}
+          {{- include "ax.imagePullPolicy" (dict "image" .Values.host.image "imageDefaults" .Values.imageDefaults) | nindent 10 }}
           command: {{ .Values.host.command | toJson }}
           ports:
             - name: http
@@ -69,6 +70,9 @@ spec:
             - name: ax-config
               mountPath: /etc/ax
               readOnly: true
+            {{- with .Values.host.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- range . }}
@@ -80,3 +84,6 @@ spec:
         - name: ax-config
           configMap:
             name: {{ include "ax.fullname" . }}-config
+        {{- with .Values.host.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}

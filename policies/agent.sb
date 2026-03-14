@@ -1,6 +1,6 @@
 ;; policies/agent.sb — Seatbelt sandbox for agent containers
 ;; Parameters: WORKSPACE, SKILLS, IPC_SOCKET_DIR, PROJECT_DIR, NODE_DIR,
-;;             AGENT_WORKSPACE, USER_WORKSPACE
+;;             AGENT_WORKSPACE, USER_WORKSPACE, AGENT_WORKSPACE_RW, USER_WORKSPACE_RW
 (version 1)
 (deny default)
 
@@ -17,9 +17,16 @@
 (allow file-write* (subpath (param "WORKSPACE")))
 (allow file-read* (subpath (param "SKILLS")))
 
-;; ── Enterprise workspace tiers (read-only — writes go through IPC) ──
+;; ── Enterprise workspace tiers (always readable) ──
 (allow file-read* (subpath (param "AGENT_WORKSPACE")))
 (allow file-read* (subpath (param "USER_WORKSPACE")))
+
+;; ── Writable workspace tiers (only when workspace provider is active) ──
+;; AGENT_WORKSPACE_RW and USER_WORKSPACE_RW are set to real paths when the
+;; workspace provider pre-mounts scopes; otherwise /dev/null (matches nothing).
+;; The workspace provider validates all writes at end-of-turn commit.
+(allow file-write* (subpath (param "AGENT_WORKSPACE_RW")))
+(allow file-write* (subpath (param "USER_WORKSPACE_RW")))
 
 ;; ── IPC + proxy sockets (communication channels to host) ──
 (allow file-read* file-write* (subpath (param "IPC_SOCKET_DIR")))

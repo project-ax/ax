@@ -3,8 +3,8 @@ import { TOOL_CATALOG, TOOL_NAMES, getToolParamKeys, normalizeOrigin, normalizeI
 import type { ToolFilterContext, ToolCategory } from '../../src/agent/tool-catalog.js';
 
 describe('tool-catalog', () => {
-  test('exports exactly 15 tools', () => {
-    expect(TOOL_CATALOG.length).toBe(15);
+  test('exports exactly 14 tools', () => {
+    expect(TOOL_CATALOG.length).toBe(14);
   });
 
   test('TOOL_NAMES matches TOOL_CATALOG names', () => {
@@ -53,7 +53,7 @@ describe('tool-catalog', () => {
   test('contains all expected tool names', () => {
     const expected = [
       'memory', 'web', 'identity', 'scheduler', 'skill',
-      'workspace', 'workspace_mount', 'governance', 'audit', 'agent', 'image',
+      'workspace_mount', 'governance', 'audit', 'agent', 'image',
       'bash', 'read_file', 'write_file', 'edit_file',
     ];
     expect(TOOL_NAMES).toEqual(expected);
@@ -109,7 +109,7 @@ describe('tool-catalog', () => {
     const validCategories: ToolCategory[] = [
       'memory', 'web', 'audit', 'identity',
       'scheduler', 'skill', 'delegation', 'image',
-      'workspace', 'workspace_scopes', 'governance', 'sandbox',
+      'workspace_scopes', 'governance', 'sandbox',
     ];
     for (const spec of TOOL_CATALOG) {
       expect(validCategories, `"${spec.name}" has invalid category "${spec.category}"`).toContain(spec.category);
@@ -120,7 +120,7 @@ describe('tool-catalog', () => {
     const categories: ToolCategory[] = [
       'memory', 'web', 'audit', 'identity',
       'scheduler', 'skill', 'delegation', 'image',
-      'workspace', 'workspace_scopes', 'governance', 'sandbox',
+      'workspace_scopes', 'governance', 'sandbox',
     ];
     for (const cat of categories) {
       const tools = TOOL_CATALOG.filter(s => s.category === cat);
@@ -188,7 +188,6 @@ describe('filterTools', () => {
   const ALL_FLAGS: ToolFilterContext = {
     hasHeartbeat: true,
     hasSkills: true,
-    hasWorkspaceTiers: true,
     hasWorkspaceScopes: true,
     hasGovernance: true,
   };
@@ -196,7 +195,6 @@ describe('filterTools', () => {
   const NO_FLAGS: ToolFilterContext = {
     hasHeartbeat: false,
     hasSkills: false,
-    hasWorkspaceTiers: false,
     hasWorkspaceScopes: false,
     hasGovernance: false,
   };
@@ -211,13 +209,13 @@ describe('filterTools', () => {
     const names = result.map(s => s.name);
     // memory(1) + web(1) + audit(1) + identity(1) + delegation(1) + image(1) + sandbox(4) = 10
     const alwaysOn = TOOL_CATALOG.filter(s =>
-      !['scheduler', 'skill', 'workspace', 'workspace_scopes', 'governance'].includes(s.category)
+      !['scheduler', 'skill', 'workspace_scopes', 'governance'].includes(s.category)
     );
     expect(result.length).toBe(alwaysOn.length);
 
     // Verify excluded categories
     for (const spec of result) {
-      expect(['scheduler', 'skill', 'workspace', 'governance']).not.toContain(spec.category);
+      expect(['scheduler', 'skill', 'workspace_scopes', 'governance']).not.toContain(spec.category);
     }
   });
 
@@ -243,18 +241,6 @@ describe('filterTools', () => {
     const result = filterTools({ ...ALL_FLAGS, hasSkills: false });
     const names = result.map(s => s.name);
     expect(names).not.toContain('skill');
-  });
-
-  test('hasWorkspaceTiers includes workspace tool', () => {
-    const result = filterTools({ ...NO_FLAGS, hasWorkspaceTiers: true });
-    const names = result.map(s => s.name);
-    expect(names).toContain('workspace');
-  });
-
-  test('hasWorkspaceTiers=false excludes workspace tool', () => {
-    const result = filterTools({ ...ALL_FLAGS, hasWorkspaceTiers: false });
-    const names = result.map(s => s.name);
-    expect(names).not.toContain('workspace');
   });
 
   test('hasGovernance includes governance tool', () => {

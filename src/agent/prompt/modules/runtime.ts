@@ -63,13 +63,6 @@ export class RuntimeModule extends BasePromptModule {
     if (ctx.agentId) {
       lines.push(`**Agent ID**: ${ctx.agentId}`);
     }
-    if (ctx.hasWorkspaceTiers) {
-      lines.push('', '### Storage Tiers',
-        '- **Scratch** (`./scratch`): Session workspace. Persists between messages, lost when session ends. Use relative paths with local tools (write, read, edit, bash).',
-        '- **Agent tier** (`./agent`): Persistent shared files, mounted read-only. Read directly with local tools. To write, use `workspace({ type: "write", tier: "agent", path: "...", content: "..." })`.',
-        '- **User tier** (`./user`): Your personal persistent files, mounted read-only. Read directly with local tools. To write, use `workspace({ type: "write", tier: "user", path: "...", content: "..." })`.',
-      );
-    }
     if (ctx.hasGovernance) {
       lines.push('', '### Governance',
         'Identity changes go through a proposal system. Use `governance({ type: "propose" })` to suggest changes.',

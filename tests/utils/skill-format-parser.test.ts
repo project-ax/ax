@@ -216,7 +216,7 @@ tags:
 ---
 # Legacy`);
 
-      expect(skill.permissions).toEqual(['workspace_write', 'web_fetch']);
+      expect(skill.permissions).toEqual(['workspace_mount', 'web_fetch']);
       expect(skill.tags).toEqual(['productivity', 'automation']);
     });
   });

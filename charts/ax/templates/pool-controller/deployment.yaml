@@ -23,6 +23,7 @@ spec:
       containers:
         - name: controller
           image: {{ include "ax.image" (dict "image" .Values.poolController.image "imageDefaults" .Values.imageDefaults "context" $) }}
+          {{- include "ax.imagePullPolicy" (dict "image" .Values.poolController.image "imageDefaults" .Values.imageDefaults) | nindent 10 }}
           command: {{ .Values.poolController.command | toJson }}
           ports:
             - name: metrics

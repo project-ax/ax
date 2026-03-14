@@ -1,5 +1,11 @@
 # Testing Infrastructure
 
+### Agent stdin payload must parse ALL fields — missing fields cause silent feature loss
+**Date:** 2026-03-13
+**Context:** Running workspace acceptance tests, found workspace_mount tool never registered because workspaceProvider field not parsed from stdin payload in src/agent/runner.ts parseStdinPayload().
+**Lesson:** When adding a new field to the stdin payload (passed from host to agent), you must update THREE places: (1) StdinPayload type definition, (2) parseStdinPayload() extraction logic, (3) main entry point field mapping from payload to AgentConfig. Missing any one silently drops the field and breaks features that depend on it. The symptom is always "feature works in structural tests but not at runtime."
+**Tags:** agent, runner, stdin, payload, workspace, silent-failure
+
 ### K8s acceptance tests require multiple workarounds for single-process mode
 **Date:** 2026-03-05
 **Context:** Running plainjob scheduler and memoryfs-v2 acceptance tests in k8s kind cluster

@@ -2,6 +2,14 @@
 
 Acceptance test skill and framework for validating features against plan design goals.
 
+## [2026-03-13 13:46] -- K8s acceptance: workspace provider
+
+**Task:** Deploy AX to kind cluster with workspace provider enabled and run all behavioral (BT-1 through BT-5) and integration tests (IT-1 through IT-3) for the workspace feature.
+**What I did:** Deployed with `workspace: local`, ran all 8 non-structural tests. Discovered and fixed two bugs: (1) `parseStdinPayload()` didn't extract `workspaceProvider` from JSON, (2) main runner didn't assign `payload.workspaceProvider` to `config.workspaceProvider`. Both fixes in `src/agent/runner.ts`. Created separate namespace for BT-3 (workspace: none). Redeployed with maxFileSize=100 for BT-4.
+**Files touched:** `src/agent/runner.ts` (2 bug fixes), `tests/acceptance/workspace/results-k8s.md` (created)
+**Outcome:** Partial success. 4/8 passed, 2/8 partial pass, 2/8 failed. Failures are architectural: workspace_write IPC handler bypasses the provider commit pipeline (no maxFileSize or ignore pattern enforcement). Partial passes due to per-request session IDs in k8s mode breaking additive scope tracking.
+**Notes:** The workspace feature has two independent write paths: enterprise two-tier (workspace_write) and provider-backed (workspace_mount/commit). Only the provider-backed path enforces structural checks. The k8s NATS architecture creates separate internal request IDs per HTTP call, which breaks in-memory scope tracking across requests within the same persistent session.
+
 ## [2026-03-06 17:15] -- K8s acceptance: verify cortex infrastructure fixes (FIX-10/11/12)
 
 **Task:** Deploy AX to kind cluster with custom PG username "ax" and verify 3 infrastructure fixes work automatically: pgvector auto-enabled (FIX-10), custom user/database created (FIX-11), advisory lock prevents duplicate backfill (FIX-12). Run BT-8, IT-7, IT-8.

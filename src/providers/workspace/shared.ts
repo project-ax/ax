@@ -10,6 +10,7 @@ import type {
   WorkspaceBackend,
   WorkspaceScope,
   WorkspaceMounts,
+  MountOptions,
   WorkspaceConfig,
   CommitResult,
   ScopeCommitResult,
@@ -195,14 +196,14 @@ export function createOrchestrator(opts: OrchestratorOptions): WorkspaceProvider
   const sessionScopes = new Map<string, Set<WorkspaceScope>>();
 
   return {
-    async mount(sessionId: string, scopes: WorkspaceScope[]): Promise<WorkspaceMounts> {
+    async mount(sessionId: string, scopes: WorkspaceScope[], opts?: MountOptions): Promise<WorkspaceMounts> {
       let active = sessionScopes.get(sessionId);
       if (!active) {
         active = new Set();
         sessionScopes.set(sessionId, active);
       }
 
-      const ctx: ScopeContext = { sessionId, agentId };
+      const ctx: ScopeContext = { sessionId, agentId, userId: opts?.userId };
       const paths: Partial<Record<WorkspaceScope, string>> = {};
 
       for (const scope of scopes) {

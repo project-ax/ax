@@ -8,10 +8,12 @@ export interface SandboxConfig {
   command: string[];
 
   // ── Enterprise mounts (optional) ──
-  /** Agent's shared workspace (read-only): ~/.ax/agents/<id>/agent/workspace/ */
+  /** Agent's shared workspace: ~/.ax/agents/<id>/agent/workspace/ */
   agentWorkspace?: string;
-  /** Per-user workspace (read-write): ~/.ax/agents/<id>/users/<userId>/workspace/ */
+  /** Per-user workspace: ~/.ax/agents/<id>/users/<userId>/workspace/ */
   userWorkspace?: string;
+  /** When true, agent/user workspace mounts are read-write (workspace provider validates at commit). */
+  workspaceMountsWritable?: boolean;
 }
 
 export interface SandboxProcess {

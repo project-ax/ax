@@ -32,7 +32,6 @@ describe('RuntimeModule enterprise features', () => {
     expect(content).toContain('Agent Type');
     expect(content).toContain('Sandbox');
     expect(content).not.toContain('Agent ID');
-    expect(content).not.toContain('Workspace Tiers');
     expect(content).not.toContain('Governance');
   });
 
@@ -42,19 +41,6 @@ describe('RuntimeModule enterprise features', () => {
     const content = lines.join('\n');
 
     expect(content).toContain('**Agent ID**: research-bot');
-  });
-
-  test('includes workspace tier docs when hasWorkspaceTiers is true', () => {
-    const ctx = makeContext({ hasWorkspaceTiers: true });
-    const lines = mod.render(ctx);
-    const content = lines.join('\n');
-
-    expect(content).toContain('### Storage Tiers');
-    expect(content).toContain('Agent tier');
-    expect(content).toContain('User tier');
-    expect(content).toContain('./scratch');
-    expect(content).toContain('./agent');
-    expect(content).toContain('./user');
   });
 
   test('includes governance docs when hasGovernance is true', () => {
@@ -72,14 +58,12 @@ describe('RuntimeModule enterprise features', () => {
   test('includes all enterprise sections when all fields set', () => {
     const ctx = makeContext({
       agentId: 'main',
-      hasWorkspaceTiers: true,
       hasGovernance: true,
     });
     const lines = mod.render(ctx);
     const content = lines.join('\n');
 
     expect(content).toContain('**Agent ID**: main');
-    expect(content).toContain('### Storage Tiers');
     expect(content).toContain('### Governance');
   });
 });

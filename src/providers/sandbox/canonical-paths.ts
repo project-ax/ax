@@ -9,8 +9,8 @@
  * Canonical mount table (all under /workspace, which is the CWD):
  *   /workspace          — CWD/HOME (mount root)
  *   /workspace/scratch  — Session working files (rw, lost when session ends)
- *   /workspace/agent    — Agent workspace, persistent shared files (ro)
- *   /workspace/user     — Per-user persistent storage (ro, writes via IPC)
+ *   /workspace/agent    — Agent workspace, persistent shared files (rw when workspace provider active, ro otherwise)
+ *   /workspace/user     — Per-user persistent storage (rw when workspace provider active, ro otherwise)
  *
  * Identity files and skills are now sent via stdin payload (loaded from
  * DocumentStore), not mounted as filesystem directories.
@@ -66,12 +66,12 @@ export function createCanonicalSymlinks(config: SandboxConfig): {
   // scratch → real workspace (session cwd/HOME)
   symlinkSync(config.workspace, join(mountRoot, 'scratch'));
 
-  // agent → agent workspace (read-only)
+  // agent → agent workspace (rw when workspace provider active, ro otherwise)
   if (config.agentWorkspace) {
     symlinkSync(config.agentWorkspace, join(mountRoot, 'agent'));
   }
 
-  // user → per-user persistent workspace (read-only in sandbox, writes via IPC)
+  // user → per-user persistent workspace (rw when workspace provider active, ro otherwise)
   if (config.userWorkspace) {
     symlinkSync(config.userWorkspace, join(mountRoot, 'user'));
   }

@@ -208,27 +208,6 @@ export function createIPCMcpServer(client: IPCClient, opts?: MCPServerOptions): 
       },
     ),
 
-    // ── Workspace ──
-    tool('workspace',
-      'Write files to persistent workspace tiers (agent or user). Reading and listing is done via local tools since tiers are mounted in the sandbox.\n\n' +
-      'Operations:\n' +
-      '- write: Write a text file (requires tier, path, content)\n' +
-      '- write_file: Write a base64-encoded binary file (requires tier, path, data, mimeType)',
-      {
-        type: z.enum(['write', 'write_file']),
-        tier: z.string().describe('"agent" or "user"'),
-        path: z.string().describe('Relative path within the tier'),
-        content: z.string().optional().describe('File content (for write)'),
-        data: z.string().optional().describe('Base64-encoded binary content (for write_file)'),
-        mimeType: z.string().optional().describe('MIME type (for write_file, e.g. "image/png")'),
-      },
-      (args) => {
-        const { type, ...rest } = args;
-        const params = Object.fromEntries(Object.entries(rest).filter(([_, v]) => v !== undefined));
-        return ipcCall(`workspace_${type}`, params);
-      },
-    ),
-
     // ── Workspace Scopes ──
     tool('workspace_mount',
       'Mount workspace scopes for file persistence. Scopes: session (temporary), user (private), agent (shared). Additive — call multiple times to add scopes.',

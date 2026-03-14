@@ -23,6 +23,7 @@ spec:
       containers:
         - name: agent-runtime
           image: {{ include "ax.image" (dict "image" .Values.agentRuntime.image "imageDefaults" .Values.imageDefaults "context" $) }}
+          {{- include "ax.imagePullPolicy" (dict "image" .Values.agentRuntime.image "imageDefaults" .Values.imageDefaults) | nindent 10 }}
           command: {{ .Values.agentRuntime.command | toJson }}
           ports:
             - name: metrics
@@ -65,6 +66,9 @@ spec:
             - name: ax-config
               mountPath: /etc/ax
               readOnly: true
+            {{- with .Values.agentRuntime.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       {{- with .Values.global.imagePullSecrets }}
       imagePullSecrets:
         {{- range . }}
@@ -76,3 +80,6 @@ spec:
         - name: ax-config
           configMap:
             name: {{ include "ax.fullname" . }}-config
+        {{- with .Values.agentRuntime.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}

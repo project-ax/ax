@@ -15,6 +15,11 @@ export interface WorkspaceMounts {
   paths: Partial<Record<WorkspaceScope, string>>;
 }
 
+export interface MountOptions {
+  /** User ID for resolving the 'user' scope directory. Falls back to sessionId if omitted. */
+  userId?: string;
+}
+
 // ═══════════════════════════════════════════════════════
 // Commit Results
 // ═══════════════════════════════════════════════════════
@@ -81,7 +86,7 @@ export interface WorkspaceBackend {
 
 export interface WorkspaceProvider {
   /** Activate scopes and populate content into workspace directories. */
-  mount(sessionId: string, scopes: WorkspaceScope[]): Promise<WorkspaceMounts>;
+  mount(sessionId: string, scopes: WorkspaceScope[], opts?: MountOptions): Promise<WorkspaceMounts>;
 
   /** Diff, scan, and persist changes for all mounted scopes. */
   commit(sessionId: string): Promise<CommitResult>;

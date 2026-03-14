@@ -269,7 +269,7 @@ export function registerChannelHandler(
                   content: extracted.data,
                 });
               } else {
-                // Fallback: read from disk (e.g. agent wrote file via workspace_write_file)
+                // Fallback: read from disk (e.g. agent wrote file via workspace provider)
                 const agent = resultAgent ?? agentName;
                 const user = resultUser ?? msg.sender ?? 'default';
                 try {

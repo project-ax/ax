@@ -121,10 +121,10 @@ function parseInstallSteps(raw: unknown): SkillInstallStep[] {
 // ═══════════════════════════════════════════════════════
 
 const PERMISSION_MAP: Record<string, string> = {
-  'full-disk-access': 'workspace_write',
-  'disk-full-access': 'workspace_write',
-  'read-files': 'workspace_write',
-  'write-files': 'workspace_write',
+  'full-disk-access': 'workspace_mount',
+  'disk-full-access': 'workspace_mount',
+  'read-files': 'workspace_mount',
+  'write-files': 'workspace_mount',
   'web-access': 'web_fetch',
   'web-search': 'web_search',
   'run-commands': 'agent_delegate',

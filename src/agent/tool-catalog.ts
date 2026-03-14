@@ -15,7 +15,7 @@ import { Type, type TSchema } from '@sinclair/typebox';
 export type ToolCategory =
   | 'memory' | 'web' | 'audit' | 'identity'
   | 'scheduler' | 'skill' | 'delegation' | 'image'
-  | 'workspace' | 'workspace_scopes' | 'governance' | 'sandbox';
+  | 'workspace_scopes' | 'governance' | 'sandbox';
 
 export interface ToolSpec {
   name: string;
@@ -251,36 +251,6 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     },
   },
 
-  // ── Workspace ──
-  {
-    name: 'workspace',
-    label: 'Workspace',
-    description:
-      'Write files to persistent workspace tiers (agent or user). Reading and listing is done via local tools since tiers are mounted in the sandbox.\n\nOperations:\n' +
-      '- write: Write a text file to a workspace tier (agent or user)\n' +
-      '- write_file: Write a base64-encoded binary file to a workspace tier',
-    parameters: Type.Union([
-      Type.Object({
-        type: Type.Literal('write'),
-        tier: Type.String({ description: '"agent" or "user"' }),
-        path: Type.String({ description: 'Relative path within the tier (e.g. "docs/notes.md")' }),
-        content: Type.String({ description: 'File content to write' }),
-      }),
-      Type.Object({
-        type: Type.Literal('write_file'),
-        tier: Type.String({ description: '"agent" or "user"' }),
-        path: Type.String({ description: 'Relative path within the tier (e.g. "files/image.png")' }),
-        data: Type.String({ description: 'Base64-encoded binary content' }),
-        mimeType: Type.String({ description: 'MIME type of the file (e.g. "image/png")' }),
-      }),
-    ]),
-    category: 'workspace',
-    actionMap: {
-      write: 'workspace_write',
-      write_file: 'workspace_write_file',
-    },
-  },
-
   // ── Workspace Scopes ──
   {
     name: 'workspace_mount',
@@ -474,9 +444,7 @@ export interface ToolFilterContext {
   hasHeartbeat: boolean;
   /** skills.length > 0 */
   hasSkills: boolean;
-  /** Enterprise workspace tiers enabled */
-  hasWorkspaceTiers: boolean;
-  /** Workspace scoped mounts available (workspace provider \!= 'none') */
+  /** Workspace scoped mounts available (workspace provider != 'none') */
   hasWorkspaceScopes: boolean;
   /** Enterprise governance enabled */
   hasGovernance: boolean;
@@ -491,7 +459,6 @@ export function filterTools(ctx: ToolFilterContext): readonly ToolSpec[] {
     switch (spec.category) {
       case 'scheduler':  return ctx.hasHeartbeat;
       case 'skill':      return ctx.hasSkills;
-      case 'workspace':  return ctx.hasWorkspaceTiers;
       case 'workspace_scopes': return ctx.hasWorkspaceScopes;
       case 'governance': return ctx.hasGovernance;
       default:           return true;

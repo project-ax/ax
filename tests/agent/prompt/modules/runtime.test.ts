@@ -78,20 +78,6 @@ describe('RuntimeModule', () => {
     expect(text).toContain('Working Directory');
   });
 
-  test('uses relative paths like ./scratch, ./agent, ./user for workspace tiers', () => {
-    const mod = new RuntimeModule();
-    const text = mod.render(makeContext({
-      workspace: '/home/someuser/random/path',
-      hasWorkspaceTiers: true,
-    })).join('\n');
-    expect(text).not.toContain('someuser');
-    expect(text).not.toContain('/home/');
-    expect(text).toContain('./scratch');
-    expect(text).toContain('./agent');
-    expect(text).toContain('./user');
-    expect(text).toContain('Working Directory');
-  });
-
   test('renders cache-stable time as ISO 8601 with timezone offset', () => {
     const mod = new RuntimeModule();
     const text = mod.render(makeContext()).join('\n');

@@ -72,6 +72,18 @@ Call with (dict "image" .Values.host.image "imageDefaults" .Values.imageDefaults
 {{- end }}
 
 {{/*
+Container image pull policy for a component.
+Call with (dict "image" .Values.host.image "imageDefaults" .Values.imageDefaults)
+Returns the pullPolicy if set, otherwise omits it (letting k8s use its default).
+*/}}
+{{- define "ax.imagePullPolicy" -}}
+{{- $policy := .image.pullPolicy | default .imageDefaults.pullPolicy | default "" -}}
+{{- if $policy -}}
+imagePullPolicy: {{ $policy }}
+{{- end -}}
+{{- end }}
+
+{{/*
 NATS URL — uses subchart service if enabled, otherwise external URL.
 */}}
 {{- define "ax.natsUrl" -}}

@@ -101,33 +101,6 @@ describe('E2E Scenario: Error Handling & Edge Cases', () => {
     expect(result[0]).toBeDefined();
   });
 
-  // ─── Workspace Edge Cases ─────────────────────────
-
-  test('workspace_write with nested path', async () => {
-    harness = await TestHarness.create();
-
-    const result = await harness.ipcCall('workspace_write', {
-      tier: 'agent',
-      path: 'deep/nested/file.md',
-      content: 'Nested content',
-    });
-
-    expect(result.ok).toBe(true);
-    expect(result.written).toBe(true);
-  });
-
-  test('workspace_write with empty content', async () => {
-    harness = await TestHarness.create();
-
-    const result = await harness.ipcCall('workspace_write', {
-      tier: 'agent',
-      path: 'empty.md',
-      content: '',
-    });
-
-    expect(result.ok).toBe(true);
-  });
-
   // ─── Sequential Operations ────────────────────────
 
   test('rapid sequential memory writes all succeed', async () => {
@@ -159,13 +132,6 @@ describe('E2E Scenario: Error Handling & Edge Cases', () => {
       scope: 'mixed',
       content: 'Memory entry',
       tags: [],
-    });
-
-    // Write workspace
-    await harness.ipcCall('workspace_write', {
-      tier: 'agent',
-      path: 'mixed-test.md',
-      content: 'Workspace content',
     });
 
     // Search web

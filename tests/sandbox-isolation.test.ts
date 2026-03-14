@@ -117,6 +117,60 @@ describe('seatbelt sandbox env isolation', () => {
   });
 });
 
+// ── Writable Workspace Mounts (workspace provider active) ────────────
+
+describe('writable workspace mounts via workspaceMountsWritable flag', () => {
+  test('docker mounts agent/user workspace as rw when workspaceMountsWritable is true', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/docker.ts'), 'utf-8');
+
+    // When workspaceMountsWritable is true, mounts should be :rw not :ro
+    expect(source).toContain("config.workspaceMountsWritable ? 'rw' : 'ro'");
+  });
+
+  test('bwrap uses --bind (rw) instead of --ro-bind when workspaceMountsWritable is true', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/bwrap.ts'), 'utf-8');
+
+    expect(source).toContain("config.workspaceMountsWritable ? '--bind' : '--ro-bind'");
+  });
+
+  test('nsjail uses --bindmount (rw) instead of --bindmount_ro when workspaceMountsWritable is true', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/nsjail.ts'), 'utf-8');
+
+    expect(source).toContain("config.workspaceMountsWritable ? '--bindmount' : '--bindmount_ro'");
+  });
+
+  test('seatbelt passes AGENT_WORKSPACE_RW and USER_WORKSPACE_RW params', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/seatbelt.ts'), 'utf-8');
+
+    expect(source).toContain('AGENT_WORKSPACE_RW=');
+    expect(source).toContain('USER_WORKSPACE_RW=');
+    // When not writable, /dev/null is used (matches nothing in seatbelt policy)
+    expect(source).toContain("'/dev/null'");
+  });
+
+  test('seatbelt policy includes write rules for AGENT_WORKSPACE_RW and USER_WORKSPACE_RW', async () => {
+    const { readFileSync } = await import('node:fs');
+    const policy = readFileSync(resolve('policies/agent.sb'), 'utf-8');
+
+    expect(policy).toContain('(allow file-write* (subpath (param "AGENT_WORKSPACE_RW")))');
+    expect(policy).toContain('(allow file-write* (subpath (param "USER_WORKSPACE_RW")))');
+  });
+
+  test('server-completions pre-mounts workspace scopes when provider is active', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/host/server-completions.ts'), 'utf-8');
+
+    // Should pre-mount agent and user scopes before sandbox spawn
+    expect(source).toContain("providers.workspace.mount(sessionId, ['agent', 'user']");
+    // Should set workspaceMountsWritable flag in sandbox config
+    expect(source).toContain('workspaceMountsWritable');
+  });
+});
+
 // ── Identity Mount Removed From All Sandbox Providers ────────────────
 
 describe('sandbox providers do not mount identity (now via stdin payload)', () => {
@@ -476,13 +530,13 @@ describe('MCP server tool registry security', () => {
       'memory', 'web', 'identity', 'scheduler', 'skill',
       'audit', 'agent', 'image',
       // Enterprise tools
-      'workspace', 'workspace_mount', 'governance',
+      'workspace_mount', 'governance',
       // Sandbox tools
       'bash', 'read_file', 'write_file', 'edit_file',
     ];
 
     expect(Object.keys(tools).sort()).toEqual(expected.sort());
-    expect(Object.keys(tools).length).toBe(15);
+    expect(Object.keys(tools).length).toBe(14);
   });
 
   test('tool results are JSON strings, not raw objects with taint', () => {

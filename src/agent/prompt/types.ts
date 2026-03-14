@@ -42,8 +42,6 @@ export interface PromptContext {
   // Enterprise (optional — absent for single-agent setups)
   /** Agent ID in enterprise registry (e.g. 'main', 'research-bot'). */
   agentId?: string;
-  /** Whether enterprise workspace tiers are available. */
-  hasWorkspaceTiers?: boolean;
   /** Whether governance (proposal) system is active. */
   hasGovernance?: boolean;
 }

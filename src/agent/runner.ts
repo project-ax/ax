@@ -297,6 +297,7 @@ export function parseStdinPayload(data: string): StdinPayload {
         agentId: typeof parsed.agentId === 'string' ? parsed.agentId : undefined,
         agentWorkspace: typeof parsed.agentWorkspace === 'string' ? parsed.agentWorkspace : undefined,
         userWorkspace: typeof parsed.userWorkspace === 'string' ? parsed.userWorkspace : undefined,
+        workspaceProvider: typeof parsed.workspaceProvider === 'string' ? parsed.workspaceProvider : undefined,
         // Identity and skills from host (loaded from DocumentStore)
         identity: parsed.identity && typeof parsed.identity === 'object' ? parsed.identity as Partial<IdentityFiles> : undefined,
         skills: Array.isArray(parsed.skills) ? parsed.skills as SkillPayload[] : undefined,
@@ -362,6 +363,7 @@ if (isMain) {
     config.agentId = payload.agentId;
     config.agentWorkspace = process.env.AX_AGENT_WORKSPACE || payload.agentWorkspace;
     config.userWorkspace = process.env.AX_USER_WORKSPACE || payload.userWorkspace;
+    config.workspaceProvider = payload.workspaceProvider;
     // Identity and skills from host (loaded from DocumentStore)
     if (payload.identity) {
       config.identity = {

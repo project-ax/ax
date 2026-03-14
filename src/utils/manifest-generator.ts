@@ -81,7 +81,7 @@ const IPC_TOOLS = [
   'memory_write', 'memory_query', 'memory_read', 'memory_delete', 'memory_list',
   'web_fetch', 'web_search',
   'skill_read', 'skill_list', 'skill_propose',
-  'workspace_write', 'workspace_write_file',
+  'workspace_mount',
   'agent_delegate',
   'browser_launch', 'browser_navigate', 'browser_snapshot',
 ] as const;

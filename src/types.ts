@@ -125,6 +125,8 @@ export interface Config {
   };
   workspace: {
     basePath: string;
+    bucket?: string;
+    prefix?: string;
     maxFileSize: number;
     maxFiles: number;
     maxCommitSize: number;

@@ -93,6 +93,33 @@ describe('workspace/shared orchestrator', () => {
       expect(backend.mount).toHaveBeenCalledTimes(2);
     });
 
+    test('mount with userId resolves user scope to userId instead of sessionId', async () => {
+      const provider = createOrchestrator({ backend, scanner, config: {}, agentId: AGENT_ID });
+
+      await provider.mount('s1', ['user'], { userId: 'alice' });
+
+      // Backend should be called with scope='user', id='alice' (not 's1')
+      expect(backend.mount).toHaveBeenCalledWith('user', 'alice');
+    });
+
+    test('mount without userId resolves user scope to sessionId', async () => {
+      const provider = createOrchestrator({ backend, scanner, config: {}, agentId: AGENT_ID });
+
+      await provider.mount('s1', ['user']);
+
+      // Without userId, should fall back to sessionId
+      expect(backend.mount).toHaveBeenCalledWith('user', 's1');
+    });
+
+    test('mount with userId resolves agent scope to agentId (not userId)', async () => {
+      const provider = createOrchestrator({ backend, scanner, config: {}, agentId: AGENT_ID });
+
+      await provider.mount('s1', ['agent'], { userId: 'alice' });
+
+      // Agent scope uses agentId, not userId
+      expect(backend.mount).toHaveBeenCalledWith('agent', AGENT_ID);
+    });
+
     test('different sessions are independent', async () => {
       const provider = createOrchestrator({ backend, scanner, config: {}, agentId: AGENT_ID });
 

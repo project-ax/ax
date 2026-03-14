@@ -115,6 +115,8 @@ const ConfigSchema = z.strictObject({
   }).optional(),
   workspace: z.strictObject({
     basePath: z.string().default('~/.ax/workspaces'),
+    bucket: z.string().optional(),
+    prefix: z.string().optional(),
     maxFileSize: z.number().int().min(1).default(10_485_760),
     maxFiles: z.number().int().min(1).default(500),
     maxCommitSize: z.number().int().min(1).default(52_428_800),

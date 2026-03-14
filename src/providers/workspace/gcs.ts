@@ -11,7 +11,7 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile, mkdir, writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { safePath } from '../../utils/safe-path.js';
 import { createOrchestrator } from './shared.js';
 import type { ScannerProvider } from '../scanner/types.js';
@@ -104,7 +104,8 @@ export function createGcsBackend(bucket: GcsBucketLike, basePath: string, prefix
 
   /** Build the GCS key prefix for a scope/id pair. */
   function gcsPrefix(scope: WorkspaceScope, id: string): string {
-    return prefix ? `${prefix}/${scope}/${id}/` : `${scope}/${id}/`;
+    const base = prefix.endsWith('/') ? prefix : prefix ? `${prefix}/` : '';
+    return `${base}${scope}/${id}/`;
   }
 
   return {
@@ -232,9 +233,7 @@ export async function create(config: Config): Promise<WorkspaceProvider> {
   // Lazy import to avoid requiring @google-cloud/storage when using other backends
   const { Storage } = await import('@google-cloud/storage');
 
-  const wsConfig = (config as unknown as Record<string, unknown>).workspace as
-    | Partial<{ basePath: string; bucket: string; prefix: string; maxFileSize: number; maxFiles: number; maxCommitSize: number; ignorePatterns: string[] }>
-    | undefined;
+  const wsConfig = config.workspace;
 
   const bucketName = wsConfig?.bucket ?? process.env.GCS_WORKSPACE_BUCKET;
   if (!bucketName) {
@@ -244,7 +243,8 @@ export async function create(config: Config): Promise<WorkspaceProvider> {
   }
 
   const prefix = wsConfig?.prefix ?? '';
-  const basePath = wsConfig?.basePath ?? join(tmpdir(), 'ax-workspaces-gcs');
+  const rawBase = wsConfig?.basePath ?? join(tmpdir(), 'ax-workspaces-gcs');
+  const basePath = rawBase.startsWith('~') ? rawBase.replace('~', homedir()) : rawBase;
   const agentId = config.agent_name ?? 'assistant';
 
   await mkdir(basePath, { recursive: true });

@@ -292,24 +292,6 @@ export const WorkspaceMountSchema = ipcAction('workspace_mount', {
   scopes: z.array(z.enum(['agent', 'user', 'session'])),
 });
 
-/** Safe path segment: no slashes, dots-only, or nulls. */
-const pathSegment = safeString(255).check(
-  z.refine((s: string) => !/[/\\]/.test(s) && s !== '.' && s !== '..', 'Invalid path segment')
-);
-
-export const WorkspaceWriteSchema = ipcAction('workspace_write', {
-  tier: z.enum(['agent', 'user']),
-  path: safeString(1024),
-  content: safeString(500_000),
-});
-
-export const WorkspaceWriteFileSchema = ipcAction('workspace_write_file', {
-  tier: z.enum(['agent', 'user']),
-  path: safeString(1024),
-  /** Base64-encoded binary content. */
-  data: safeString(20_000_000),
-  mimeType: safeString(200),
-});
 
 // ── Enterprise: Governance ─────────────────────────────
 

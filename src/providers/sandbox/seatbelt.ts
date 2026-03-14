@@ -36,6 +36,10 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         // could match root and blow the sandbox wide open.
         '-D', `AGENT_WORKSPACE=${config.agentWorkspace ?? '/dev/null'}`,
         '-D', `USER_WORKSPACE=${config.userWorkspace ?? '/dev/null'}`,
+        // Writable workspace paths — only set to real paths when workspace provider is active.
+        // Otherwise /dev/null → (subpath "/dev/null") matches nothing, keeping tiers read-only.
+        '-D', `AGENT_WORKSPACE_RW=${config.workspaceMountsWritable && config.agentWorkspace ? config.agentWorkspace : '/dev/null'}`,
+        '-D', `USER_WORKSPACE_RW=${config.workspaceMountsWritable && config.userWorkspace ? config.userWorkspace : '/dev/null'}`,
         // Also allow access to symlink mount root
         '-D', `MOUNT_ROOT=${mountRoot}`,
         cmd, ...args,

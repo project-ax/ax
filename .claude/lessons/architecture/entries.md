@@ -1,5 +1,11 @@
 # Architecture
 
+### Workspace provider mounts must be pre-resolved before sandbox spawn
+**Date:** 2026-03-13
+**Context:** Wiring workspace provider directories into sandbox mounts. The sandbox can't add mounts after spawn, so workspace scopes must be pre-mounted before the sandbox process starts.
+**Lesson:** When a workspace provider is active, pre-mount all needed scopes (agent, user) in server-completions.ts BEFORE constructing the sandbox config. Use the returned paths from workspace.mount() as the agentWorkspace/userWorkspace values in SandboxConfig. The workspaceMountsWritable flag tells sandbox providers to use rw instead of ro mounts. The end-of-turn commit() validates all changes — the writable mounts are safe because the workspace provider's two-layer validation (structural + scanner) gates persistence.
+**Tags:** workspace, sandbox, architecture, security
+
 ### Seatbelt sandbox-exec -D parameters must always be defined
 **Date:** 2026-03-13
 **Context:** Removing the `skills` field from SandboxConfig. Seatbelt uses `-D SKILLS=...` in its policy file, and removing it entirely would break the seatbelt policy parser.

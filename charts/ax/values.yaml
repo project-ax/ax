@@ -20,6 +20,7 @@ global:
 imageDefaults:
   registry: "ghcr.io/project-ax"
   tag: "latest"
+  pullPolicy: ""  # Defaults to IfNotPresent (or Always for :latest if left empty)
 
 # ─── AX Configuration ────────────────────────────────────────────
 # This entire block is rendered as ax.yaml and mounted into every pod.
@@ -66,7 +67,10 @@ host:
     registry: ""
     repository: ax
     tag: ""  # Defaults to Chart.appVersion
+    pullPolicy: ""  # Defaults to imageDefaults.pullPolicy
   command: ["node", "dist/host/host-process.js"]
+  extraVolumes: []
+  extraVolumeMounts: []
   ports:
     http: 8080
     metrics: 9090
@@ -104,7 +108,10 @@ agentRuntime:
     registry: ""
     repository: ax
     tag: ""
+    pullPolicy: ""
   command: ["node", "dist/host/agent-runtime-process.js"]
+  extraVolumes: []
+  extraVolumeMounts: []
   ports:
     metrics: 9091
   resources:   # null → use preset (small=500m/1Gi, medium/large=1cpu/2Gi) or default 1cpu/2Gi
@@ -130,6 +137,7 @@ poolController:
     registry: ""
     repository: ax
     tag: ""
+    pullPolicy: ""
   command: ["node", "dist/pool-controller/main.js"]
   ports:
     metrics: 9092
@@ -155,6 +163,7 @@ sandbox:
     registry: ""
     repository: ax-sandbox
     tag: "latest"
+    pullPolicy: ""
   # Pod runtime class for sandbox pods (e.g., "gvisor" for GKE Autopilot).
   # Set to "" to disable (for kind/minikube/non-gVisor clusters).
   # null → use preset (small="", medium/large=gvisor) or default gvisor.

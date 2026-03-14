@@ -1,6 +1,5 @@
 import { describe, test, expect } from 'vitest';
 import {
-  WorkspaceWriteSchema,
   IdentityProposeSchema,
   ProposalListSchema,
   ProposalReviewSchema,
@@ -10,39 +9,6 @@ import {
 } from '../src/ipc-schemas.js';
 
 describe('Enterprise IPC Schemas', () => {
-
-  // ── Workspace schemas ──
-
-  test('WorkspaceWriteSchema accepts valid input', () => {
-    const result = WorkspaceWriteSchema.safeParse({
-      action: 'workspace_write',
-      tier: 'user',
-      path: 'notes/todo.md',
-      content: '# Todo\n- Buy milk',
-    });
-    expect(result.success).toBe(true);
-  });
-
-  test('WorkspaceWriteSchema rejects invalid tier', () => {
-    const result = WorkspaceWriteSchema.safeParse({
-      action: 'workspace_write',
-      tier: 'invalid_tier',
-      path: 'test.md',
-      content: 'hi',
-    });
-    expect(result.success).toBe(false);
-  });
-
-  test('WorkspaceWriteSchema rejects unknown fields', () => {
-    const result = WorkspaceWriteSchema.safeParse({
-      action: 'workspace_write',
-      tier: 'user',
-      path: 'test.md',
-      content: 'hi',
-      extra: 'should_fail',
-    });
-    expect(result.success).toBe(false);
-  });
 
   // ── Governance schemas ──
 
@@ -131,7 +97,7 @@ describe('Enterprise IPC Schemas', () => {
 
   test('all enterprise actions are registered in IPC_SCHEMAS', () => {
     const enterpriseActions = [
-      'workspace_write', 'workspace_write_file',
+      'workspace_mount',
       'identity_propose', 'proposal_list', 'proposal_review',
       'agent_registry_list', 'agent_registry_get',
     ];
@@ -140,25 +106,4 @@ describe('Enterprise IPC Schemas', () => {
     }
   });
 
-  // ── Null byte rejection ──
-
-  test('workspace_write rejects null bytes in content', () => {
-    const result = WorkspaceWriteSchema.safeParse({
-      action: 'workspace_write',
-      tier: 'user',
-      path: 'test.md',
-      content: 'hello\0world',
-    });
-    expect(result.success).toBe(false);
-  });
-
-  test('workspace_write rejects null bytes in path', () => {
-    const result = WorkspaceWriteSchema.safeParse({
-      action: 'workspace_write',
-      tier: 'user',
-      path: 'test\0.md',
-      content: 'hello',
-    });
-    expect(result.success).toBe(false);
-  });
 });

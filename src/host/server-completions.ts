@@ -601,26 +601,61 @@ export async function processCompletion(
       memoryMB: config.sandbox.memory_mb,
     });
 
-    // Enterprise: set up workspace directories
-    const enterpriseAgentWs = agentWorkspaceDir(agentName);
-    const enterpriseUserWs = userWorkspaceDir(agentName, currentUserId);
-    mkdirSync(enterpriseAgentWs, { recursive: true });
-    mkdirSync(enterpriseUserWs, { recursive: true });
+    // Enterprise: set up workspace directories.
+    // When workspace provider is active (not 'none'), pre-mount agent+user scopes
+    // and use the provider's directories (writable). Otherwise fall back to
+    // the legacy read-only enterprise paths.
+    const hasWorkspaceProvider = config.providers.workspace && config.providers.workspace !== 'none';
+    let agentWsPath: string | undefined;
+    let userWsPath: string | undefined;
+    let workspaceMountsWritable = false;
 
-    // Workspace provider: auto-mount previously remembered scopes
-    const rememberedScopes = providers.workspace.activeMounts(sessionId);
-    if (rememberedScopes.length > 0) {
+    if (hasWorkspaceProvider) {
+      // Pre-mount agent and user scopes so their directories exist before sandbox spawn.
+      // The sandbox mounts these as read-write; the workspace provider validates at end-of-turn commit.
       try {
-        await providers.workspace.mount(sessionId, rememberedScopes);
+        const mountOpts = { userId: currentUserId };
+        const preMounted = await providers.workspace.mount(sessionId, ['agent', 'user'], mountOpts);
+        agentWsPath = preMounted.paths.agent;
+        userWsPath = preMounted.paths.user;
+        workspaceMountsWritable = true;
         eventBus?.emit({
           type: 'workspace.mount',
           requestId,
           timestamp: Date.now(),
-          data: { sessionId, scopes: rememberedScopes, agentId: agentName },
+          data: { sessionId, scopes: ['agent', 'user'], agentId: agentName },
         });
       } catch (err) {
-        reqLogger.warn('workspace_automount_failed', { error: (err as Error).message, scopes: rememberedScopes });
+        reqLogger.warn('workspace_premount_failed', { error: (err as Error).message });
       }
+
+      // Also re-mount any additional remembered scopes (e.g. 'session')
+      const rememberedScopes = providers.workspace.activeMounts(sessionId)
+        .filter(s => s !== 'agent' && s !== 'user');
+      if (rememberedScopes.length > 0) {
+        try {
+          await providers.workspace.mount(sessionId, rememberedScopes, { userId: currentUserId });
+        } catch (err) {
+          reqLogger.warn('workspace_automount_failed', { error: (err as Error).message, scopes: rememberedScopes });
+        }
+      }
+
+      // Point sandbox tool writes at the workspace provider's agent directory
+      // so file changes land in the GCS-mounted (or other backend) path and
+      // get committed at end-of-turn.
+      if (agentWsPath && workspaceMountsWritable && deps.workspaceMap) {
+        deps.workspaceMap.set(requestId, agentWsPath);
+      }
+    }
+
+    // Fallback: legacy enterprise paths (read-only in sandbox when workspace provider is 'none')
+    if (!agentWsPath || !userWsPath) {
+      const enterpriseAgentWs = agentWorkspaceDir(agentName);
+      const enterpriseUserWs = userWorkspaceDir(agentName, currentUserId);
+      mkdirSync(enterpriseAgentWs, { recursive: true });
+      mkdirSync(enterpriseUserWs, { recursive: true });
+      agentWsPath = agentWsPath ?? enterpriseAgentWs;
+      userWsPath = userWsPath ?? enterpriseUserWs;
     }
 
     // ── Load identity from DocumentStore ──
@@ -646,8 +681,8 @@ export async function processCompletion(
       sessionScope: sessionScope ?? 'dm',
       // Enterprise fields
       agentId: agentName,
-      agentWorkspace: enterpriseAgentWs,
-      userWorkspace: enterpriseUserWs,
+      agentWorkspace: agentWsPath,
+      userWorkspace: userWsPath,
       workspaceProvider: config.providers.workspace,
       // Identity and skills from DocumentStore (not filesystem)
       identity: identityPayload,
@@ -663,8 +698,9 @@ export async function processCompletion(
       timeoutSec: config.sandbox.timeout_sec,
       memoryMB: config.sandbox.memory_mb,
       command: spawnCommand,
-      agentWorkspace: enterpriseAgentWs,
-      userWorkspace: enterpriseUserWs,
+      agentWorkspace: agentWsPath,
+      userWorkspace: userWsPath,
+      workspaceMountsWritable,
     };
 
     let response = '';

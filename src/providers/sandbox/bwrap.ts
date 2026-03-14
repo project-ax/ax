@@ -51,9 +51,9 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         // Workspace (read-write) — mounted at canonical /scratch
         '--bind', config.workspace, CANONICAL.scratch,
 
-        // Enterprise mounts — canonical paths
-        ...(config.agentWorkspace ? ['--ro-bind', config.agentWorkspace, CANONICAL.agent] : []),
-        ...(config.userWorkspace ? ['--ro-bind', config.userWorkspace, CANONICAL.user] : []),
+        // Enterprise mounts — canonical paths (rw when workspace provider active, ro otherwise)
+        ...(config.agentWorkspace ? [config.workspaceMountsWritable ? '--bind' : '--ro-bind', config.agentWorkspace, CANONICAL.agent] : []),
+        ...(config.userWorkspace ? [config.workspaceMountsWritable ? '--bind' : '--ro-bind', config.userWorkspace, CANONICAL.user] : []),
 
         // IPC socket directory (read-write)
         '--bind', ipcSocketDir, ipcSocketDir,
