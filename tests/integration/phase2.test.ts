@@ -43,7 +43,7 @@ function powerUserConfig(): Config {
       memory: 'cortex', scanner: 'guardian',
       channels: [], web: 'tavily', browser: 'container',
       credentials: 'keychain', skills: 'database', audit: 'database',
-      sandbox: 'docker', scheduler: 'full',
+      sandbox: 'docker', scheduler: 'plainjob',
     },
     sandbox: { timeout_sec: 60, memory_mb: 512 },
     scheduler: {

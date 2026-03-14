@@ -426,6 +426,6 @@ describe('Provider Map', () => {
 
     // Scheduler providers
     expect(PROVIDER_MAP.scheduler).toHaveProperty('none');
-    expect(PROVIDER_MAP.scheduler).toHaveProperty('full');
+    expect(PROVIDER_MAP.scheduler).toHaveProperty('plainjob');
   });
 });

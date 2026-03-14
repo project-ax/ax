@@ -1,6 +1,5 @@
 // src/providers/scheduler/types.ts — Scheduler provider types
 import type { InboundMessage, SessionAddress } from '../shared-types.js';
-import type { ProactiveHint } from '../shared-types.js';
 
 export interface CronDelivery {
   mode: 'channel' | 'none';
@@ -48,8 +47,4 @@ export interface SchedulerProvider {
   scheduleOnce?(job: CronJobDef, fireAt: Date): void | Promise<void>;
   /** Manually trigger cron check at optional Date (for testing). */
   checkCronNow?(at?: Date): void | Promise<void>;
-  /** Record tokens used so budget tracking can suppress hints. */
-  recordTokenUsage?(tokens: number): void;
-  /** List hints that were queued (budget exceeded). */
-  listPendingHints?(): ProactiveHint[];
 }

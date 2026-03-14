@@ -218,7 +218,7 @@ export async function create(config: Config, deps: PlainJobSchedulerDeps = {}): 
       if (deps.eventbus) {
         unsubscribeHints = deps.eventbus.subscribe((event) => {
           if (event.type !== 'memory.proactive_hint') return;
-          handleProactiveHint(event.data as ProactiveHint);
+          handleProactiveHint(event.data as unknown as ProactiveHint);
         });
       }
     },

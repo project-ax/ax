@@ -52,5 +52,4 @@ export interface MemoryProvider {
   delete(id: string): Promise<void>;
   list(scope: string, limit?: number, userId?: string): Promise<MemoryEntry[]>;
   memorize?(conversation: ConversationTurn[], userId?: string): Promise<void>;
-  onProactiveHint?(handler: (hint: ProactiveHint) => void): void;
 }

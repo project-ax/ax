@@ -71,7 +71,6 @@ const _PROVIDER_MAP = {
   },
   scheduler: {
     none:     '../providers/scheduler/none.js',
-    full:     '../providers/scheduler/full.js',
     plainjob: '../providers/scheduler/plainjob.js',
   },
   screener: {

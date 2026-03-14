@@ -21,7 +21,6 @@ export type {
 // ─── Memory types (used by scheduler for proactive hints) ───
 export type {
   ProactiveHint,
-  MemoryProvider,
 } from './memory/types.js';
 
 // ─── Audit types (used by scheduler for event logging) ───

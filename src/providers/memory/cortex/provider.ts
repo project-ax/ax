@@ -475,7 +475,7 @@ export async function create(config: Config, _name?: string, opts?: CreateOption
               timestamp: Date.now(),
               data: {
                 source: 'memory',
-                kind: ('hintKind' in candidate ? candidate.hintKind : undefined) ?? 'pending_task',
+                kind: (('hintKind' in candidate ? candidate.hintKind : undefined) ?? 'pending_task') as ProactiveHint['kind'],
                 reason: candidate.content,
                 suggestedPrompt: candidate.content,
                 confidence: candidate.confidence,
