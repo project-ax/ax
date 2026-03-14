@@ -72,18 +72,18 @@ export async function loadProviders(config: Config, opts?: LoadProvidersOptions)
   const skillsMod = await import(skillsModulePath);
   const skills = await skillsMod.create(config, config.providers.skills, { screener, storage });
 
-  // Load memory provider, passing LLM for extraction + summary generation + database
+  // Load eventbus provider BEFORE memory and scheduler — both consume it.
+  const eventbus = await loadProvider('eventbus', config.providers.eventbus, config);
+
+  // Load memory provider, passing LLM for extraction + summary generation + database + eventbus
   const memoryModPath = resolveProviderPath('memory', config.providers.memory);
   const memoryMod = await import(memoryModPath);
-  const memory = await memoryMod.create(config, config.providers.memory, { llm: tracedLlm, database });
+  const memory = await memoryMod.create(config, config.providers.memory, { llm: tracedLlm, database, eventbus });
 
   // Load audit provider — pass database for audit/database provider
   const auditModPath = resolveProviderPath('audit', config.providers.audit);
   const auditMod = await import(auditModPath);
   const audit = await auditMod.create(config, config.providers.audit, { database });
-
-  // Load eventbus provider (in-process pub/sub; Phase 2 adds NATS for k8s)
-  const eventbus = await loadProvider('eventbus', config.providers.eventbus, config);
 
   // Load workspace provider (default: none = no-op stub)
   const workspace = await loadProvider('workspace', config.providers.workspace, config);
@@ -100,7 +100,7 @@ export async function loadProviders(config: Config, opts?: LoadProvidersOptions)
     skills,
     audit,
     sandbox:     await loadProvider('sandbox', config.providers.sandbox, config),
-    scheduler:   await loadScheduler(config, database),
+    scheduler:   await loadScheduler(config, database, eventbus),
     storage,
     database,
     eventbus,
@@ -128,8 +128,8 @@ async function loadScanner(config: Config, llm: import('../providers/llm/types.j
   return scannerMod.create(config, config.providers.scanner, { llm });
 }
 
-async function loadScheduler(config: Config, database?: DatabaseProvider) {
+async function loadScheduler(config: Config, database?: DatabaseProvider, eventbus?: import('../providers/eventbus/types.js').EventBusProvider) {
   const modulePath = resolveProviderPath('scheduler', config.providers.scheduler);
   const mod = await import(modulePath);
-  return mod.create(config, { database });
+  return mod.create(config, { database, eventbus });
 }
