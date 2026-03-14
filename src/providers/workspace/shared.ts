@@ -202,6 +202,9 @@ export function createOrchestrator(opts: OrchestratorOptions): WorkspaceProvider
   /** Remembered userId per session — set during mount, used during commit. */
   const sessionUserIds = new Map<string, string>();
 
+  /** Remembered mount paths — "sessionId:scope" → path, so repeated mounts return the path. */
+  const scopePaths = new Map<string, string>();
+
   return {
     async mount(sessionId: string, scopes: WorkspaceScope[], opts?: MountOptions): Promise<WorkspaceMounts> {
       let active = sessionScopes.get(sessionId);
@@ -224,6 +227,12 @@ export function createOrchestrator(opts: OrchestratorOptions): WorkspaceProvider
           const mountPath = await backend.mount(scope, id);
           paths[scope] = mountPath;
           active.add(scope);
+          // Remember the path so we can return it on subsequent mount calls
+          scopePaths.set(`${sessionId}:${scope}`, mountPath);
+        } else {
+          // Already mounted — return the remembered path so callers can use it
+          const remembered = scopePaths.get(`${sessionId}:${scope}`);
+          if (remembered) paths[scope] = remembered;
         }
       }
 
@@ -312,6 +321,10 @@ export function createOrchestrator(opts: OrchestratorOptions): WorkspaceProvider
     async cleanup(sessionId: string): Promise<void> {
       sessionScopes.delete(sessionId);
       sessionUserIds.delete(sessionId);
+      // Clean up remembered paths for this session
+      for (const key of scopePaths.keys()) {
+        if (key.startsWith(`${sessionId}:`)) scopePaths.delete(key);
+      }
     },
 
     activeMounts(sessionId: string): WorkspaceScope[] {
