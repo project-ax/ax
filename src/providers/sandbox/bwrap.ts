@@ -48,6 +48,9 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         '--dev', '/dev',
         '--proc', '/proc',
 
+        // Ephemeral workspace root -- /workspace/scratch (rw bind) overlays on top
+        '--tmpfs', CANONICAL.root,
+
         // Workspace (read-write) — mounted at canonical /scratch
         '--bind', config.workspace, CANONICAL.scratch,
 

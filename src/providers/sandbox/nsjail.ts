@@ -35,6 +35,9 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         '--rlimit_as', String(config.memoryMB ?? 256),
         '--max_cpus', '1',
 
+        // Read-only workspace root -- /workspace/scratch (rw bind) is the only writable area
+        '--tmpfsmount', `${CANONICAL.root}:4m`,
+
         // Mount workspace (read-write) — canonical /scratch
         '--bindmount', `${config.workspace}:${CANONICAL.scratch}`,
         '--cwd', CANONICAL.root,

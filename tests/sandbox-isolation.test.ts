@@ -558,6 +558,31 @@ describe('MCP server tool registry security', () => {
   });
 });
 
+// ── /workspace Root Is Read-Only ──────────────────────────────────────
+
+describe('/workspace root is read-only', () => {
+  test('nsjail creates tmpfs at workspace root', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/nsjail.ts'), 'utf-8');
+    expect(source).toContain('--tmpfsmount');
+    expect(source).toContain('CANONICAL.root');
+  });
+
+  test('bwrap creates tmpfs at workspace root', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/bwrap.ts'), 'utf-8');
+    // bwrap --tmpfs creates ephemeral workspace root; /workspace/scratch rw bind overlays on top
+    expect(source).toContain("'--tmpfs'");
+    expect(source).toContain('CANONICAL.root');
+  });
+
+  test('docker already has --read-only flag', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/docker.ts'), 'utf-8');
+    expect(source).toContain("'--read-only'");
+  });
+});
+
 // ── Per-Tier Writable Workspace Flags ─────────────────────────────────
 
 describe('per-tier writable workspace flags', () => {
