@@ -74,7 +74,11 @@ describe('loadTierConfigs', () => {
     expect(result).toHaveLength(2);
     expect(result[0]?.tier).toBe('light');
     expect(result[0]?.minReady).toBe(2); // default
+    expect(result[0]?.template.cpu).toBe('250m');
+    expect(result[0]?.template.memory).toBe('500Mi');
     expect(result[1]?.tier).toBe('heavy');
     expect(result[1]?.minReady).toBe(0); // default
+    expect(result[1]?.template.cpu).toBe('1');
+    expect(result[1]?.template.memory).toBe('2Gi');
   });
 });

@@ -17,8 +17,8 @@ function makePod(overrides: Partial<PoolPod> = {}): PoolPod {
 const lightTemplate: PodTemplate = {
   image: 'ax/agent:latest',
   command: ['node', 'dist/sandbox-worker/main.js'],
-  cpu: '1',
-  memory: '2Gi',
+  cpu: '250m',
+  memory: '500Mi',
   tier: 'light',
   natsUrl: 'nats://localhost:4222',
   workspaceRoot: '/workspace',

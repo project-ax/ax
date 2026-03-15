@@ -29,6 +29,8 @@ export interface PodTemplate {
   tier: string;
   natsUrl: string;
   workspaceRoot: string;
+  /** Size limit for the workspace emptyDir volume (e.g. '10Gi'). */
+  workspaceSize?: string;
   runtimeClassName?: string;
   nodeSelector?: Record<string, string>;
   activeDeadlineSeconds?: number;
@@ -140,7 +142,7 @@ export async function createPoolK8sClient(namespace?: string): Promise<PoolK8sCl
             },
           ],
           volumes: [
-            { name: 'workspace', emptyDir: { sizeLimit: template.tier === 'heavy' ? '50Gi' : '10Gi' } },
+            { name: 'workspace', emptyDir: { sizeLimit: template.workspaceSize ?? '10Gi' } },
             { name: 'tmp', emptyDir: { sizeLimit: '256Mi' } },
           ],
         },
