@@ -120,7 +120,14 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
   const { systemPrompt, toolFilter } = buildSystemPrompt(config);
 
   // 4. Create IPC MCP server with context-aware tool filtering
-  const ipcMcpServer = createIPCMcpServer(client, { userId: config.userId, filter: toolFilter });
+  // When running in a container, sandbox tools execute locally with host audit gate.
+  const CONTAINER_SANDBOXES = new Set(['docker', 'apple', 'k8s']);
+  const useLocalSandbox = CONTAINER_SANDBOXES.has(config.sandboxType ?? '');
+  const ipcMcpServer = createIPCMcpServer(client, {
+    userId: config.userId,
+    filter: toolFilter,
+    ...(useLocalSandbox ? { localSandbox: { client, workspace: config.workspace } } : {}),
+  });
 
   // Include conversation history in the prompt if available
   let fullPrompt = '';

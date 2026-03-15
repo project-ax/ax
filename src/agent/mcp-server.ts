@@ -12,6 +12,7 @@ import type { McpSdkServerConfigWithInstance } from '@anthropic-ai/claude-agent-
 import type { IPCClient } from './ipc-client.js';
 import { normalizeOrigin, filterTools } from './tool-catalog.js';
 import type { ToolFilterContext } from './tool-catalog.js';
+import { createLocalSandbox } from './local-sandbox.js';
 
 function stripTaint(data: unknown): unknown {
   if (Array.isArray(data)) {
@@ -44,6 +45,8 @@ export interface MCPServerOptions {
   userId?: string;
   /** Tool filter context — excludes tools irrelevant to the current session. */
   filter?: ToolFilterContext;
+  /** When set, sandbox tools execute locally with host audit gate. */
+  localSandbox?: { client: IPCClient; workspace: string };
 }
 
 // ── Action maps for tools with irregular IPC action names ──
@@ -69,6 +72,11 @@ export function createIPCMcpServer(client: IPCClient, opts?: MCPServerOptions): 
       return errorResult(err);
     }
   }
+
+  // Local sandbox executor for container-local tool execution
+  const sandbox = opts?.localSandbox
+    ? createLocalSandbox({ client: opts.localSandbox.client, workspace: opts.localSandbox.workspace })
+    : null;
 
   // Build name set of allowed tools based on filter context
   const allowedNames = opts?.filter
@@ -302,12 +310,15 @@ export function createIPCMcpServer(client: IPCClient, opts?: MCPServerOptions): 
     ),
 
     // ── Sandbox (singleton tools for bash/file ops) ──
+    // When localSandbox is set, tools execute in-container with host audit gate.
     tool('bash',
       'Execute a bash command in the workspace directory.',
       {
         command: z.string().describe('The bash command to execute'),
       },
-      (args) => ipcCall('sandbox_bash', args),
+      sandbox
+        ? async (args) => textResult(await sandbox.bash(args.command))
+        : (args) => ipcCall('sandbox_bash', args),
     ),
 
     tool('read_file',
@@ -315,7 +326,9 @@ export function createIPCMcpServer(client: IPCClient, opts?: MCPServerOptions): 
       {
         path: z.string().describe('Relative path to the file'),
       },
-      (args) => ipcCall('sandbox_read_file', args),
+      sandbox
+        ? async (args) => textResult(await sandbox.readFile(args.path))
+        : (args) => ipcCall('sandbox_read_file', args),
     ),
 
     tool('write_file',
@@ -324,7 +337,9 @@ export function createIPCMcpServer(client: IPCClient, opts?: MCPServerOptions): 
         path: z.string().describe('Relative path to the file'),
         content: z.string().describe('Content to write'),
       },
-      (args) => ipcCall('sandbox_write_file', args),
+      sandbox
+        ? async (args) => textResult(await sandbox.writeFile(args.path, args.content))
+        : (args) => ipcCall('sandbox_write_file', args),
     ),
 
     tool('edit_file',
@@ -334,7 +349,9 @@ export function createIPCMcpServer(client: IPCClient, opts?: MCPServerOptions): 
         old_string: z.string().describe('Text to find'),
         new_string: z.string().describe('Replacement text'),
       },
-      (args) => ipcCall('sandbox_edit_file', args),
+      sandbox
+        ? async (args) => textResult(await sandbox.editFile(args.path, args.old_string, args.new_string))
+        : (args) => ipcCall('sandbox_edit_file', args),
     ),
   ];
 

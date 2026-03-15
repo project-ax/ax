@@ -2,6 +2,7 @@ import type { AgentTool } from '@mariozechner/pi-agent-core';
 import type { IPCClient } from './ipc-client.js';
 import { TOOL_CATALOG, filterTools } from './tool-catalog.js';
 import type { ToolFilterContext } from './tool-catalog.js';
+import { createLocalSandbox } from './local-sandbox.js';
 
 function text(t: string) {
   return { content: [{ type: 'text' as const, text: t }], details: undefined };
@@ -12,6 +13,8 @@ export interface IPCToolsOptions {
   userId?: string;
   /** Tool filter context — excludes tools irrelevant to the current session. */
   filter?: ToolFilterContext;
+  /** When set, sandbox tools execute locally with host audit gate. */
+  localSandbox?: { client: IPCClient; workspace: string };
 }
 
 /** Create tools that route through IPC to the host process. */
@@ -24,6 +27,11 @@ export function createIPCTools(client: IPCClient, opts?: IPCToolsOptions): Agent
       return text(`Error: ${(err as Error).message}`);
     }
   }
+
+  // Lazily create local sandbox executor if configured
+  const sandbox = opts?.localSandbox
+    ? createLocalSandbox({ client: opts.localSandbox.client, workspace: opts.localSandbox.workspace })
+    : null;
 
   const catalog = opts?.filter ? filterTools(opts.filter) : TOOL_CATALOG;
 
@@ -47,6 +55,20 @@ export function createIPCTools(client: IPCClient, opts?: IPCToolsOptions): Agent
         // Singleton
         action = spec.singletonAction ?? spec.name;
         callParams = p;
+      }
+
+      // Route sandbox tools to local executor when in container
+      if (sandbox && spec.category === 'sandbox') {
+        switch (action) {
+          case 'sandbox_bash':
+            return text(JSON.stringify(await sandbox.bash(callParams.command as string)));
+          case 'sandbox_read_file':
+            return text(JSON.stringify(await sandbox.readFile(callParams.path as string)));
+          case 'sandbox_write_file':
+            return text(JSON.stringify(await sandbox.writeFile(callParams.path as string, callParams.content as string)));
+          case 'sandbox_edit_file':
+            return text(JSON.stringify(await sandbox.editFile(callParams.path as string, callParams.old_string as string, callParams.new_string as string)));
+        }
       }
 
       // Inject userId only for identity tool's user_write type

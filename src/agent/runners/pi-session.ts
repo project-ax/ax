@@ -211,6 +211,7 @@ function makeErrorMessage(errorText: string, api = 'ax-ipc'): AssistantMessage {
 
 import { TOOL_CATALOG, filterTools, normalizeOrigin, normalizeIdentityFile } from '../tool-catalog.js';
 import type { ToolFilterContext } from '../tool-catalog.js';
+import { createLocalSandbox } from '../local-sandbox.js';
 
 function text(t: string) {
   return { content: [{ type: 'text' as const, text: t }], details: undefined };
@@ -221,6 +222,8 @@ interface IPCToolDefsOptions {
   userId?: string;
   /** Tool filter context — excludes tools irrelevant to the current session. */
   filter?: ToolFilterContext;
+  /** When set, sandbox tools execute locally with host audit gate. */
+  localSandbox?: { client: IPCClient; workspace: string };
 }
 
 function createIPCToolDefinitions(client: IPCClient, opts?: IPCToolDefsOptions): ToolDefinition[] {
@@ -234,6 +237,11 @@ function createIPCToolDefinitions(client: IPCClient, opts?: IPCToolDefsOptions):
       return text(`Error: ${(err as Error).message}`);
     }
   }
+
+  // Lazily create local sandbox executor if configured
+  const sandbox = opts?.localSandbox
+    ? createLocalSandbox({ client: opts.localSandbox.client, workspace: opts.localSandbox.workspace })
+    : null;
 
   // Cast params to Record<string, unknown> since TypeBox Static types
   // resolve to unknown in this context but IPC just forwards them as-is.
@@ -261,6 +269,20 @@ function createIPCToolDefinitions(client: IPCClient, opts?: IPCToolDefsOptions):
       } else {
         action = spec.singletonAction ?? spec.name;
         callParams = raw;
+      }
+
+      // Route sandbox tools to local executor when in container
+      if (sandbox && spec.category === 'sandbox') {
+        switch (action) {
+          case 'sandbox_bash':
+            return text(JSON.stringify(await sandbox.bash(callParams.command as string)));
+          case 'sandbox_read_file':
+            return text(JSON.stringify(await sandbox.readFile(callParams.path as string)));
+          case 'sandbox_write_file':
+            return text(JSON.stringify(await sandbox.writeFile(callParams.path as string, callParams.content as string)));
+          case 'sandbox_edit_file':
+            return text(JSON.stringify(await sandbox.editFile(callParams.path as string, callParams.old_string as string, callParams.new_string as string)));
+        }
       }
 
       // Inject userId only for user_write action
@@ -339,9 +361,15 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
   const { systemPrompt, toolFilter } = buildSystemPrompt(config);
 
   // All tools (including bash/file ops) now come through IPC to the host process.
-  // In local mode, sandbox tool handlers execute directly on the host filesystem.
-  // In k8s mode (Phase 2), they'll dispatch to sandbox pods via NATS.
-  const ipcToolDefs = createIPCToolDefinitions(client, { userId: config.userId, filter: toolFilter });
+  // When running in a container (docker/apple/k8s), sandbox tools execute locally
+  // with host audit gate instead of dispatching through the host.
+  const CONTAINER_SANDBOXES = new Set(['docker', 'apple', 'k8s']);
+  const useLocalSandbox = CONTAINER_SANDBOXES.has(config.sandboxType ?? '');
+  const ipcToolDefs = createIPCToolDefinitions(client, {
+    userId: config.userId,
+    filter: toolFilter,
+    ...(useLocalSandbox ? { localSandbox: { client, workspace: config.workspace } } : {}),
+  });
 
   logger.debug('session_config', {
     systemPromptLength: systemPrompt.length,
