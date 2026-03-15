@@ -351,29 +351,87 @@ export async function create(config: Config, _name?: string, opts?: CreateOption
         }
       }
 
-      // Path 2: Keyword search (fallback or when no embedding provided)
-      let items = q.query
-        ? await store.searchContent(q.query, scope, limit, q.userId)
-        : await store.listByScope(scope, limit, q.agentId, q.userId);
+      // Path 2: Keyword / parallel search (when no pre-computed embedding provided)
+      let scored: Array<{ item: Parameters<typeof toEntry>[0]; score: number }>;
 
-      if (q.agentId && q.query) {
-        items = items.filter(i => i.agentId === q.agentId);
+      if (q.query) {
+        // Run LIKE search and (optionally) embedding search in parallel
+        const likePromise = store.searchContent(q.query, scope, limit, q.userId);
+
+        const noEmbResults = {
+          items: [] as Awaited<ReturnType<typeof store.getByIds>>,
+          distances: new Map<string, number>(),
+        };
+        const embPromise = (embeddingClient.available && embeddingStore.available)
+          ? embeddingClient.embed([q.query]).then(async ([vector]) => {
+              const similar = await embeddingStore.findSimilar(vector, limit, scope, q.userId);
+              if (similar.length === 0) return noEmbResults;
+              const items = await store.getByIds(similar.map(s => s.itemId));
+              return { items, distances: new Map(similar.map(s => [s.itemId, s.distance])) };
+            }).catch((err: unknown) => {
+              logger.warn('parallel_embedding_failed', { error: (err as Error).message });
+              return noEmbResults;
+            })
+          : Promise.resolve(noEmbResults);
+
+        const [likeItems, { items: embItems, distances }] = await Promise.all([likePromise, embPromise]);
+
+        // Merge: embedding results first (have distance scores), then LIKE-only
+        const seen = new Set<string>();
+        scored = [];
+        for (const item of embItems) {
+          seen.add(item.id);
+          const distance = distances.get(item.id) ?? 1;
+          scored.push({
+            item,
+            score: salienceScore({
+              similarity: 1 / (1 + distance),
+              reinforcementCount: item.reinforcementCount,
+              lastReinforcedAt: item.lastReinforcedAt,
+              recencyDecayDays: 30,
+            }),
+          });
+        }
+        for (const item of likeItems) {
+          if (seen.has(item.id)) continue;
+          scored.push({
+            item,
+            score: salienceScore({
+              similarity: 1.0,
+              reinforcementCount: item.reinforcementCount,
+              lastReinforcedAt: item.lastReinforcedAt,
+              recencyDecayDays: 30,
+            }),
+          });
+        }
+
+        if (q.agentId) {
+          scored = scored.filter(s => s.item.agentId === q.agentId);
+        }
+
+        logger.debug('query_parallel_search', {
+          likeCount: likeItems.length,
+          embeddingCount: embItems.length,
+          mergedCount: scored.length,
+        });
+      } else {
+        // No query string — list by scope
+        const items = await store.listByScope(scope, limit, q.agentId, q.userId);
+        scored = items.map(item => ({
+          item,
+          score: salienceScore({
+            similarity: 1.0,
+            reinforcementCount: item.reinforcementCount,
+            lastReinforcedAt: item.lastReinforcedAt,
+            recencyDecayDays: 30,
+          }),
+        }));
       }
 
-      // Rank by salience
-      const ranked = items.map(item => ({
-        item,
-        score: salienceScore({
-          similarity: 1.0,
-          reinforcementCount: item.reinforcementCount,
-          lastReinforcedAt: item.lastReinforcedAt,
-          recencyDecayDays: 30,
-        }),
-      }));
-      ranked.sort((a, b) => b.score - a.score);
+      scored.sort((a, b) => b.score - a.score);
 
       // ── Build item results ──
-      const sliced = ranked.slice(0, limit);
+      const sliced = scored.slice(0, limit);
       // Reinforce accessed items (fire-and-forget)
       for (const { item } of sliced) {
         store.reinforce(item.id).catch(() => {});
@@ -402,8 +460,14 @@ export async function create(config: Config, _name?: string, opts?: CreateOption
 
           if (content.trim() === `# ${cat}`) continue; // skip empty defaults
 
-          // For keyword queries, only include summaries that match
-          if (q.query && !content.toLowerCase().includes(q.query.toLowerCase())) continue;
+          // For keyword queries, only include summaries where at least one term matches
+          if (q.query) {
+            const lc = content.toLowerCase();
+            const queryTerms = q.query.includes(' OR ')
+              ? q.query.split(' OR ').map(t => t.trim().toLowerCase()).filter(Boolean)
+              : q.query.split(/\s+/).map(t => t.toLowerCase()).filter(Boolean);
+            if (!queryTerms.some(term => lc.includes(term))) continue;
+          }
 
           summaryEntries.push({
             id: `${SUMMARY_ID_PREFIX}${cat}`,

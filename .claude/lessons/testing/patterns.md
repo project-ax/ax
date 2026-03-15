@@ -1,5 +1,11 @@
 # Testing Patterns
 
+### vi.mock constructor mocks must use regular functions, not arrow functions or vi.fn()
+**Date:** 2026-03-15
+**Context:** Mocking EmbeddingStore class for cortex provider parallel search tests. `vi.fn().mockImplementation(() => inst)` fails with "not a constructor" when the mock is called with `new`.
+**Lesson:** When mocking a class in `vi.mock` that's instantiated with `new`, use a named regular function: `EmbeddingStore: function EmbeddingStore() { return mockInst; }`. Arrow functions can't be constructors, and `vi.fn()` inside `vi.mock` factories doesn't properly support `new` in vitest v4. The regular function returning an object works because `new` uses the returned object.
+**Tags:** vitest, vi.mock, constructor, class mock, EmbeddingStore
+
 ### Sandbox providers use source-level test assertions (read source, check patterns)
 **Date:** 2026-03-01
 **Context:** Updating sandbox-isolation.test.ts after changing seatbelt/subprocess env construction

@@ -1,5 +1,21 @@
 # Providers: Memory
 
+## [2026-03-15 14:21] — Parallel LIKE + embedding search for memory queries
+
+**Task:** When querying memory with a string (no pre-computed embedding), run both LIKE keyword search and embedding semantic search in parallel, merge and deduplicate results
+**What I did:** Modified `query()` in cortex provider to run `store.searchContent()` and `embeddingClient.embed()` → `embeddingStore.findSimilar()` → `store.getByIds()` via `Promise.all`. Embedding results are merged first (with distance-based similarity), LIKE-only results follow (similarity=1.0). Deduplication by item ID. Added 4 tests covering merge, dedup, unavailable-client fallback, and embed-error graceful degradation. Used `vi.hoisted` + `vi.mock` for embedding client/store mocks.
+**Files touched:** `src/providers/memory/cortex/provider.ts`, `tests/providers/memory/cortex/provider.test.ts`
+**Outcome:** Success — 178 memory tests pass, 2400/2401 full suite (1 pre-existing macOS symlink test failure)
+**Notes:** EmbeddingStore mock required a regular function (not arrow) to work as a constructor with `new`. `vi.fn().mockImplementation(() => inst)` doesn't work as constructor in vitest v4 — use `function EmbeddingStore() { return inst; }` instead.
+
+## [2026-03-15 13:30] — Fix multi-term memory query bug
+
+**Task:** Fix bug where querying multiple memory values (e.g. "foo and bar") returned no results even though individual queries worked
+**What I did:** (1) Fixed `searchContent()` in `items-store.ts` to split space-separated queries into individual LIKE conditions (previously only split on literal ` OR `). (2) Fixed summary filtering in `provider.ts` to check individual terms against summary content instead of the full query string. (3) Added test for space-separated multi-term queries.
+**Files touched:** `src/providers/memory/cortex/items-store.ts`, `src/providers/memory/cortex/provider.ts`, `tests/providers/memory/cortex/items-store.test.ts`
+**Outcome:** Success — all 174 memory tests pass (13 files)
+**Notes:** Root cause: two query paths exist — auto-recall (via `extractQueryTerms()` which joins with ` OR `) and direct agent tool calls (raw query string). The direct path sent space-separated terms which `searchContent()` treated as a single LIKE pattern, matching nothing.
+
 ## [2026-03-06 13:55] — Fix acceptance test issues: read/query reinforcement and write reinforcementCount
 
 **Task:** Implement remaining fixes from tests/acceptance/cortex/fixes.md (FIX-3, FIX-4, FIX-5)

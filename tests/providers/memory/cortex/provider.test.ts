@@ -11,7 +11,48 @@ import type { LLMProvider, ChatChunk } from '../../../../src/providers/llm/types
 import type { EventBusProvider, StreamEvent } from '../../../../src/providers/eventbus/types.js';
 import { SUMMARY_ID_PREFIX } from '../../../../src/providers/memory/cortex/summary-store.js';
 
+// Controllable mocks for embedding client and store (defaults: disabled)
+const { mockEmbedFn, mockFindSimilarFn, mockEmbeddingClient, mockEmbeddingStoreInst } = vi.hoisted(() => {
+  const mockEmbedFn = vi.fn();
+  const mockFindSimilarFn = vi.fn();
+  const mockEmbeddingClient = {
+    embed: mockEmbedFn,
+    dimensions: 1536,
+    available: false,
+  };
+  const mockEmbeddingStoreInst = {
+    ready: vi.fn().mockResolvedValue(undefined),
+    available: false,
+    findSimilar: mockFindSimilarFn,
+    upsert: vi.fn().mockResolvedValue(undefined),
+    delete: vi.fn().mockResolvedValue(undefined),
+    listUnembedded: vi.fn().mockResolvedValue([]),
+    close: vi.fn().mockResolvedValue(undefined),
+  };
+  return { mockEmbedFn, mockFindSimilarFn, mockEmbeddingClient, mockEmbeddingStoreInst };
+});
+
+vi.mock('../../../../src/utils/embedding-client.js', () => ({
+  createEmbeddingClient: vi.fn(() => mockEmbeddingClient),
+}));
+
+vi.mock('../../../../src/providers/memory/cortex/embedding-store.js', () => ({
+  EmbeddingStore: function EmbeddingStore() { return mockEmbeddingStoreInst; },
+}));
+
 const config = {} as Config;
+
+// Reset embedding mocks to disabled state before each test
+beforeEach(() => {
+  mockEmbeddingClient.available = false;
+  mockEmbedFn.mockReset();
+  mockFindSimilarFn.mockReset().mockResolvedValue([]);
+  mockEmbeddingStoreInst.available = false;
+  mockEmbeddingStoreInst.upsert.mockReset().mockResolvedValue(undefined);
+  mockEmbeddingStoreInst.delete.mockReset().mockResolvedValue(undefined);
+  mockEmbeddingStoreInst.listUnembedded.mockReset().mockResolvedValue([]);
+  mockEmbeddingStoreInst.ready.mockReset().mockResolvedValue(undefined);
+});
 
 /** Create an async iterable from an array of chunks. */
 async function* chunksFrom(chunks: ChatChunk[]): AsyncIterable<ChatChunk> {
@@ -494,5 +535,83 @@ describe('cortex provider proactive hints', () => {
     await provider.memorize!([
       { role: 'user', content: 'I have a dog' },
     ]);
+  });
+});
+
+describe('cortex provider parallel search', () => {
+  let memory: MemoryProvider;
+  let testHome: string;
+
+  beforeEach(async () => {
+    testHome = await mkdtemp(join(tmpdir(), `memfs-parallel-${randomUUID()}-`));
+    process.env.AX_HOME = testHome;
+    memory = await create(config);
+  });
+
+  afterEach(async () => {
+    try { await rm(testHome, { recursive: true, force: true }); } catch {}
+    delete process.env.AX_HOME;
+  });
+
+  it('merges results from LIKE and embedding search', async () => {
+    const id1 = await memory.write({ scope: 'default', content: 'TypeScript is great' });
+    const id2 = await memory.write({ scope: 'default', content: 'JavaScript patterns' });
+    const id3 = await memory.write({ scope: 'default', content: 'Python data science' });
+
+    // Enable parallel embedding search
+    mockEmbeddingClient.available = true;
+    mockEmbeddingStoreInst.available = true;
+    mockEmbedFn.mockResolvedValue([new Float32Array([0.1])]);
+    mockFindSimilarFn.mockResolvedValue([
+      { itemId: id2, distance: 0.5 },
+      { itemId: id3, distance: 0.8 },
+    ]);
+
+    // LIKE "TypeScript" finds id1; embedding finds id2, id3
+    const results = await memory.query({ scope: 'default', query: 'TypeScript' });
+    const items = results.filter(r => !r.id?.startsWith(SUMMARY_ID_PREFIX));
+    expect(items).toHaveLength(3);
+    const ids = items.map(r => r.id);
+    expect(ids).toContain(id1);
+    expect(ids).toContain(id2);
+    expect(ids).toContain(id3);
+  });
+
+  it('deduplicates when both searches return the same item', async () => {
+    const id1 = await memory.write({ scope: 'default', content: 'TypeScript is great' });
+
+    mockEmbeddingClient.available = true;
+    mockEmbeddingStoreInst.available = true;
+    mockEmbedFn.mockResolvedValue([new Float32Array([0.1])]);
+    mockFindSimilarFn.mockResolvedValue([{ itemId: id1, distance: 0.3 }]);
+
+    // Both LIKE and embedding find id1 — should appear only once
+    const results = await memory.query({ scope: 'default', query: 'TypeScript' });
+    const items = results.filter(r => !r.id?.startsWith(SUMMARY_ID_PREFIX));
+    expect(items).toHaveLength(1);
+    expect(items[0].id).toBe(id1);
+  });
+
+  it('returns LIKE results when embedding client is unavailable', async () => {
+    await memory.write({ scope: 'default', content: 'TypeScript is great' });
+
+    // Embedding stays disabled (default)
+    const results = await memory.query({ scope: 'default', query: 'TypeScript' });
+    const items = results.filter(r => !r.id?.startsWith(SUMMARY_ID_PREFIX));
+    expect(items).toHaveLength(1);
+    expect(items[0].content).toContain('TypeScript');
+  });
+
+  it('returns LIKE results when embedding call fails', async () => {
+    await memory.write({ scope: 'default', content: 'TypeScript is great' });
+
+    mockEmbeddingClient.available = true;
+    mockEmbeddingStoreInst.available = true;
+    mockEmbedFn.mockRejectedValue(new Error('API unavailable'));
+
+    const results = await memory.query({ scope: 'default', query: 'TypeScript' });
+    const items = results.filter(r => !r.id?.startsWith(SUMMARY_ID_PREFIX));
+    expect(items).toHaveLength(1);
+    expect(items[0].content).toContain('TypeScript');
   });
 });

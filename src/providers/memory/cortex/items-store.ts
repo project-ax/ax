@@ -154,8 +154,11 @@ export class ItemsStore {
       q = q.where('scope', '=', scope);
     }
 
-    // Split OR-joined terms (from extractQueryTerms) into individual LIKE conditions
-    const terms = query.split(' OR ').map(t => t.trim()).filter(Boolean);
+    // Split into individual terms for OR matching.
+    // Supports both "foo OR bar" (from extractQueryTerms) and "foo bar" (space-separated).
+    const terms = query.includes(' OR ')
+      ? query.split(' OR ').map(t => t.trim()).filter(Boolean)
+      : query.split(/\s+/).filter(Boolean);
     if (terms.length > 1) {
       q = q.where(eb =>
         eb.or(terms.map(term => eb('content', 'like', `%${term}%`))));

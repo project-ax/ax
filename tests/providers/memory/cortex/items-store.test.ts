@@ -112,6 +112,19 @@ describe('ItemsStore', () => {
     expect(results).toHaveLength(3);
   });
 
+  it('searchContent splits space-separated terms into individual LIKE conditions', async () => {
+    await store.insert({ ...sampleItem, content: 'foo=12', contentHash: 'foo_hash_12345678' });
+    await store.insert({ ...sampleItem, content: 'bar=34', contentHash: 'bar_hash_12345678' });
+    await store.insert({ ...sampleItem, content: 'unrelated item', contentHash: 'unrel_hash_123456' });
+
+    // Simulates agent sending space-separated query (not pre-processed by extractQueryTerms)
+    const results = await store.searchContent('foo bar', 'default');
+    expect(results).toHaveLength(2);
+    const contents = results.map(i => i.content);
+    expect(contents).toContain('foo=12');
+    expect(contents).toContain('bar=34');
+  });
+
   it('scopes queries by agentId when provided', async () => {
     await store.insert({ ...sampleItem, agentId: 'agent_1' });
     await store.insert({ ...sampleItem, content: 'Other agent fact', contentHash: 'eeeeeeeeeeeeeeee', agentId: 'agent_2' });
