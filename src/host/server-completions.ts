@@ -606,20 +606,15 @@ export async function processCompletion(
     const CONTAINER_SANDBOXES = new Set(['docker', 'apple', 'k8s']);
     const isContainerSandbox = CONTAINER_SANDBOXES.has(config.providers.sandbox);
 
-    // For container sandboxes (apple/docker), run the agent as a local subprocess
-    // instead of inside the container. This decouples the agent loop from the
-    // sandbox — the agent only needs IPC to the host, while sandbox tools can
-    // lazily spawn containers on demand. k8s already does this in
-    // agent-runtime-process.ts; this extends the pattern to local container modes.
-    let agentSandbox = providers.sandbox;
-    if (isContainerSandbox && config.providers.sandbox !== 'k8s') {
-      const subprocessModule = await import('../providers/sandbox/subprocess.js');
-      agentSandbox = await subprocessModule.create(config);
-    }
+    // The agent process runs inside the container for all container sandboxes
+    // (docker, apple, k8s). The sandbox provider's spawn() handles network
+    // isolation, resource limits, and volume mounts. Tool calls (sandbox_bash)
+    // spawn separate ephemeral containers via the host.
+    const agentSandbox = providers.sandbox;
 
-    // agentInContainer: true only when the agent itself runs in a container.
-    // With lazy sandbox, apple/docker agents run as subprocess on the host.
-    const agentInContainer = isContainerSandbox && config.providers.sandbox === 'k8s';
+    // agentInContainer: true when the agent itself runs in a container.
+    // All container sandboxes now run the agent in-container.
+    const agentInContainer = isContainerSandbox;
 
     const spawnCommand = agentInContainer
       ? ['/opt/ax/dist/agent/runner.js']
@@ -816,7 +811,7 @@ export async function processCompletion(
       stderr = '';
 
       const proc = await agentSandbox.spawn(sandboxConfig);
-      reqLogger.debug('agent_spawn', { sandbox: 'subprocess', attempt });
+      reqLogger.debug('agent_spawn', { sandbox: config.providers.sandbox, attempt });
       eventBus?.emit({
         type: 'completion.agent',
         requestId,
