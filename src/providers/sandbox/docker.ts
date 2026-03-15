@@ -57,8 +57,8 @@ export async function create(_config: Config): Promise<SandboxProvider> {
   return {
     async spawn(config: SandboxConfig): Promise<SandboxProcess> {
       const [cmd, ...args] = config.command;
-      const socketDir = resolve(config.ipcSocket, '..');
       const containerName = `ax-agent-${randomUUID().slice(0, 8)}`;
+      const hasIpcSocket = !!config.ipcSocket;
 
       const dockerArgs: string[] = [
         'run',
@@ -80,7 +80,8 @@ export async function create(_config: Config): Promise<SandboxProvider> {
 
         // Volume mounts — canonical paths so the LLM sees simple /scratch
         '-v', `${config.workspace}:${CANONICAL.scratch}:rw`,
-        '-v', `${socketDir}:${socketDir}:rw`,
+        // IPC socket mount — only for agent containers, not ephemeral tool containers
+        ...(hasIpcSocket ? ['-v', `${resolve(config.ipcSocket, '..')}:${resolve(config.ipcSocket, '..')}:rw`] : []),
         // Enterprise mounts — canonical paths (rw per-tier when workspace provider active)
         ...(config.agentWorkspace ? ['-v', `${config.agentWorkspace}:${CANONICAL.agent}:${config.agentWorkspaceWritable ? 'rw' : 'ro'}`] : []),
         ...(config.userWorkspace ? ['-v', `${config.userWorkspace}:${CANONICAL.user}:${config.userWorkspaceWritable ? 'rw' : 'ro'}`] : []),

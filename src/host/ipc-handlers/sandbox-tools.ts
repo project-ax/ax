@@ -16,6 +16,7 @@ import type { IPCContext } from '../ipc-server.js';
 import { safePath } from '../../utils/safe-path.js';
 import type { NATSSandboxDispatcher } from '../nats-sandbox-dispatch.js';
 import type { SandboxToolRequest } from '../../sandbox-worker/types.js';
+import type { SandboxProvider } from '../../providers/sandbox/types.js';
 import { getLogger } from '../../logger.js';
 
 const logger = getLogger().child({ component: 'sandbox-tools' });
@@ -39,6 +40,13 @@ export interface SandboxToolHandlerOptions {
    * The dispatcher uses requestId to track which pod to reuse.
    */
   requestIdMap?: Map<string, string>;
+
+  /**
+   * Container sandbox provider (docker/apple) for spawning ephemeral
+   * tool containers. When set, sandbox_bash dispatches commands to
+   * containers instead of executing them locally on the host.
+   */
+  containerSandbox?: SandboxProvider;
 }
 
 function resolveWorkspace(opts: SandboxToolHandlerOptions, ctx: IPCContext): string {
@@ -101,8 +109,45 @@ async function dispatchViaNATS(
   }
 }
 
+/**
+ * Spawn an ephemeral container to execute a command, collect output, and return.
+ * Used for sandbox_bash when docker/apple sandbox is active.
+ */
+async function execInContainer(
+  sandbox: SandboxProvider,
+  workspace: string,
+  command: string,
+): Promise<{ output: string }> {
+  const proc = await sandbox.spawn({
+    workspace,
+    ipcSocket: '',  // not needed for tool containers
+    command: ['sh', '-c', command],
+    timeoutSec: 30,
+    memoryMB: 256,
+  });
+
+  let output = '';
+  const stdoutDone = (async () => {
+    for await (const chunk of proc.stdout) {
+      output += chunk.toString();
+    }
+  })();
+  const stderrDone = (async () => {
+    for await (const chunk of proc.stderr) {
+      output += chunk.toString();
+    }
+  })();
+
+  await Promise.all([stdoutDone, stderrDone]);
+  const exitCode = await proc.exitCode;
+  if (exitCode !== 0) {
+    return { output: `Exit code ${exitCode}\n${output}` };
+  }
+  return { output };
+}
+
 export function createSandboxToolHandlers(providers: ProviderRegistry, opts: SandboxToolHandlerOptions) {
-  const { natsDispatcher } = opts;
+  const { natsDispatcher, containerSandbox } = opts;
 
   return {
     sandbox_bash: async (req: any, ctx: IPCContext) => {
@@ -119,6 +164,30 @@ export function createSandboxToolHandlers(providers: ProviderRegistry, opts: San
         if ('output' in result) return { output: result.output };
         if ('error' in result) return { output: result.error };
         return result;
+      }
+
+      // Container dispatch mode (docker/apple)
+      if (containerSandbox) {
+        const workspace = resolveWorkspace(opts, ctx);
+        try {
+          const result = await execInContainer(containerSandbox, workspace, req.command);
+          await providers.audit.log({
+            action: 'sandbox_bash',
+            sessionId: ctx.sessionId,
+            args: { command: req.command.slice(0, 200), dispatchMode: 'container' },
+            result: 'success',
+          });
+          return result;
+        } catch (err: unknown) {
+          logger.error('container_dispatch_error', { error: (err as Error).message });
+          await providers.audit.log({
+            action: 'sandbox_bash',
+            sessionId: ctx.sessionId,
+            args: { command: req.command.slice(0, 200), dispatchMode: 'container' },
+            result: 'error',
+          });
+          return { output: `Container dispatch error: ${(err as Error).message}` };
+        }
       }
 
       // Local execution mode

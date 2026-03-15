@@ -88,6 +88,9 @@ export interface IPCHandlerOptions {
   natsDispatcher?: NATSSandboxDispatcher;
   /** Maps sessionId → requestId for per-turn pod affinity tracking. */
   requestIdMap?: Map<string, string>;
+  /** Container sandbox provider (docker/apple) for spawning ephemeral tool containers.
+   *  When set, sandbox_bash dispatches to containers instead of executing locally. */
+  containerSandbox?: import('../providers/sandbox/types.js').SandboxProvider;
 }
 
 export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerOptions) {
@@ -124,6 +127,7 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
       workspaceMap: opts.workspaceMap,
       natsDispatcher: opts.natsDispatcher,
       requestIdMap: opts.requestIdMap,
+      containerSandbox: opts.containerSandbox,
     }) : {}),
   };
 
