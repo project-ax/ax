@@ -2,6 +2,14 @@
 
 Architecture analysis, gap analysis, design documents, implementation plans.
 
+## [2026-03-15 14:26] — Review local sandbox execution architecture plan
+
+**Task:** Review `docs/plans/2026-03-15-local-sandbox-execution.md` and provide actionable feedback.
+**What I did:** Read the full plan and appended a structured review section covering strengths, concrete risk gaps (execution hardening, network isolation, k8s cleanup, migration sequencing, observability), and recommended additions (rollout/backout, compatibility matrix, failure modes, security checklist, DoD).
+**Files touched:** docs/plans/2026-03-15-local-sandbox-execution.md, .claude/journal/docs/plans.md, .claude/journal/docs/index.md
+**Outcome:** Success — feedback is now embedded directly in the plan document for implementation teams.
+**Notes:** Emphasized turning security/runtime claims into testable acceptance criteria to reduce migration risk.
+
 ## [2026-03-11 13:00] — Keep agent/user workspaces as filesystem mounts in storage plan
 
 **Task:** Fix plan that incorrectly proposed moving agent/user workspace artifacts to DB
