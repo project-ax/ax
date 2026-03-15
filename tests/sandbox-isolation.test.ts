@@ -332,9 +332,13 @@ describe('server workspace isolation', () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(resolve('src/host/server-completions.ts'), 'utf-8');
 
-    // Workspace is NOT passed as a CLI arg — it's set via canonical env
+    // Workspace is NOT passed as a CLI arg to the agent — it's set via canonical env
     // vars by the sandbox provider. Identity and skills come via stdin payload.
-    const spawnSection = source.slice(source.indexOf('spawnCommand'));
+    // Note: the spawnCommand section only covers the agent spawn args, not the
+    // three-phase workspace-cli provision/cleanup args which are separate spawn calls.
+    const spawnStart = source.indexOf('spawnCommand');
+    const spawnEnd = source.indexOf('needsProvisioning', spawnStart);
+    const spawnSection = source.slice(spawnStart, spawnEnd !== -1 ? spawnEnd : undefined);
     expect(spawnSection).not.toContain("'--workspace'");
     expect(spawnSection).not.toContain("'--skills'");
     expect(spawnSection).not.toContain("'--agent-dir'");

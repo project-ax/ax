@@ -795,12 +795,37 @@ export async function processCompletion(
       ipcSocket: ipcSocketPath,
       timeoutSec: config.sandbox.timeout_sec,
       memoryMB: config.sandbox.memory_mb,
+      cpus: config.sandbox.tiers?.default?.cpus ?? 1,
       command: spawnCommand,
       agentWorkspace: agentWsPath,
       userWorkspace: userWsPath,
       agentWorkspaceWritable,
       userWorkspaceWritable,
     };
+
+    // ── Three-phase container orchestration ──
+    // When workspace has GCS config, run provision phase (with network) before
+    // the agent and cleanup phase (with network) after.
+    const workspaceGitUrl = process.env.AX_WORKSPACE_GIT_URL;
+    const workspaceGcsPrefix = process.env.AX_WORKSPACE_GCS_PREFIX;
+    const needsProvisioning = isContainerSandbox && workspaceGitUrl;
+
+    if (needsProvisioning) {
+      reqLogger.debug('provision_phase_start', { gitUrl: workspaceGitUrl });
+      const provisionArgs = [
+        '/opt/ax/dist/agent/workspace-cli.js', 'provision',
+        '--workspace', workspace,
+        '--session', sessionId,
+        '--git-url', workspaceGitUrl,
+        ...(workspaceGcsPrefix ? ['--session-gcs-prefix', workspaceGcsPrefix] : []),
+      ];
+      await agentSandbox.spawn({
+        ...sandboxConfig,
+        command: ['node', ...provisionArgs],
+        network: true,  // provision phase needs network for GCS/git
+      }).then(proc => proc.exitCode);
+      reqLogger.debug('provision_phase_done');
+    }
 
     let response = '';
     let stderr = '';
@@ -1002,6 +1027,27 @@ export async function processCompletion(
         }
       } catch (err) {
         reqLogger.warn('workspace_commit_failed', { error: (err as Error).message });
+      }
+    }
+
+    // ── Phase 3: Cleanup (with network) ──
+    if (needsProvisioning) {
+      try {
+        reqLogger.debug('cleanup_phase_start');
+        const cleanupArgs = [
+          '/opt/ax/dist/agent/workspace-cli.js', 'cleanup',
+          '--workspace', workspace,
+          '--session', sessionId,
+          ...(workspaceGcsPrefix ? ['--push-changes', 'true', '--update-cache', 'true'] : []),
+        ];
+        await agentSandbox.spawn({
+          ...sandboxConfig,
+          command: ['node', ...cleanupArgs],
+          network: true,  // cleanup phase needs network for GCS/git push
+        }).then(proc => proc.exitCode);
+        reqLogger.debug('cleanup_phase_done');
+      } catch (err) {
+        reqLogger.warn('cleanup_phase_failed', { error: (err as Error).message });
       }
     }
 

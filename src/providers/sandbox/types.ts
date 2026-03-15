@@ -5,7 +5,12 @@ export interface SandboxConfig {
   ipcSocket: string;
   timeoutSec?: number;
   memoryMB?: number;
+  cpus?: number;
   command: string[];
+
+  // ── Three-phase orchestration ──
+  /** When true, container has network access (provision/cleanup phases). Default: false. */
+  network?: boolean;
 
   // ── Enterprise mounts (optional) ──
   /** Agent's shared workspace: ~/.ax/agents/<id>/agent/workspace/ */

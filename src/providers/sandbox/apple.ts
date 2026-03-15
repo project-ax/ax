@@ -56,13 +56,13 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         '--rm',                                    // auto-remove container on exit
         '-i',                                      // interactive (stdin)
         '--name', containerName,                   // named for debugging
-        // No --network flag: Apple Container has no network by default.
-        // Each container runs in its own VM — no shared kernel, no network
-        // unless explicitly attached. This satisfies the security invariant.
+        // No network by default. When config.network is true (provision/cleanup),
+        // Apple Container needs an explicit --network flag to enable connectivity.
+        ...(config.network ? ['--network', 'default'] : []),
 
         // Resource limits
         '--memory', `${config.memoryMB ?? 256}m`,
-        '--cpus', '1',
+        '--cpus', String(config.cpus ?? 1),
 
         // Filesystem: writable root (no --read-only, no --tmpfs).
         // --publish-socket forwarding fails when the container-side socket path

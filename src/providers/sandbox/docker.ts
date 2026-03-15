@@ -65,11 +65,12 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         '--rm',                                    // auto-remove container on exit
         '-i',                                      // interactive (stdin)
         '--name', containerName,                   // named for debugging
-        '--network=none',                          // NO network access
+        // Network: disabled by default for run phase; enabled for provision/cleanup
+        ...(config.network ? [] : ['--network=none']),
 
         // Resource limits
         '--memory', `${config.memoryMB ?? 256}m`,
-        '--cpus', '1',
+        '--cpus', String(config.cpus ?? 1),
         '--pids-limit', String(DEFAULT_PID_LIMIT), // limit process count
 
         // Security hardening
