@@ -11,7 +11,7 @@
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Server as NetServer } from 'node:net';
-import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, watchFile, unwatchFile, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -516,19 +516,6 @@ export async function createServer(
   const defaultCtx = { sessionId: 'server', agentId: 'system', userId: defaultUserId };
   const ipcServer: NetServer = await createIPCServer(ipcSocketPath, handleIPC, defaultCtx);
   logger.debug('ipc_server_started', { socket: ipcSocketPath });
-
-  // Watchdog: detect if proxy.sock is deleted during operation.
-  // polls every 2s — logs immediately when the file disappears.
-  watchFile(ipcSocketPath, { interval: 2000 }, (curr) => {
-    if (curr.nlink === 0) {
-      const dirContents = existsSync(ipcSocketDir) ? readdirSync(ipcSocketDir) : ['<dir missing>'];
-      logger.error('ipc_socket_deleted', {
-        ipcSocketPath,
-        dirContents,
-        message: 'proxy.sock was deleted — investigating culprit',
-      });
-    }
-  });
 
   let httpServer: HttpServer | null = null;
   let tcpServer: HttpServer | null = null;
@@ -1099,7 +1086,6 @@ export async function createServer(
     orchestrator.shutdown();
 
     // Stop IPC server
-    unwatchFile(ipcSocketPath);
     try { ipcServer.close(); } catch {
       logger.debug('ipc_server_close_failed');
     }
