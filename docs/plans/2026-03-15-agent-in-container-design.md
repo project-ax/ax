@@ -1,7 +1,11 @@
 # Agent-in-Container Design
 
+> **Superseded by:** Local sandbox execution plan (2026-03-15-local-sandbox-execution.md).
+> Agent containers now execute tools locally with host audit gate.
+> Ephemeral tool containers and NATS sandbox-worker pods removed.
+
 **Date:** 2026-03-15
-**Status:** Proposed
+**Status:** Superseded
 
 ## Problem
 

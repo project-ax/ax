@@ -64,15 +64,15 @@ A few things are non-negotiable regardless of which profile you choose. These ar
 - Provider loading uses a **static allowlist** — no dynamic imports from config values. Ever.
 - **No web UI**. OpenClaw's dashboard was its #1 attack vector, so we solved that problem by not having one.
 
-### Sandbox Tiers
+### Container Architecture
 
-| Platform | Default | Escalation |
-|----------|---------|------------|
-| Linux | nsjail (~5ms start) | bwrap / Docker + gVisor |
-| macOS | Seatbelt (sandbox-exec) | Docker Desktop |
-| Kubernetes | k8s pods (gVisor runtime) | Configurable tier templates |
+| Platform | Container | Runtime |
+|----------|-----------|---------|
+| Linux | Docker | gVisor optional |
+| macOS | Apple Virtualization | Container framework |
+| Kubernetes | k8s pods | gVisor runtime class |
 
-We start with the lightest sandbox that does the job. If the agent needs heavier tools, we escalate mid-session. Most local invocations never need more than nsjail — it starts in 5 milliseconds and uses about 1MB of memory. In Kubernetes, sandbox pods are ephemeral and disposable — no state, no mount complexity, just isolated compute with network policies enforcing zero egress.
+Every agent runs inside a single container with a three-phase lifecycle: **provision** (with network, git clone, dependency install) → **run** (no network, tools execute locally) → **cleanup** (with network, push results). The host orchestrates the phases and maintains a tamper-proof audit log via the audit gate — every tool call is approved before execution.
 
 ## Security Profiles
 
@@ -239,7 +239,7 @@ Every subsystem is a swappable provider. Here's what ships in the box:
 | **Credentials** | plaintext, OS keychain |
 | **Skills** | readonly, git-backed (with screening) |
 | **Audit** | file (JSONL), database (queryable) |
-| **Sandbox** | subprocess, seatbelt, nsjail, bwrap, Docker, k8s (Kubernetes pods) |
+| **Sandbox** | subprocess, Docker, Apple Virtualization, k8s (Kubernetes pods) |
 | **Scheduler** | full (with active hours), plainjob |
 | **Screener** | static (rule-based) |
 | **Database** | SQLite (with sqlite-vec), PostgreSQL (with pgvector) |
