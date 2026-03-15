@@ -1,3 +1,11 @@
+## [2026-03-15 04:14] — Add Mermaid architecture and data-flow diagrams to deep docs
+
+**Task:** Address feedback on the deep architecture pack by adding visual diagrams and explicit data-flow views.
+**What I did:** Added Mermaid system architecture diagrams to the pack index and core runtime report, and created `data-flow.md` with sequence + flow diagrams covering end-to-end request handling, workspace GCS flows (Apple/local vs k8s/remote), and skill install inspect→execute lifecycle.
+**Files touched:** docs/architecture/deep-dive/README.md; docs/architecture/deep-dive/agent-1-core-runtime.md; docs/architecture/deep-dive/data-flow.md; .claude/journal/docs/index.md; .claude/journal/docs/plans.md
+**Outcome:** Success — the documentation pack now includes visual architecture and data-flow diagrams in Mermaid format.
+**Notes:** Kept diagrams implementation-aligned with current host/agent/sandbox/workspace/skills behavior.
+
 ## [2026-03-15 04:03] — Generate deep multi-agent architecture markdown pack
 
 **Task:** Produce detailed AX architecture docs across major components, including GCS workspace mounting (Apple containers vs k8s pods), plus skill binary install/runtime networking behavior.

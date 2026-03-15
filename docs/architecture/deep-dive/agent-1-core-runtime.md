@@ -11,7 +11,25 @@ AX uses a trusted **host process** as the orchestration and policy boundary:
 
 This keeps policy and credentials outside sandbox execution paths.
 
-## 2) Provider contract model
+## 2) Host-plane architecture diagram
+
+```mermaid
+flowchart LR
+  subgraph HOST[Host Process]
+    SRV[server-completions/server-http]
+    RTR[router + taint-budget]
+    IPC[ipc-server + handlers]
+    REG[registry/provider-map]
+    AUD[audit provider]
+  end
+
+  CH[Channels / clients] --> SRV --> RTR --> IPC
+  REG --> IPC
+  IPC --> AUD
+  IPC --> OUT[Workspace/skills/memory/scheduler providers]
+```
+
+## 3) Provider contract model
 
 The host constructs a provider registry and loads implementations by name from a static allowlist map (no dynamic user-controlled import path construction).
 
@@ -21,7 +39,7 @@ Practical implications:
 - security policy can be enforced at registration points
 - tests can mock provider interfaces at category boundaries
 
-## 3) Completion request lifecycle (high-level)
+## 4) Completion request lifecycle (high-level)
 
 1. Channel/server endpoint receives user content.
 2. Host resolves session, memory/history, and policy state.
@@ -29,7 +47,7 @@ Practical implications:
 4. Agent sends tool/LLM actions back to host over IPC.
 5. Host handlers execute trusted actions and stream results.
 
-## 4) IPC server and handler dispatch
+## 5) IPC server and handler dispatch
 
 IPC actions are strongly schema-gated (Zod strict object schemas) and then dispatched into handler modules (LLM, memory, workspace, skills, scheduler, plugin, image, sandbox tools, etc.).
 
@@ -39,14 +57,14 @@ Why this matters:
 - action-specific policy can be centralized
 - audit logging becomes deterministic per action
 
-## 5) Security-critical host responsibilities
+## 6) Security-critical host responsibilities
 
 - credential custody (API keys and OAuth tokens stay on host)
 - taint accounting for untrusted content
 - audit log writes for sensitive actions
 - workspace commit pipeline enforcement through workspace provider + scanner
 
-## 6) Why this architecture scales
+## 7) Why this architecture scales
 
 The same host policy layer can drive:
 
