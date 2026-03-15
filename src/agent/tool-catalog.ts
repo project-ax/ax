@@ -256,20 +256,14 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     name: 'workspace',
     label: 'Workspace',
     description:
-      'Write files to persistent workspace tiers (agent or user) without requiring a sandbox.\n\nOperations:\n' +
-      '- write: Write a text file to a workspace tier (agent or user)',
-    parameters: Type.Union([
-      Type.Object({
-        type: Type.Literal('write'),
-        tier: Type.String({ description: '"agent" or "user"' }),
-        path: Type.String({ description: 'Relative path within the tier (e.g. "docs/notes.md")' }),
-        content: Type.String({ description: 'File content to write' }),
-      }),
-    ]),
+      'Write a text file to a persistent workspace tier (agent or user) without requiring a sandbox.',
+    parameters: Type.Object({
+      tier: Type.String({ description: '"agent" or "user"' }),
+      path: Type.String({ description: 'Relative path within the tier (e.g. "docs/notes.md")' }),
+      content: Type.String({ description: 'File content to write' }),
+    }),
     category: 'workspace',
-    actionMap: {
-      write: 'workspace_write',
-    },
+    singletonAction: 'workspace_write',
   },
 
   // ── Workspace Scopes ──

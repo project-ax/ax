@@ -263,6 +263,9 @@ export function createOrchestrator(opts: OrchestratorOptions): WorkspaceProvider
           { maxFileSize, maxFiles, maxCommitSize, ignorePatterns },
         );
 
+
+
+
         // Layer 2: Content scanning (via ScannerProvider)
         const scanApproved: FileChange[] = [];
         const scanRejections: FileRejection[] = [];

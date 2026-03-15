@@ -59,10 +59,10 @@ describe('tool-catalog', () => {
     expect(TOOL_NAMES).toEqual(expected);
   });
 
-  test('workspace tool exists with write operation', () => {
+  test('workspace tool exists with singleton workspace_write action', () => {
     const spec = TOOL_CATALOG.find(s => s.name === 'workspace');
     expect(spec).toBeDefined();
-    expect(spec!.actionMap).toHaveProperty('write', 'workspace_write');
+    expect(spec!.singletonAction).toBe('workspace_write');
     expect(spec!.category).toBe('workspace');
   });
 
