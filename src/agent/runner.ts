@@ -60,6 +60,8 @@ export interface AgentConfig {
   replyOptional?: boolean;
   /** Session ID from host — used to scope IPC requests (e.g. image generation). */
   sessionId?: string;
+  /** HTTP request ID from host — used for event bus routing so SSE subscribers receive events. */
+  requestId?: string;
   /** Session scope from channel provider — determines memory scoping (dm = user-scoped, channel = agent-scoped). */
   sessionScope?: 'dm' | 'channel' | 'thread' | 'group';
   // Enterprise fields
@@ -252,6 +254,8 @@ export interface StdinPayload {
   replyOptional?: boolean;
   /** Session ID from host — used to scope IPC requests (e.g. image generation). */
   sessionId?: string;
+  /** HTTP request ID from host — used for event bus routing so SSE subscribers receive events. */
+  requestId?: string;
   /** Session scope from channel provider — determines memory scoping (dm = user-scoped, channel = agent-scoped). */
   sessionScope?: 'dm' | 'channel' | 'thread' | 'group';
   // Enterprise fields
@@ -299,6 +303,7 @@ export function parseStdinPayload(data: string): StdinPayload {
         userId: typeof parsed.userId === 'string' ? parsed.userId : undefined,
         replyOptional: parsed.replyOptional === true,
         sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : undefined,
+        requestId: typeof parsed.requestId === 'string' ? parsed.requestId : undefined,
         sessionScope: typeof parsed.sessionScope === 'string' ? parsed.sessionScope as StdinPayload['sessionScope'] : undefined,
         // Enterprise fields
         agentId: typeof parsed.agentId === 'string' ? parsed.agentId : undefined,
@@ -380,6 +385,7 @@ if (isMain) {
     config.userId = payload.userId;
     config.replyOptional = payload.replyOptional;
     config.sessionId = payload.sessionId;
+    config.requestId = payload.requestId;
     config.sessionScope = payload.sessionScope;
     // Update the early IPCClient (created in listen mode before stdin) with
     // session context from the host. Without this, the client sends IPC
@@ -387,6 +393,7 @@ if (isMain) {
     if (config.ipcClient) {
       config.ipcClient.setContext({
         sessionId: payload.sessionId,
+        requestId: payload.requestId,
         userId: payload.userId,
         sessionScope: payload.sessionScope,
       });

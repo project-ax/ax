@@ -37,6 +37,8 @@ export interface IPCContext {
   sessionId: string;
   agentId: string;
   userId?: string;
+  /** HTTP request ID — used for event bus routing so SSE subscribers receive events. */
+  requestId?: string;
   /** Session scope from the channel provider. DM = user-scoped memory, channel/group = agent-scoped. */
   sessionScope?: 'dm' | 'channel' | 'thread' | 'group';
 }
@@ -177,11 +179,16 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
     if (requestSessionScope !== undefined) {
       delete (parsed as Record<string, unknown>)._sessionScope;
     }
+    const requestRequestId = (parsed as Record<string, unknown>)._requestId;
+    if (requestRequestId !== undefined) {
+      delete (parsed as Record<string, unknown>)._requestId;
+    }
     const effectiveCtx: IPCContext = {
       ...ctx,
       ...(typeof requestSessionId === 'string' ? { sessionId: requestSessionId } : {}),
       ...(typeof requestUserId === 'string' ? { userId: requestUserId } : {}),
       ...(typeof requestSessionScope === 'string' ? { sessionScope: requestSessionScope as IPCContext['sessionScope'] } : {}),
+      ...(typeof requestRequestId === 'string' ? { requestId: requestRequestId } : {}),
     };
 
     logger.debug('action_parsed', { action: actionName });

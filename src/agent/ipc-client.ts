@@ -14,6 +14,8 @@ export interface IPCClientOptions {
   maxReconnectAttempts?: number;
   /** Session ID included in every IPC request for host-side scoping. */
   sessionId?: string;
+  /** HTTP request ID included in every IPC request for event bus routing. */
+  requestId?: string;
   /** User ID included in every IPC request for per-user scoping. */
   userId?: string;
   /** Session scope included in every IPC request for memory scoping (dm = user-scoped, channel = agent-scoped). */
@@ -29,6 +31,7 @@ export class IPCClient {
   private timeoutMs: number;
   private maxReconnectAttempts: number;
   private sessionId?: string;
+  private requestId?: string;
   private userId?: string;
   private sessionScope?: string;
   private socket: Socket | null = null;
@@ -42,6 +45,7 @@ export class IPCClient {
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.maxReconnectAttempts = opts.maxReconnectAttempts ?? MAX_RECONNECT_ATTEMPTS;
     this.sessionId = opts.sessionId;
+    this.requestId = opts.requestId;
     this.userId = opts.userId;
     this.sessionScope = opts.sessionScope;
     this.listenMode = opts.listen ?? false;
@@ -53,8 +57,9 @@ export class IPCClient {
    * stdin is parsed (to start the listener early), then session context is
    * applied once the stdin payload arrives with the host-assigned sessionId.
    */
-  setContext(ctx: { sessionId?: string; userId?: string; sessionScope?: string }): void {
+  setContext(ctx: { sessionId?: string; requestId?: string; userId?: string; sessionScope?: string }): void {
     if (ctx.sessionId !== undefined) this.sessionId = ctx.sessionId;
+    if (ctx.requestId !== undefined) this.requestId = ctx.requestId;
     if (ctx.userId !== undefined) this.userId = ctx.userId;
     if (ctx.sessionScope !== undefined) this.sessionScope = ctx.sessionScope;
   }
@@ -182,6 +187,7 @@ export class IPCClient {
     const enriched = {
       ...request,
       ...(this.sessionId ? { _sessionId: this.sessionId } : {}),
+      ...(this.requestId ? { _requestId: this.requestId } : {}),
       ...(this.userId ? { _userId: this.userId } : {}),
       ...(this.sessionScope ? { _sessionScope: this.sessionScope } : {}),
     };

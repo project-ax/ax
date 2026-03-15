@@ -74,7 +74,7 @@ export function createLLMHandlers(providers: ProviderRegistry, configModel?: str
       });
       eventBus?.emit({
         type: 'llm.start',
-        requestId: ctx.sessionId,
+        requestId: ctx.requestId ?? ctx.sessionId,
         timestamp: Date.now(),
         data: {
           model: effectiveModel,
@@ -109,14 +109,14 @@ export function createLLMHandlers(providers: ProviderRegistry, configModel?: str
           }
           eventBus?.emit({
             type: 'tool.call',
-            requestId: ctx.sessionId,
+            requestId: ctx.requestId ?? ctx.sessionId,
             timestamp: Date.now(),
             data: toolData,
           });
         } else if (chunkType === 'thinking') {
           eventBus?.emit({
             type: 'llm.thinking',
-            requestId: ctx.sessionId,
+            requestId: ctx.requestId ?? ctx.sessionId,
             timestamp: Date.now(),
             data: { contentLength: ((chunk as any).content ?? '').length },
           });
@@ -124,7 +124,7 @@ export function createLLMHandlers(providers: ProviderRegistry, configModel?: str
           const textContent = (chunk as any).content ?? '';
           eventBus?.emit({
             type: 'llm.chunk',
-            requestId: ctx.sessionId,
+            requestId: ctx.requestId ?? ctx.sessionId,
             timestamp: Date.now(),
             data: { chunkType: 'text', content: textContent, contentLength: textContent.length },
           });
@@ -152,7 +152,7 @@ export function createLLMHandlers(providers: ProviderRegistry, configModel?: str
       const doneChunk = chunks.find((c: any) => c.type === 'done') as any;
       eventBus?.emit({
         type: 'llm.done',
-        requestId: ctx.sessionId,
+        requestId: ctx.requestId ?? ctx.sessionId,
         timestamp: Date.now(),
         data: {
           chunkCount: chunks.length,

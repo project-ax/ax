@@ -313,7 +313,7 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
 
   // Use pre-connected client if available (listen mode starts before stdin read).
   // Otherwise create a new client and connect.
-  const client = config.ipcClient ?? new IPCClient({ socketPath: config.ipcSocket, listen: config.ipcListen, sessionId: config.sessionId, userId: config.userId, sessionScope: config.sessionScope });
+  const client = config.ipcClient ?? new IPCClient({ socketPath: config.ipcSocket, listen: config.ipcListen, sessionId: config.sessionId, requestId: config.requestId, userId: config.userId, sessionScope: config.sessionScope });
   if (!config.ipcClient) await client.connect();
 
   // Register LLM provider (replaces built-in providers — no network in sandbox)

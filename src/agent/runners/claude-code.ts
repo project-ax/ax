@@ -113,7 +113,7 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
 
   // 2. Connect IPC client for MCP tools
   // Use pre-connected client if available (listen mode starts before stdin read).
-  const client = config.ipcClient ?? new IPCClient({ socketPath: config.ipcSocket, listen: config.ipcListen, sessionId: config.sessionId, userId: config.userId, sessionScope: config.sessionScope });
+  const client = config.ipcClient ?? new IPCClient({ socketPath: config.ipcSocket, listen: config.ipcListen, sessionId: config.sessionId, requestId: config.requestId, userId: config.userId, sessionScope: config.sessionScope });
   if (!config.ipcClient) await client.connect();
 
   // 3. Build system prompt (also returns toolFilter for MCP tool filtering)

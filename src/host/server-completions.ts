@@ -780,6 +780,7 @@ export async function processCompletion(
       userId: currentUserId,
       replyOptional: replyOptional ?? false,
       sessionId,
+      requestId,
       sessionScope: sessionScope ?? 'dm',
       // Enterprise fields
       agentId: agentName,
