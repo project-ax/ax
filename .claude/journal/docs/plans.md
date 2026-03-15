@@ -1,3 +1,11 @@
+## [2026-03-15 04:03] — Generate deep multi-agent architecture markdown pack
+
+**Task:** Produce detailed AX architecture docs across major components, including GCS workspace mounting (Apple containers vs k8s pods), plus skill binary install/runtime networking behavior.
+**What I did:** Read core host/agent/sandbox/workspace/skills implementation files and authored a five-file deep-dive markdown pack under `docs/architecture/deep-dive/` with a README index. Documented current behavior and explicitly called out that skill install env scrubbing currently omits HTTP(S)_PROXY variables.
+**Files touched:** docs/architecture/deep-dive/README.md; docs/architecture/deep-dive/agent-1-core-runtime.md; docs/architecture/deep-dive/agent-2-agent-runtime.md; docs/architecture/deep-dive/agent-3-sandbox-and-compute.md; docs/architecture/deep-dive/agent-4-workspace-gcs-mounting.md; docs/architecture/deep-dive/agent-5-skills-binaries-network.md; .claude/journal/docs/index.md; .claude/journal/docs/plans.md; .claude/lessons/providers/skills.md
+**Outcome:** Success — generated downloadable markdown architecture docs with explicit implementation-grounded coverage of requested topics.
+**Notes:** Documented proxy nuance carefully to avoid claiming unsupported behavior for skill installs.
+
 # Docs: Plans
 
 Architecture analysis, gap analysis, design documents, implementation plans.

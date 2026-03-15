@@ -4,6 +4,7 @@ Documentation, plans, architecture docs, website updates, GitHub Pages.
 
 ## Entries
 
+- 2026-03-15 04:03 — Generate deep multi-agent architecture markdown pack [plans.md](plans.md)
 - 2026-03-13 16:30 — Add GCS workspace K8s setup instructions to README [website.md](website.md)
 - 2026-03-13 15:00 — Sync all ax/* skills with codebase changes [website.md](website.md)
 - 2026-03-08 20:41 — Harden unified WASM sandbox plan against current AX seams [plans.md](plans.md)

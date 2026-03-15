@@ -29,3 +29,9 @@
 **Context:** Added context-aware tool filtering — scheduler tools excluded when no heartbeat. Pi-session test broke because it expected scheduler tools without providing a HEARTBEAT.md file.
 **Lesson:** When adding tool filtering by category, ensure the filter flags derive from the same data that prompt modules use in `shouldInclude()`. If HeartbeatModule checks `identityFiles.heartbeat?.trim()`, the scheduler filter must check the same thing. Test fixtures must provide the relevant identity files (e.g., HEARTBEAT.md in agentDir) when expecting those tools to be present.
 **Tags:** tools, filtering, prompt-modules, testing, heartbeat
+
+### Skill installs do not inherit HTTP(S)_PROXY by default
+**Date:** 2026-03-15
+**Context:** Writing architecture docs for skill binary installation and host-network behavior.
+**Lesson:** When documenting or debugging skill install networking, check `buildScrubbedEnv()` first: it intentionally strips most environment variables and does not currently pass `HTTP_PROXY`/`HTTPS_PROXY`. In proxy-required environments, installs may fail unless we explicitly add vetted proxy env passthrough.
+**Tags:** skills, install, proxy, networking, environment, security
