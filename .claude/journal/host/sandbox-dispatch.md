@@ -2,6 +2,14 @@
 
 Local and NATS-based sandbox dispatching, lazy sandbox spawning.
 
+## [2026-03-15 04:20] — Implement agent-in-container design for Docker/Apple sandboxes
+
+**Task:** Run agent processes inside Docker/Apple containers instead of overriding to subprocess. Tool calls (sandbox_bash) spawn ephemeral containers via the host.
+**What I did:** (1) Removed subprocess override in server-completions.ts — docker/apple agents now run in-container via the sandbox provider's spawn(). (2) Added `containerSandbox` option to SandboxToolHandlerOptions and IPCHandlerOptions. (3) Added container dispatch path in sandbox_bash that spawns ephemeral containers via execInContainer(). (4) Made ipcSocket optional in Docker and Apple providers (empty string = no socket mount/bridge, for tool containers). (5) Passed containerSandbox from server.ts to createIPCHandler when sandbox is docker/apple. (6) File ops (read/write/edit) continue to run locally with safePath protection.
+**Files touched:** src/host/server-completions.ts, src/host/ipc-server.ts, src/host/server.ts, src/host/ipc-handlers/sandbox-tools.ts, src/providers/sandbox/docker.ts, src/providers/sandbox/apple.ts, tests/host/ipc-handlers/sandbox-tools.test.ts
+**Outcome:** Success — all 2449 tests pass
+**Notes:** NATS dispatch (k8s) still takes priority over container dispatch. The execInContainer helper collects stdout+stderr and returns exit code.
+
 ## [2026-03-14 14:30] — Consolidate session scope into scratch (no separate /workspace/session)
 
 **Task:** Remove duplicate session/ directory — scratch/ and session/ served the same purpose

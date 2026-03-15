@@ -1,5 +1,11 @@
 # Provider Lessons: Sandbox
 
+### Container providers need ipcSocket guards for ephemeral tool containers
+**Date:** 2026-03-15
+**Context:** When implementing agent-in-container, sandbox_bash spawns ephemeral containers via the same Docker/Apple provider. Tool containers don't need IPC (they're fire-and-forget), so ipcSocket is empty string.
+**Lesson:** Guard all socket-related logic in Docker/Apple providers with `if (config.ipcSocket)`. Docker needs it for the `-v socketDir:socketDir:rw` mount. Apple needs it for `--publish-socket`, bridge socket path computation, and IPC env vars (AX_IPC_SOCKET, AX_IPC_LISTEN). Empty string = no socket setup.
+**Tags:** sandbox, docker, apple-container, ipcSocket, ephemeral-containers
+
 ### Apple Container --publish-socket requires listener-ready signaling
 **Date:** 2026-03-14
 **Context:** IPC bridge via --publish-socket hung silently — host connected to host-side socket but the runtime never forwarded to the container's listener. Root cause: host connected before the agent's Node.js process finished booting and called `net.Server.listen()`.

@@ -387,4 +387,109 @@ describe('Sandbox tool IPC handlers', () => {
       );
     });
   });
+
+  // ── Container dispatch mode (docker/apple) ──
+
+  describe('Container dispatch mode', () => {
+    function mockContainerSandbox(exitCode = 0, stdout = '', stderr = ''): any {
+      return {
+        spawn: vi.fn().mockImplementation(async () => {
+          const { Readable, Writable } = await import('node:stream');
+          return {
+            pid: 99999,
+            exitCode: Promise.resolve(exitCode),
+            stdout: Readable.from([Buffer.from(stdout)]),
+            stderr: Readable.from([Buffer.from(stderr)]),
+            stdin: new Writable({ write(_c, _e, cb) { cb(); } }),
+            kill: vi.fn(),
+          };
+        }),
+        kill: vi.fn(),
+        isAvailable: vi.fn().mockResolvedValue(true),
+      };
+    }
+
+    test('sandbox_bash dispatches to container and returns output', async () => {
+      const sandbox = mockContainerSandbox(0, 'container output');
+      const handlers = createSandboxToolHandlers(providers, { workspaceMap, containerSandbox: sandbox });
+      const result = await handlers.sandbox_bash({ command: 'echo hello' }, ctx);
+      expect(result.output).toBe('container output');
+      expect(sandbox.spawn).toHaveBeenCalledWith(
+        expect.objectContaining({
+          workspace,
+          ipcSocket: '',
+          command: ['sh', '-c', 'echo hello'],
+          timeoutSec: 30,
+          memoryMB: 256,
+        }),
+      );
+    });
+
+    test('sandbox_bash returns exit code on container failure', async () => {
+      const sandbox = mockContainerSandbox(1, '', 'command not found');
+      const handlers = createSandboxToolHandlers(providers, { workspaceMap, containerSandbox: sandbox });
+      const result = await handlers.sandbox_bash({ command: 'bad-cmd' }, ctx);
+      expect(result.output).toContain('Exit code 1');
+      expect(result.output).toContain('command not found');
+    });
+
+    test('sandbox_bash returns error when container spawn fails', async () => {
+      const sandbox = {
+        spawn: vi.fn().mockRejectedValue(new Error('Docker not available')),
+        kill: vi.fn(),
+        isAvailable: vi.fn().mockResolvedValue(false),
+      };
+      const handlers = createSandboxToolHandlers(providers, { workspaceMap, containerSandbox: sandbox });
+      const result = await handlers.sandbox_bash({ command: 'echo hello' }, ctx);
+      expect(result.output).toContain('Container dispatch error');
+      expect(result.output).toContain('Docker not available');
+    });
+
+    test('audits container dispatch calls', async () => {
+      const sandbox = mockContainerSandbox(0, 'ok');
+      const handlers = createSandboxToolHandlers(providers, { workspaceMap, containerSandbox: sandbox });
+      await handlers.sandbox_bash({ command: 'echo test' }, ctx);
+      expect(providers.audit.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'sandbox_bash',
+          result: 'success',
+          args: expect.objectContaining({ dispatchMode: 'container' }),
+        }),
+      );
+    });
+
+    test('file ops still use local execution even with containerSandbox', async () => {
+      // File operations should NOT go through container dispatch
+      const sandbox = mockContainerSandbox(0, 'should not be called');
+      writeFileSync(join(workspace, 'local.txt'), 'local content');
+      const handlers = createSandboxToolHandlers(providers, { workspaceMap, containerSandbox: sandbox });
+
+      const readResult = await handlers.sandbox_read_file({ path: 'local.txt' }, ctx);
+      expect(readResult.content).toBe('local content');
+      // sandbox.spawn should NOT have been called for file ops
+      expect(sandbox.spawn).not.toHaveBeenCalled();
+
+      const writeResult = await handlers.sandbox_write_file({ path: 'new.txt', content: 'data' }, ctx);
+      expect(writeResult.written).toBe(true);
+      expect(sandbox.spawn).not.toHaveBeenCalled();
+    });
+
+    test('NATS takes priority over container dispatch', async () => {
+      const sandbox = mockContainerSandbox(0, 'container output');
+      const dispatcher = {
+        dispatch: vi.fn().mockResolvedValue({ type: 'bash_result', output: 'nats output', exitCode: 0 }),
+        release: vi.fn(),
+        hasPod: vi.fn(),
+        close: vi.fn(),
+      };
+      const handlers = createSandboxToolHandlers(providers, {
+        workspaceMap,
+        natsDispatcher: dispatcher,
+        containerSandbox: sandbox,
+      });
+      const result = await handlers.sandbox_bash({ command: 'echo hello' }, ctx);
+      expect(result.output).toBe('nats output');
+      expect(sandbox.spawn).not.toHaveBeenCalled();
+    });
+  });
 });
