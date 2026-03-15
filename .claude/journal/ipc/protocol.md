@@ -2,13 +2,13 @@
 
 IPC protocol enhancements: heartbeat keep-alive, schema hardening.
 
-## [2026-03-15 16:12] — Fix proxy.sock ENOENT after Apple Container exit
+## [2026-03-15 16:23] — Fix proxy.sock ENOENT race on first message after restart
 
-**Task:** Debug `connect ENOENT proxy.sock` error when sending Slack message to agent
-**What I did:** Traced root cause to Apple Container bridge sockets sharing the same directory as the IPC server's `proxy.sock`. When containers exit, the runtime auto-cleans `--publish-socket` files; aggressive cleanup could remove `proxy.sock`. Moved bridge sockets to a `bridges/` subdirectory. Also added error handling to `createIPCServer`'s `listen()` call (was completely silent on failure).
-**Files touched:** `src/providers/sandbox/apple.ts`, `src/host/ipc-server.ts`, `tests/host/ipc-server.test.ts`
-**Outcome:** Success — 52 IPC tests + 74 total affected tests pass. Bridge sockets now isolated from IPC server socket.
-**Notes:** Apple Container agents use bridge.sock (reverse IPC) and never directly connect to proxy.sock, which is why the bug only manifested for subsequent subprocess-mode agent spawns (e.g., from channel handler or scheduler follow-ups).
+**Task:** Debug `connect ENOENT proxy.sock` error on first Slack message after server restart (subsequent messages work)
+**What I did:** Root cause was `createIPCServer` calling `server.listen()` without awaiting completion — socket file didn't exist yet when the first agent was spawned. Made `createIPCServer` async, returning `Promise<Server>` that resolves only after the socket is bound and accepting connections. Also moved Apple Container bridge sockets to a `bridges/` subdirectory to prevent co-location with proxy.sock.
+**Files touched:** `src/host/ipc-server.ts`, `src/host/server.ts`, `src/host/agent-runtime-process.ts`, `src/providers/sandbox/apple.ts`, `tests/host/ipc-server.test.ts`
+**Outcome:** Success — 76 affected tests pass, 2403/2404 full suite pass (1 pre-existing failure).
+**Notes:** The race only affected the first message because subsequent messages arrived after the event loop had processed the pending listen. Apple Container agents masked the issue by using bridge.sock (reverse IPC) instead of connecting to proxy.sock directly.
 
 ## [2026-03-15 15:35] — Fix concurrent IPC call response misrouting
 

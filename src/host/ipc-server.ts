@@ -309,12 +309,16 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
 /**
  * Creates a Unix socket IPC server with length-prefixed JSON framing.
  * Protocol: 4-byte big-endian length prefix + JSON payload.
+ *
+ * Returns a Promise that resolves with the Server once the socket file
+ * exists and is accepting connections. Callers MUST await this before
+ * spawning agents that connect to the socket.
  */
-export function createIPCServer(
+export async function createIPCServer(
   socketPath: string,
   handler: (raw: string, ctx: IPCContext) => Promise<string>,
   defaultCtx: IPCContext,
-): Server {
+): Promise<Server> {
   const server = createServer((socket: Socket) => {
     let buffer = Buffer.alloc(0);
     logger.debug('client_connected', { socketPath });
@@ -380,13 +384,18 @@ export function createIPCServer(
     });
   });
 
-  server.on('error', (err) => {
-    logger.error('ipc_server_error', { socketPath, error: (err as Error).message });
+  await new Promise<void>((resolve, reject) => {
+    server.on('error', (err) => {
+      logger.error('ipc_server_error', { socketPath, error: (err as Error).message });
+      reject(err);
+    });
+
+    server.listen(socketPath, () => {
+      logger.debug('server_listening', { socketPath });
+      resolve();
+    });
   });
 
-  server.listen(socketPath, () => {
-    logger.debug('server_listening', { socketPath });
-  });
   return server;
 }
 

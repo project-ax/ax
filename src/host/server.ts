@@ -514,7 +514,7 @@ export async function createServer(
     : null;
 
   const defaultCtx = { sessionId: 'server', agentId: 'system', userId: defaultUserId };
-  const ipcServer: NetServer = createIPCServer(ipcSocketPath, handleIPC, defaultCtx);
+  const ipcServer: NetServer = await createIPCServer(ipcSocketPath, handleIPC, defaultCtx);
   logger.debug('ipc_server_started', { socket: ipcSocketPath });
 
   let httpServer: HttpServer | null = null;

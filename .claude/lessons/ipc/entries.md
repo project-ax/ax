@@ -1,10 +1,10 @@
 # IPC
 
-### Keep IPC socket files isolated from sandbox-managed files
+### Always await server.listen() before accepting connections
 **Date:** 2026-03-15
-**Context:** Apple Container bridge sockets (`--publish-socket`) were created in the same directory as the IPC server's `proxy.sock`. Container runtime cleanup on exit could remove `proxy.sock`, causing ENOENT for subsequent agent connections.
-**Lesson:** Never co-locate host IPC server sockets with files managed by external runtimes (container CLI, k8s, etc.). Put sandbox bridge sockets in a subdirectory (e.g., `bridges/`) so runtime cleanup can't affect the IPC server socket. Also always add `server.on('error')` handlers to `net.Server` instances — without one, `listen()` failures are completely silent (no crash, no log, the socket just never appears).
-**Tags:** ipc, apple-container, bridge-socket, unix-socket, error-handling
+**Context:** `createIPCServer` called `server.listen(socketPath)` without awaiting — the socket file isn't created until the event loop processes the bind. First Slack message after server restart raced ahead and spawned an agent before the socket existed. Subsequent messages worked because the socket was created by then.
+**Lesson:** `net.Server.listen()` is async even for Unix sockets. Always await the `listening` callback (or wrap in a Promise) before proceeding with any code that depends on the socket being ready. Make `createIPCServer`-style factories return `Promise<Server>` so callers can't accidentally skip the wait. Also keep sandbox-managed files (bridge sockets) in a separate subdirectory from host IPC sockets.
+**Tags:** ipc, server-listen, race-condition, unix-socket, async, startup
 
 ### IPC client cannot handle concurrent calls without message ID correlation
 **Date:** 2026-03-15

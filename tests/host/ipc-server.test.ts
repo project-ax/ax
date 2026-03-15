@@ -984,8 +984,7 @@ describe('IPC Server heartbeat', () => {
       return JSON.stringify({ ok: true, slow: true });
     };
 
-    const server = createIPCServer(socketPath, slowHandler, ctx);
-    await new Promise<void>(r => server.on('listening', r));
+    const server = await createIPCServer(socketPath, slowHandler, ctx);
 
     // Collect all frames from the socket
     const frames: Record<string, unknown>[] = [];
@@ -1042,29 +1041,20 @@ describe('IPC Server heartbeat', () => {
     expect(HEARTBEAT_INTERVAL_MS).toBe(15_000);
   });
 
-  test('server emits error event on listen failure instead of crashing', async () => {
+  test('rejects with EADDRINUSE when socket path is already bound', async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), 'ipc-err-'));
     const socketPath = join(tmpDir, 'test.sock');
 
     const handler = async () => JSON.stringify({ ok: true });
 
     // First server: bind to the socket path
-    const server1 = createIPCServer(socketPath, handler, ctx);
-    await new Promise<void>(r => server1.on('listening', r));
+    const server1 = await createIPCServer(socketPath, handler, ctx);
 
-    // Second server: try to bind to the same path — should emit 'error', not crash
-    const errors: Error[] = [];
-    const server2 = createIPCServer(socketPath, handler, ctx);
-    server2.on('error', (err) => errors.push(err));
-
-    // Give listen time to fail
-    await new Promise<void>(r => setTimeout(r, 100));
-
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors[0].message).toContain('EADDRINUSE');
+    // Second server: try to bind to the same path — should reject
+    await expect(createIPCServer(socketPath, handler, ctx))
+      .rejects.toThrow('EADDRINUSE');
 
     server1.close();
-    server2.close();
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -1076,8 +1066,7 @@ describe('IPC Server heartbeat', () => {
     const socketPath = join(tmpDir, 'proxy.sock');
 
     const handler = async () => JSON.stringify({ ok: true });
-    const server = createIPCServer(socketPath, handler, ctx);
-    await new Promise<void>(r => server.on('listening', r));
+    const server = await createIPCServer(socketPath, handler, ctx);
 
     // Simulate bridge socket creation and cleanup in a subdirectory
     const bridgeDir = join(tmpDir, 'bridges');

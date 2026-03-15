@@ -223,7 +223,7 @@ async function main(): Promise<void> {
   completionDeps.ipcHandler = handleIPC;
 
   const defaultCtx = { sessionId: 'server', agentId: 'system', userId: defaultUserId };
-  const ipcServer = createIPCServer(ipcSocketPath, handleIPC, defaultCtx);
+  const ipcServer = await createIPCServer(ipcSocketPath, handleIPC, defaultCtx);
 
   // ── NATS connection ──
 
