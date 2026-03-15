@@ -24,6 +24,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { SandboxProvider, SandboxConfig, SandboxProcess } from './types.js';
@@ -47,9 +48,17 @@ export async function create(_config: Config): Promise<SandboxProvider> {
       // through virtio-vsock into the container. The host connects to the
       // host-side socket after the agent signals readiness. The container
       // runtime owns the host socket and deletes it on exit.
+      //
+      // Bridge sockets go in a 'bridges/' subdirectory to isolate them from
+      // the IPC server's proxy.sock. The container runtime auto-cleans
+      // --publish-socket files on exit — if they shared the same directory,
+      // aggressive cleanup could remove proxy.sock and break subsequent
+      // agent connections.
       const CONTAINER_BRIDGE_SOCK = '/tmp/bridge.sock';
       const ipcSocketDir = hasIpcSocket ? dirname(config.ipcSocket) : '';
-      const bridgeSocketPath = hasIpcSocket ? join(ipcSocketDir, `apple-${containerName}.sock`) : '';
+      const bridgeDir = hasIpcSocket ? join(ipcSocketDir, 'bridges') : '';
+      if (bridgeDir) mkdirSync(bridgeDir, { recursive: true });
+      const bridgeSocketPath = hasIpcSocket ? join(bridgeDir, `${containerName}.sock`) : '';
 
       const containerArgs: string[] = [
         'run',

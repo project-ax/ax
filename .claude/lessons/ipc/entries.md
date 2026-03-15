@@ -1,5 +1,11 @@
 # IPC
 
+### Keep IPC socket files isolated from sandbox-managed files
+**Date:** 2026-03-15
+**Context:** Apple Container bridge sockets (`--publish-socket`) were created in the same directory as the IPC server's `proxy.sock`. Container runtime cleanup on exit could remove `proxy.sock`, causing ENOENT for subsequent agent connections.
+**Lesson:** Never co-locate host IPC server sockets with files managed by external runtimes (container CLI, k8s, etc.). Put sandbox bridge sockets in a subdirectory (e.g., `bridges/`) so runtime cleanup can't affect the IPC server socket. Also always add `server.on('error')` handlers to `net.Server` instances — without one, `listen()` failures are completely silent (no crash, no log, the socket just never appears).
+**Tags:** ipc, apple-container, bridge-socket, unix-socket, error-handling
+
 ### IPC client cannot handle concurrent calls without message ID correlation
 **Date:** 2026-03-15
 **Context:** Debugging empty response in web UI. The pi-coding-agent's second LLM call got an identity_read response instead of the actual LLM response because 3 concurrent tool IPC calls all registered separate `data` handlers on the same socket.

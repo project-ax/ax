@@ -380,8 +380,13 @@ export function createIPCServer(
     });
   });
 
-  server.listen(socketPath);
-  logger.debug('server_listening', { socketPath });
+  server.on('error', (err) => {
+    logger.error('ipc_server_error', { socketPath, error: (err as Error).message });
+  });
+
+  server.listen(socketPath, () => {
+    logger.debug('server_listening', { socketPath });
+  });
   return server;
 }
 

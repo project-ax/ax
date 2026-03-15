@@ -2,6 +2,14 @@
 
 IPC protocol enhancements: heartbeat keep-alive, schema hardening.
 
+## [2026-03-15 16:12] — Fix proxy.sock ENOENT after Apple Container exit
+
+**Task:** Debug `connect ENOENT proxy.sock` error when sending Slack message to agent
+**What I did:** Traced root cause to Apple Container bridge sockets sharing the same directory as the IPC server's `proxy.sock`. When containers exit, the runtime auto-cleans `--publish-socket` files; aggressive cleanup could remove `proxy.sock`. Moved bridge sockets to a `bridges/` subdirectory. Also added error handling to `createIPCServer`'s `listen()` call (was completely silent on failure).
+**Files touched:** `src/providers/sandbox/apple.ts`, `src/host/ipc-server.ts`, `tests/host/ipc-server.test.ts`
+**Outcome:** Success — 52 IPC tests + 74 total affected tests pass. Bridge sockets now isolated from IPC server socket.
+**Notes:** Apple Container agents use bridge.sock (reverse IPC) and never directly connect to proxy.sock, which is why the bug only manifested for subsequent subprocess-mode agent spawns (e.g., from channel handler or scheduler follow-ups).
+
 ## [2026-03-15 15:35] — Fix concurrent IPC call response misrouting
 
 **Task:** Debug why the web UI showed no response when user said "hi" — agent's second LLM call returned empty text

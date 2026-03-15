@@ -1041,6 +1041,62 @@ describe('IPC Server heartbeat', () => {
   test('HEARTBEAT_INTERVAL_MS is exported and equals 15 seconds', () => {
     expect(HEARTBEAT_INTERVAL_MS).toBe(15_000);
   });
+
+  test('server emits error event on listen failure instead of crashing', async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'ipc-err-'));
+    const socketPath = join(tmpDir, 'test.sock');
+
+    const handler = async () => JSON.stringify({ ok: true });
+
+    // First server: bind to the socket path
+    const server1 = createIPCServer(socketPath, handler, ctx);
+    await new Promise<void>(r => server1.on('listening', r));
+
+    // Second server: try to bind to the same path — should emit 'error', not crash
+    const errors: Error[] = [];
+    const server2 = createIPCServer(socketPath, handler, ctx);
+    server2.on('error', (err) => errors.push(err));
+
+    // Give listen time to fail
+    await new Promise<void>(r => setTimeout(r, 100));
+
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0].message).toContain('EADDRINUSE');
+
+    server1.close();
+    server2.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  test('proxy.sock remains accessible after sibling files are removed', async () => {
+    // Regression: Apple Container bridge sockets in the same directory as proxy.sock
+    // could cause proxy.sock to be deleted when the container runtime cleans up.
+    // Bridge sockets should now be in a 'bridges/' subdirectory.
+    const tmpDir = mkdtempSync(join(tmpdir(), 'ipc-sibling-'));
+    const socketPath = join(tmpDir, 'proxy.sock');
+
+    const handler = async () => JSON.stringify({ ok: true });
+    const server = createIPCServer(socketPath, handler, ctx);
+    await new Promise<void>(r => server.on('listening', r));
+
+    // Simulate bridge socket creation and cleanup in a subdirectory
+    const bridgeDir = join(tmpDir, 'bridges');
+    mkdirSync(bridgeDir, { recursive: true });
+    const bridgeSock = join(bridgeDir, 'apple-test.sock');
+    writeFileSync(bridgeSock, ''); // simulate bridge socket
+    rmSync(bridgeDir, { recursive: true, force: true }); // container runtime cleanup
+
+    // proxy.sock must still be connectable
+    expect(existsSync(socketPath)).toBe(true);
+    const client = new IPCClient({ socketPath, timeoutMs: 2000 });
+    await client.connect();
+    const result = await client.call({ action: 'test' });
+    expect(result).toBeDefined();
+    client.disconnect();
+
+    server.close();
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
 });
 
 describe('connectIPCBridge (reverse IPC for Apple containers)', () => {
