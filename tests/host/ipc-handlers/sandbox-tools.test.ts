@@ -492,4 +492,100 @@ describe('Sandbox tool IPC handlers', () => {
       expect(sandbox.spawn).not.toHaveBeenCalled();
     });
   });
+
+  // ── Sandbox Audit Gate ──
+
+  describe('sandbox_approve', () => {
+    test('approves bash operation and logs audit', async () => {
+      const handlers = createSandboxToolHandlers(providers, { workspaceMap });
+      const result = await handlers.sandbox_approve(
+        { operation: 'bash', command: 'ls' },
+        ctx,
+      );
+      expect(result).toEqual({ approved: true });
+      expect(providers.audit.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'sandbox_bash',
+          sessionId: 'test-session',
+          result: 'approved',
+          args: expect.objectContaining({ command: 'ls', mode: 'container-local' }),
+        }),
+      );
+    });
+
+    test('approves read operation and logs audit', async () => {
+      const handlers = createSandboxToolHandlers(providers, { workspaceMap });
+      const result = await handlers.sandbox_approve(
+        { operation: 'read', path: 'foo.txt' },
+        ctx,
+      );
+      expect(result).toEqual({ approved: true });
+      expect(providers.audit.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'sandbox_read',
+          result: 'approved',
+          args: expect.objectContaining({ path: 'foo.txt', mode: 'container-local' }),
+        }),
+      );
+    });
+
+    test('truncates long commands in audit log', async () => {
+      const handlers = createSandboxToolHandlers(providers, { workspaceMap });
+      const longCmd = 'x'.repeat(500);
+      await handlers.sandbox_approve(
+        { operation: 'bash', command: longCmd },
+        ctx,
+      );
+      const auditCall = (providers.audit.log as any).mock.calls[0][0];
+      expect(auditCall.args.command.length).toBe(200);
+    });
+  });
+
+  describe('sandbox_result', () => {
+    test('logs successful bash result', async () => {
+      const handlers = createSandboxToolHandlers(providers, { workspaceMap });
+      const result = await handlers.sandbox_result(
+        { operation: 'bash', command: 'ls', output: 'file1', exitCode: 0 },
+        ctx,
+      );
+      expect(result).toEqual({ ok: true });
+      expect(providers.audit.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'sandbox_bash_result',
+          sessionId: 'test-session',
+          result: 'success',
+          args: expect.objectContaining({ command: 'ls', exitCode: 0, mode: 'container-local' }),
+        }),
+      );
+    });
+
+    test('logs failed result with non-zero exit code', async () => {
+      const handlers = createSandboxToolHandlers(providers, { workspaceMap });
+      await handlers.sandbox_result(
+        { operation: 'bash', command: 'bad', exitCode: 1 },
+        ctx,
+      );
+      expect(providers.audit.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'sandbox_bash_result',
+          result: 'error',
+        }),
+      );
+    });
+
+    test('logs file operation result with success flag', async () => {
+      const handlers = createSandboxToolHandlers(providers, { workspaceMap });
+      await handlers.sandbox_result(
+        { operation: 'read', path: 'foo.txt', success: true },
+        ctx,
+      );
+      expect(providers.audit.log).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'sandbox_read_result',
+          result: 'success',
+          args: expect.objectContaining({ path: 'foo.txt', success: true }),
+        }),
+      );
+    });
+  });
 });

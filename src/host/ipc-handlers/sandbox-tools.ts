@@ -327,5 +327,44 @@ export function createSandboxToolHandlers(providers: ProviderRegistry, opts: San
         return { error: `Error editing file: ${(err as Error).message}` };
       }
     },
+
+    // ── Sandbox Audit Gate (container-local execution) ──────────
+
+    sandbox_approve: async (req: any, ctx: IPCContext) => {
+      await providers.audit.log({
+        action: `sandbox_${req.operation}`,
+        sessionId: ctx.sessionId,
+        args: {
+          ...(req.command ? { command: req.command.slice(0, 200) } : {}),
+          ...(req.path ? { path: req.path } : {}),
+          mode: 'container-local',
+        },
+        result: 'approved',
+      });
+      logger.debug('sandbox_approve', {
+        sessionId: ctx.sessionId,
+        operation: req.operation,
+        ...(req.command ? { command: req.command.slice(0, 100) } : {}),
+        ...(req.path ? { path: req.path } : {}),
+      });
+      // Option A+ hook point: policy check, return {approved: false, reason: "..."}
+      return { approved: true };
+    },
+
+    sandbox_result: async (req: any, ctx: IPCContext) => {
+      await providers.audit.log({
+        action: `sandbox_${req.operation}_result`,
+        sessionId: ctx.sessionId,
+        args: {
+          ...(req.command ? { command: req.command.slice(0, 200) } : {}),
+          ...(req.path ? { path: req.path } : {}),
+          ...(req.exitCode !== undefined ? { exitCode: req.exitCode } : {}),
+          ...(req.success !== undefined ? { success: req.success } : {}),
+          mode: 'container-local',
+        },
+        result: (req.exitCode === 0 || req.success) ? 'success' : 'error',
+      });
+      return { ok: true };
+    },
   };
 }
