@@ -420,9 +420,9 @@ describe('Provider Map', () => {
 
     // Sandbox providers
     expect(PROVIDER_MAP.sandbox).toHaveProperty('subprocess');
-    expect(PROVIDER_MAP.sandbox).toHaveProperty('seatbelt');
-    expect(PROVIDER_MAP.sandbox).toHaveProperty('nsjail');
     expect(PROVIDER_MAP.sandbox).toHaveProperty('docker');
+    expect(PROVIDER_MAP.sandbox).toHaveProperty('apple');
+    expect(PROVIDER_MAP.sandbox).toHaveProperty('k8s');
 
     // Scheduler providers
     expect(PROVIDER_MAP.scheduler).toHaveProperty('none');

@@ -17,7 +17,7 @@ describe('PromptBuilder integration', () => {
         makeSkill('Memory Skill', 'You can remember things'),
       ],
       profile: 'paranoid',
-      sandboxType: 'nsjail',
+      sandboxType: 'docker',
       taintRatio: 0.15,
       taintThreshold: 0.10,
       identityFiles: {

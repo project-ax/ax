@@ -187,14 +187,14 @@ describe('parseStdinPayload with taint state', () => {
       taintRatio: 0.15,
       taintThreshold: 0.10,
       profile: 'paranoid',
-      sandboxType: 'nsjail',
+      sandboxType: 'docker',
     });
     const result = parseStdinPayload(payload);
     expect(result.message).toBe('hello');
     expect(result.taintRatio).toBe(0.15);
     expect(result.taintThreshold).toBe(0.10);
     expect(result.profile).toBe('paranoid');
-    expect(result.sandboxType).toBe('nsjail');
+    expect(result.sandboxType).toBe('docker');
   });
 
   test('defaults taint state when absent (backward compat)', () => {

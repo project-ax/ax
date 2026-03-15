@@ -62,11 +62,8 @@ const _PROVIDER_MAP = {
   },
   sandbox: {
     subprocess: '../providers/sandbox/subprocess.js',
-    seatbelt:   '../providers/sandbox/seatbelt.js',
-    nsjail:     '../providers/sandbox/nsjail.js',
-    bwrap:      '../providers/sandbox/bwrap.js',
     docker:     '../providers/sandbox/docker.js',
-    apple:             '../providers/sandbox/apple.js',
+    apple:      '../providers/sandbox/apple.js',
     k8s:        '../providers/sandbox/k8s.js',
   },
   scheduler: {

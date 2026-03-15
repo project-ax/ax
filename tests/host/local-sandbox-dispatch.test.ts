@@ -90,11 +90,11 @@ describe('LocalSandboxDispatcher', () => {
     expect(spawnCalls.length).toBe(0);
   });
 
-  test('ensureSandbox is no-op for seatbelt sandbox type', async () => {
+  test('ensureSandbox is no-op for subprocess sandbox type', async () => {
     const { provider, spawnCalls } = mockSandboxProvider();
     const d = createLocalSandboxDispatcher({
       provider,
-      sandboxType: 'seatbelt',
+      sandboxType: 'subprocess',
     });
     await d.ensureSandbox('req-1', dummyConfig);
     expect(d.hasSandbox('req-1')).toBe(false);

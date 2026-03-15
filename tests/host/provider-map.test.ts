@@ -6,7 +6,7 @@ describe('Provider allowlist (SC-SEC-002)', () => {
     expect(resolveProviderPath('llm', 'anthropic')).toContain('/providers/llm/anthropic.js');
     expect(resolveProviderPath('memory', 'cortex')).toContain('/providers/memory/cortex/index.js');
     expect(resolveProviderPath('scheduler', 'none')).toContain('/providers/scheduler/none.js');
-    expect(resolveProviderPath('sandbox', 'seatbelt')).toContain('/providers/sandbox/seatbelt.js');
+    expect(resolveProviderPath('sandbox', 'docker')).toContain('/providers/sandbox/docker.js');
     expect(resolveProviderPath('sandbox', 'subprocess')).toContain('/providers/sandbox/subprocess.js');
   });
 
@@ -78,9 +78,9 @@ describe('Provider allowlist (SC-SEC-002)', () => {
     const sandboxMap = PROVIDER_MAP['sandbox'];
     expect(sandboxMap).toBeDefined();
     expect(sandboxMap!['subprocess']).toBeDefined();
-    expect(sandboxMap!['seatbelt']).toBeDefined();
-    expect(sandboxMap!['nsjail']).toBeDefined();
     expect(sandboxMap!['docker']).toBeDefined();
+    expect(sandboxMap!['apple']).toBeDefined();
+    expect(sandboxMap!['k8s']).toBeDefined();
   });
 
   test('all resolved paths use file:// protocol (SC-SEC-002 hardening)', () => {

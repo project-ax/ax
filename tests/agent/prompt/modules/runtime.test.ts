@@ -38,11 +38,11 @@ describe('RuntimeModule', () => {
     const mod = new RuntimeModule();
     const text = mod.render(makeContext({
       agentType: 'claude-code',
-      sandboxType: 'nsjail',
+      sandboxType: 'docker',
       profile: 'balanced',
     })).join('\n');
     expect(text).toContain('claude-code');
-    expect(text).toContain('nsjail');
+    expect(text).toContain('docker');
     expect(text).toContain('balanced');
   });
 

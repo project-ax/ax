@@ -20,7 +20,7 @@ import { request as httpRequest } from 'node:http';
 
 const PROJECT_ROOT = resolve(import.meta.dirname, '../..');
 const TEST_CONFIG = resolve(import.meta.dirname, 'ax-test.yaml');
-const SEATBELT_CONFIG = resolve(import.meta.dirname, 'ax-test-seatbelt.yaml');
+// seatbelt config removed — legacy provider deleted
 const PI_CODING_AGENT_CONFIG = resolve(import.meta.dirname, 'ax-test-pi-coding-agent.yaml');
 const GROQ_CONFIG = resolve(import.meta.dirname, 'ax-test-groq.yaml');
 const IS_BUN = typeof (globalThis as Record<string, unknown>).Bun !== 'undefined';
@@ -380,21 +380,5 @@ describe('Smoke Test', () => {
     });
   }, 60_000);
 
-  test.skipIf(!IS_MACOS)('seatbelt sandbox: agent runs inside sandbox-exec', async () => {
-    await withServer({ config: SEATBELT_CONFIG }, async ({ socket, output }) => {
-      try {
-        const res = await sendMessage(socket, 'hello from seatbelt test');
-        expect(res.status).toBe(200);
-        const data = JSON.parse(res.body);
-        expect(data.choices[0].message.content.trim().length).toBeGreaterThan(0);
-      } catch {
-        const stderr = output.stderr.join('');
-        const stdout = output.stdout.join('');
-        throw new Error(`Seatbelt test failed.\nstdout: ${stdout}\nstderr: ${stderr}`);
-      }
-
-      const stderrText = output.stderr.join('');
-      expect(stderrText).not.toContain('sandbox-exec: invalid argument');
-    });
-  }, 60_000);
+  // seatbelt sandbox test removed — legacy provider deleted (see local-sandbox-execution plan)
 });

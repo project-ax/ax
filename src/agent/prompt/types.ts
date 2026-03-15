@@ -25,7 +25,7 @@ export interface PromptContext {
 
   // Security (from host via stdin payload)
   profile: string;       // 'paranoid' | 'balanced' | 'yolo'
-  sandboxType: string;   // 'nsjail' | 'seatbelt' | 'docker' | 'bwrap' | 'subprocess'
+  sandboxType: string;   // 'docker' | 'apple' | 'k8s' | 'subprocess'
   taintRatio: number;    // 0-1, current session taint ratio from host
   taintThreshold: number; // profile threshold (0.10, 0.30, 0.60)
 

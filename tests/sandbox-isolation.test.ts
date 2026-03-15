@@ -11,7 +11,6 @@
 
 import { describe, test, expect, vi } from 'vitest';
 import { resolve, sep } from 'node:path';
-import { create as createSeatbelt } from '../src/providers/sandbox/seatbelt.js';
 import { create as createSubprocess } from '../src/providers/sandbox/subprocess.js';
 import { createIPCMcpServer } from '../src/agent/mcp-server.js';
 import type { IPCClient } from '../src/agent/ipc-client.js';
@@ -59,63 +58,7 @@ function getTools(server: ReturnType<typeof createIPCMcpServer>): Record<string,
 const PROJECT_ROOT = resolve('.');
 const HOME_DIR = process.env.HOME ?? '';
 
-// ── Seatbelt Sandbox Env Isolation ───────────────────────────────────
-
-describe('seatbelt sandbox env isolation', () => {
-  test('seatbelt source constructs minimal env via symlinkEnv', async () => {
-    // Verify at the source level that seatbelt constructs a minimal env
-    // using the canonical symlink approach (not leaking process.env).
-    const { readFileSync } = await import('node:fs');
-    const source = readFileSync(resolve('src/providers/sandbox/seatbelt.ts'), 'utf-8');
-
-    // Extract the env block from the source
-    const envMatch = source.match(/env:\s*\{([^}]+)\}/s);
-    expect(envMatch).toBeTruthy();
-    const envBlock = envMatch![1];
-
-    // Should have PATH, HOME, and spread symlinkEnv vars
-    expect(envBlock).toContain('PATH');
-    expect(envBlock).toContain('HOME');
-    expect(envBlock).toContain('...sEnv');
-
-    // Must NOT spread process.env
-    expect(envBlock).not.toContain('...process.env');
-
-    // HOME should be set to mount root (canonical workspace root), not host path
-    expect(envBlock).toContain('HOME: mountRoot');
-
-    // Must use createCanonicalSymlinks and symlinkEnv
-    expect(source).toContain('createCanonicalSymlinks');
-    expect(source).toContain('symlinkEnv');
-  });
-
-  test('seatbelt does not pass ANTHROPIC_API_KEY or credentials in env', async () => {
-    const { readFileSync } = await import('node:fs');
-    const source = readFileSync(resolve('src/providers/sandbox/seatbelt.ts'), 'utf-8');
-
-    expect(source).not.toContain('ANTHROPIC_API_KEY');
-    expect(source).not.toContain('CLAUDE_CODE_OAUTH_TOKEN');
-    expect(source).not.toContain('TAVILY_API_KEY');
-  });
-
-  test('seatbelt provider does not pass AGENT_DIR (identity comes via stdin)', async () => {
-    const { readFileSync } = await import('node:fs');
-    const source = readFileSync(resolve('src/providers/sandbox/seatbelt.ts'), 'utf-8');
-
-    // Identity files are now sent via stdin payload from DocumentStore —
-    // no AGENT_DIR mount needed in the sandbox.
-    expect(source).not.toContain('AGENT_DIR');
-  });
-
-  test('seatbelt policy does not reference AGENT_DIR (identity comes via stdin)', async () => {
-    const { readFileSync } = await import('node:fs');
-    const policy = readFileSync(resolve('policies/agent.sb'), 'utf-8');
-
-    // The policy should no longer reference AGENT_DIR since identity
-    // files are sent via stdin payload from DocumentStore.
-    expect(policy).not.toContain('AGENT_DIR');
-  });
-});
+// ── Seatbelt/nsjail/bwrap providers removed — see local-sandbox-execution plan ──
 
 // ── Per-Tier Writable Workspace Flags in Sandbox Providers ───────────
 
@@ -128,42 +71,11 @@ describe('per-tier writable workspace flags in sandbox providers', () => {
     expect(source).not.toContain('workspaceMountsWritable');
   });
 
-  test('bwrap uses per-tier writable flags', async () => {
-    const { readFileSync } = await import('node:fs');
-    const source = readFileSync(resolve('src/providers/sandbox/bwrap.ts'), 'utf-8');
-    expect(source).toContain("config.agentWorkspaceWritable ? '--bind' : '--ro-bind'");
-    expect(source).toContain("config.userWorkspaceWritable ? '--bind' : '--ro-bind'");
-    expect(source).not.toContain('workspaceMountsWritable');
-  });
-
-  test('nsjail uses per-tier writable flags', async () => {
-    const { readFileSync } = await import('node:fs');
-    const source = readFileSync(resolve('src/providers/sandbox/nsjail.ts'), 'utf-8');
-    expect(source).toContain("config.agentWorkspaceWritable ? '--bindmount' : '--bindmount_ro'");
-    expect(source).toContain("config.userWorkspaceWritable ? '--bindmount' : '--bindmount_ro'");
-    expect(source).not.toContain('workspaceMountsWritable');
-  });
-
-  test('seatbelt uses per-tier writable params', async () => {
-    const { readFileSync } = await import('node:fs');
-    const source = readFileSync(resolve('src/providers/sandbox/seatbelt.ts'), 'utf-8');
-    expect(source).toContain('agentWorkspaceWritable');
-    expect(source).toContain('userWorkspaceWritable');
-    expect(source).not.toContain('workspaceMountsWritable');
-  });
-
   test('apple container uses per-tier writable flags', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(resolve('src/providers/sandbox/apple.ts'), 'utf-8');
     expect(source).toContain("config.agentWorkspaceWritable ? 'rw' : 'ro'");
     expect(source).toContain("config.userWorkspaceWritable ? 'rw' : 'ro'");
-  });
-
-  test('seatbelt policy includes write rules for per-tier RW params', async () => {
-    const { readFileSync } = await import('node:fs');
-    const policy = readFileSync(resolve('policies/agent.sb'), 'utf-8');
-    expect(policy).toContain('(allow file-write* (subpath (param "AGENT_WORKSPACE_RW")))');
-    expect(policy).toContain('(allow file-write* (subpath (param "USER_WORKSPACE_RW")))');
   });
 
   test('server-completions uses isAdmin for agent workspace permission', async () => {
@@ -189,20 +101,6 @@ describe('sandbox providers do not mount identity (now via stdin payload)', () =
     const sandboxSection = source.slice(source.indexOf('sandboxConfig'));
     expect(sandboxSection).not.toMatch(/agentDir/);
     expect(source).toMatch(/[Ss]andbox\.spawn/);
-  });
-
-  test('bwrap provider does not mount identity directory', async () => {
-    const { readFileSync } = await import('node:fs');
-    const source = readFileSync(resolve('src/providers/sandbox/bwrap.ts'), 'utf-8');
-    expect(source).not.toContain('agentDir');
-    expect(source).not.toContain('CANONICAL.identity');
-  });
-
-  test('nsjail provider does not mount identity directory', async () => {
-    const { readFileSync } = await import('node:fs');
-    const source = readFileSync(resolve('src/providers/sandbox/nsjail.ts'), 'utf-8');
-    expect(source).not.toContain('agentDir');
-    expect(source).not.toContain('CANONICAL.identity');
   });
 
   test('docker provider does not mount identity directory', async () => {
@@ -578,21 +476,6 @@ describe('k8s pod spec workspace tier volumes', () => {
 // ── /workspace Root Is Read-Only ──────────────────────────────────────
 
 describe('/workspace root is read-only', () => {
-  test('nsjail creates tmpfs at workspace root', async () => {
-    const { readFileSync } = await import('node:fs');
-    const source = readFileSync(resolve('src/providers/sandbox/nsjail.ts'), 'utf-8');
-    expect(source).toContain('--tmpfsmount');
-    expect(source).toContain('CANONICAL.root');
-  });
-
-  test('bwrap creates tmpfs at workspace root', async () => {
-    const { readFileSync } = await import('node:fs');
-    const source = readFileSync(resolve('src/providers/sandbox/bwrap.ts'), 'utf-8');
-    // bwrap --tmpfs creates ephemeral workspace root; /workspace/scratch rw bind overlays on top
-    expect(source).toContain("'--tmpfs'");
-    expect(source).toContain('CANONICAL.root');
-  });
-
   test('docker already has --read-only flag', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(resolve('src/providers/sandbox/docker.ts'), 'utf-8');

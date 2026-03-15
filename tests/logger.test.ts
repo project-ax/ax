@@ -26,13 +26,13 @@ describe('Logger', () => {
   it('should log info with message and details', async () => {
     const { createLogger } = await import('../src/logger.js');
     const logger = createLogger({ stream: testStream, level: 'debug' });
-    logger.info('agent_spawn', { sandbox: 'bwrap' });
+    logger.info('agent_spawn', { sandbox: 'docker' });
 
     expect(lines).toHaveLength(1);
     const entry = JSON.parse(lines[0]);
     expect(entry.level).toBe(30); // pino info level
     expect(entry.msg).toBe('agent_spawn');
-    expect(entry.sandbox).toBe('bwrap');
+    expect(entry.sandbox).toBe('docker');
   });
 
   it('should log warn level', async () => {

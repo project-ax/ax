@@ -32,7 +32,7 @@ export interface ProfileDefaults {
   memoryMb: number;
 }
 
-const defaultSandbox = process.platform === 'darwin' ? 'seatbelt' : 'bwrap';
+const defaultSandbox = process.platform === 'darwin' ? 'apple' : 'docker';
 
 export const PROFILE_DEFAULTS: Record<string, ProfileDefaults> = {
   paranoid: {
@@ -177,7 +177,7 @@ export const PROVIDER_CHOICES = {
   credentials: ['keychain', 'plaintext'],
   skills: ['database'],
   audit: ['database'],
-  sandbox: ['subprocess', 'seatbelt', 'bwrap', 'nsjail', 'docker', 'apple'],
+  sandbox: ['subprocess', 'docker', 'apple', 'k8s'],
   scheduler: ['none', 'plainjob'],
   channels: ['slack'],
 } as const;
