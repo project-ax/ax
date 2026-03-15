@@ -4,7 +4,7 @@
  * agent spawning, outbound scanning, and memory persistence.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
@@ -760,6 +760,20 @@ export async function processCompletion(
       identity: identityPayload,
       skills: skillsPayload,
     });
+
+    // Guard: verify the IPC socket file still exists before spawning.
+    // If something deleted it (container runtime cleanup, temp file GC),
+    // fail fast with a diagnostic message instead of a cryptic ENOENT from
+    // the agent subprocess.
+    if (!existsSync(ipcSocketPath)) {
+      const dirContents = existsSync(ipcSocketDir) ? readdirSync(ipcSocketDir) : ['<dir missing>'];
+      reqLogger.error('ipc_socket_missing', {
+        ipcSocketPath,
+        ipcSocketDir,
+        dirContents,
+        message: 'proxy.sock was deleted after server startup — agent cannot connect',
+      });
+    }
 
     // Spawn, run, and collect agent output — with retry on transient crashes.
     // Transient: OOM kill (137), segfault (139), generic crash with retryable stderr.
