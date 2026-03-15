@@ -927,3 +927,53 @@ If needed later:
 4. Agent resumes from where it left off (same turn, higher resources)
 
 Architecturally feasible because the host re-sends full conversation history on every spawn.
+
+---
+
+## Review Feedback (2026-03-15)
+
+### Strengths
+
+- The target architecture is materially simpler (single agent container, explicit three-phase lifecycle), and the before/after tables make migration intent easy to reason about.
+- The Option A+ audit gate keeps the host as the policy decision point while allowing local tool execution, which preserves a strong control-plane boundary.
+- The plan includes concrete file-level impact and staged implementation tasks with test-first guidance.
+
+### Gaps / Risks to Address Before Implementation
+
+1. **Command execution hardening is underspecified.**
+   - The proposed `execFileSync('sh', ['-c', command])` path is workable, but we should define shell-escape expectations, timeout defaults, max output handling, and binary output behavior for audit/result payloads.
+   - Add explicit rules for redaction/truncation of potentially sensitive command output before `sandbox_result` logging.
+
+2. **Network isolation semantics need runtime-specific acceptance criteria.**
+   - “Run phase has no network” is clear at a high level, but the plan should define exact enforcement per runtime (Docker `--network=none`, Apple equivalent guarantees, K8s NetworkPolicy validation) and verification checks.
+   - Add a test matrix that proves deny-by-default egress during run phase.
+
+3. **K8s cleanup orchestration is still ambiguous.**
+   - The note “preStop hook or sidecar for cleanup” leaves failure modes unspecified (node eviction, SIGKILL, stuck preStop, partial upload).
+   - Pick one primary cleanup strategy and define retry/idempotency behavior for diff/upload/push.
+
+4. **Schema/handler compatibility and rollout sequencing need a migration strategy.**
+   - Introducing `sandbox_approve`/`sandbox_result` while removing old dispatch paths can break mixed-version host/agent deployments.
+   - Add a compatibility window plan (feature flag or dual-path support) with explicit cutover criteria.
+
+5. **Resource tier model is incomplete without scheduling limits and guardrails.**
+   - `default` and `heavy` tiers are defined, but quota controls, per-tenant limits, and burst behavior are not.
+   - Clarify where tier-to-runtime mappings are enforced and audited to prevent silent overprovisioning.
+
+6. **Observability and SLO impact are not defined.**
+   - The architecture change is substantial; add required metrics (approval latency, tool execution latency, cleanup success rate, workspace restore time, failed uploads) and error budgets.
+   - Define required audit fields for incident triage (`sessionId`, `agentId`, `operation`, decision reason, timing, runtime).
+
+7. **Deletion inventory should include a dependency proof checklist.**
+   - The removal list is comprehensive, but we should gate deletion with a static search checklist (imports, tests, docs, CI jobs, Helm values, env vars) to avoid orphaned references.
+
+8. **Security invariants should be restated as testable assertions in this plan.**
+   - Add explicit acceptance tests for “no credentials in container”, “no dynamic provider loading regression”, and “safePath enforced on file operations” across the new local executor path.
+
+### Recommended Additions to This Plan
+
+- Add a dedicated **Rollout & Backout** section (feature flag, canary percentage, rollback trigger).
+- Add a **Compatibility Matrix** (old host/new agent, new host/old agent, both new).
+- Add a **Failure Mode Table** for each phase (provision/run/cleanup) with detection + recovery.
+- Add a **Security Test Checklist** mapped to the project invariants.
+- Add a final **Definition of Done** checklist that includes docs/skills updates referenced in `CLAUDE.md`.
