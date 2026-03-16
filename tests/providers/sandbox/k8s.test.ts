@@ -154,6 +154,19 @@ describe('sandbox-k8s provider', () => {
     expect(natsEnv).toBeDefined();
   });
 
+  test('pod sets AX_IPC_TRANSPORT=nats and excludes AX_IPC_SOCKET', async () => {
+    const { create } = await import('../../../src/providers/sandbox/k8s.js');
+    const provider = await create(mockConfig());
+    await provider.spawn(mockSandboxConfig());
+
+    const env = mockCreateNamespacedPod.mock.calls[0][0].body.spec.containers[0].env;
+    const transportEnv = env.find((e: any) => e.name === 'AX_IPC_TRANSPORT');
+    expect(transportEnv).toEqual({ name: 'AX_IPC_TRANSPORT', value: 'nats' });
+
+    const socketEnv = env.find((e: any) => e.name === 'AX_IPC_SOCKET');
+    expect(socketEnv).toBeUndefined();
+  });
+
   test('pod includes activeDeadlineSeconds from timeoutSec', async () => {
     const { create } = await import('../../../src/providers/sandbox/k8s.js');
     const provider = await create(mockConfig());

@@ -108,12 +108,16 @@ function buildPodSpec(
           env: [
             // NATS connectivity
             { name: 'NATS_URL', value: options.natsUrl },
+            // Use NATS for IPC instead of Unix sockets (pods can't share host filesystem)
+            { name: 'AX_IPC_TRANSPORT', value: 'nats' },
             // Suppress agent debug/info logs — pod logs are piped into the
             // SandboxProcess.stdout stream which becomes the HTTP response.
             // Without this, pino JSON lines pollute the response content.
             { name: 'LOG_LEVEL', value: process.env.K8S_POD_LOG_LEVEL ?? 'warn' },
-            // Canonical paths from sandbox config
-            ...Object.entries(envVars).map(([name, value]) => ({ name, value })),
+            // Canonical paths from sandbox config (filter out AX_IPC_SOCKET — using NATS instead)
+            ...Object.entries(envVars)
+              .filter(([k]) => k !== 'AX_IPC_SOCKET')
+              .map(([name, value]) => ({ name, value })),
             // Pod identity
             { name: 'POD_NAME', valueFrom: { fieldRef: { fieldPath: 'metadata.name' } } },
           ],

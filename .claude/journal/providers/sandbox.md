@@ -2,6 +2,14 @@
 
 Sandbox providers, canonical paths, workspace tiers.
 
+## [2026-03-16 07:37] — Set AX_IPC_TRANSPORT=nats in k8s pod env
+
+**Task:** Update k8s sandbox provider to use NATS IPC instead of Unix sockets (pods can't access host filesystem)
+**What I did:** In buildPodSpec() env array, added AX_IPC_TRANSPORT=nats env var and filtered out AX_IPC_SOCKET from canonicalEnv() output. Added test verifying transport env is set and socket env is excluded.
+**Files touched:** src/providers/sandbox/k8s.ts, tests/providers/sandbox/k8s.test.ts
+**Outcome:** Success — 14 tests passing in k8s.test.ts
+**Notes:** canonicalEnv() includes AX_IPC_SOCKET by default; k8s pods need NATS transport since they can't share the host Unix socket.
+
 ## [2026-03-14 13:06] — Per-tier workspace permission hardening
 
 **Task:** Make /workspace root read-only, split workspaceMountsWritable into per-tier flags (agentWorkspaceWritable, userWorkspaceWritable), implement k8s scope provisioning via GCS, add transport abstraction.
