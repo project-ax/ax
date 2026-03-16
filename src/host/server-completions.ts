@@ -616,8 +616,12 @@ export async function processCompletion(
     // All container sandboxes now run the agent in-container.
     const agentInContainer = isContainerSandbox;
 
+    // K8s pod `command` overrides the image ENTRYPOINT, so we must include
+    // `node` explicitly. Docker/Apple pass args to the ENTRYPOINT (node),
+    // so including `node` would double-invoke it (node node runner.js).
+    const isK8s = config.providers.sandbox === 'k8s';
     const spawnCommand = agentInContainer
-      ? ['/opt/ax/dist/agent/runner.js']
+      ? [...(isK8s ? ['node'] : []), '/opt/ax/dist/agent/runner.js']
       : [process.execPath,
           // Dev mode: load tsx ESM loader so the .ts runner source is compiled on
           // the fly. Production: run compiled dist/agent/runner.js directly.

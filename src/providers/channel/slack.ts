@@ -87,8 +87,14 @@ export async function create(config: Config): Promise<ChannelProvider> {
     allowedMimeTypes: rawConfig.allowedMimeTypes ?? rawConfig.allowed_mime_types,
   };
 
-  // Dynamic import — @slack/bolt is an optional dependency
-  const { App, SocketModeReceiver, LogLevel } = await import('@slack/bolt');
+  // Dynamic import — @slack/bolt is an optional dependency.
+  // tsx exposes CJS named exports directly on the namespace; compiled Node.js
+  // puts them under .default. Check both so it works in dev and production.
+  const boltMod = await import('@slack/bolt') as any;
+  const cjs = boltMod.default;
+  const App = boltMod.App ?? cjs?.App;
+  const SocketModeReceiver = boltMod.SocketModeReceiver ?? cjs?.SocketModeReceiver;
+  const LogLevel = boltMod.LogLevel ?? cjs?.LogLevel;
 
   const slackLogger = getLogger().child({ component: 'slack' });
 
@@ -133,7 +139,7 @@ export async function create(config: Config): Promise<ChannelProvider> {
   // Bolt routes internal errors (including floating promise rejections during
   // socket disconnect/reconnect) through app.error(). Without this handler,
   // they become unhandled promise rejections that crash the process.
-  app.error(async (error) => {
+  app.error(async (error: any) => {
     slackLogger.warn('slack_app_error', {
       error: error.original instanceof Error ? error.original.message : String(error.original ?? error),
     });
@@ -249,7 +255,7 @@ export async function create(config: Config): Promise<ChannelProvider> {
   }
 
   // Handle DMs, group DMs, and thread replies — top-level channel messages are handled by app_mention
-  app.message(async ({ message }) => {
+  app.message(async ({ message }: any) => {
     const msg = message as SlackMessage;
     if (!msg.text || !msg.user) return;
     if (msg.user === botUserId) return;
@@ -275,7 +281,7 @@ export async function create(config: Config): Promise<ChannelProvider> {
   });
 
   // Handle @mentions in channels
-  app.event('app_mention', async ({ event }) => {
+  app.event('app_mention', async ({ event }: any) => {
     if (!event.text || !event.user) return;
     if (event.user === botUserId) return;
     if (!messageHandler) return;

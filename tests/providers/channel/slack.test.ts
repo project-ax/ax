@@ -37,7 +37,9 @@ const mockSocketClient = {
 };
 const eventHandlers = new Map<string, Function>();
 
-vi.mock('@slack/bolt', () => ({
+// Wrap exports under .default to match how Node's native ESM import() exposes
+// a CJS module — the source code uses ((mod).default ?? mod) to unwrap.
+const boltExports = {
   App: class MockApp {
     constructor() {}
     message(handler: Function) { eventHandlers.set('message', handler); }
@@ -58,7 +60,8 @@ vi.mock('@slack/bolt', () => ({
     constructor() {}
   },
   LogLevel: { ERROR: 'error', WARN: 'warn', INFO: 'info', DEBUG: 'debug' },
-}));
+};
+vi.mock('@slack/bolt', () => ({ default: boltExports, ...boltExports }));
 
 describe('Slack channel provider', () => {
   beforeEach(() => {

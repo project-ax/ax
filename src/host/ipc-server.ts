@@ -268,6 +268,7 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
         action: actionName,
         durationMs,
         totalDurationMs: Date.now() - handlerStart,
+        result,
         responseKeys: Object.keys(result ?? {}),
       });
       await providers.audit.log({
