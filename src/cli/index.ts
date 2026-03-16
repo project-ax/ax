@@ -166,7 +166,7 @@ async function runServe(args: string[]): Promise<void> {
   let daemon = false;
   let socketPath: string | undefined;
   let port: number | undefined;
-  let verbose = false;
+  let verbose = process.env.AX_VERBOSE === '1';
   let jsonOutput = false;
 
   for (let i = 0; i < args.length; i++) {

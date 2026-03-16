@@ -133,7 +133,7 @@ export async function createPoolK8sClient(namespace?: string): Promise<PoolK8sCl
                 { name: 'AX_AGENT_WORKSPACE', value: '/workspace/agent' },
                 { name: 'AX_USER_WORKSPACE', value: '/workspace/user' },
                 { name: 'SANDBOX_TIER', value: template.tier },
-                { name: 'LOG_LEVEL', value: 'warn' },
+                { name: 'LOG_LEVEL', value: process.env.AX_VERBOSE === '1' ? 'debug' : 'warn' },
                 { name: 'POD_NAME', valueFrom: { fieldRef: { fieldPath: 'metadata.name' } } },
               ],
               resources: {

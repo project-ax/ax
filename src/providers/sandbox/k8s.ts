@@ -124,7 +124,7 @@ function buildPodSpec(
             // Suppress agent debug/info logs — pod logs are piped into the
             // SandboxProcess.stdout stream which becomes the HTTP response.
             // Without this, pino JSON lines pollute the response content.
-            { name: 'LOG_LEVEL', value: process.env.K8S_POD_LOG_LEVEL ?? 'warn' },
+            { name: 'LOG_LEVEL', value: process.env.K8S_POD_LOG_LEVEL ?? (process.env.AX_VERBOSE === '1' ? 'debug' : 'warn') },
             // Canonical paths from sandbox config (filter out AX_IPC_SOCKET — using NATS instead)
             ...Object.entries(envVars)
               .filter(([k]) => k !== 'AX_IPC_SOCKET')
@@ -195,7 +195,7 @@ export function buildExecCommand(
   // IPC transport
   envPairs.push('AX_IPC_TRANSPORT=nats');
   envPairs.push(`NATS_URL=${natsUrl}`);
-  envPairs.push(`LOG_LEVEL=${process.env.K8S_POD_LOG_LEVEL ?? 'warn'}`);
+  envPairs.push(`LOG_LEVEL=${process.env.K8S_POD_LOG_LEVEL ?? (process.env.AX_VERBOSE === '1' ? 'debug' : 'warn')}`);
 
   // Final command: env KEY=VAL ... <agent-command>
   return ['env', ...envPairs, ...config.command];
