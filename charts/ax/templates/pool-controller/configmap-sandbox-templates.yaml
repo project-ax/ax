@@ -9,7 +9,7 @@ metadata:
 data:
   {{- $sandboxImage := include "ax.image" (dict "image" .Values.sandbox.image "imageDefaults" .Values.imageDefaults "context" $) }}
   {{- $natsUrl := include "ax.natsUrl" . }}
-  {{- $tiers := include "ax.preset.sandboxTiers" . | fromYaml }}
+  {{- $tiers := .Values.sandbox.tiers }}
   {{- range $tierName, $tier := $tiers }}
   {{ $tierName }}.json: |
     {
