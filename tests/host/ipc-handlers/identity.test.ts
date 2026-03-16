@@ -163,6 +163,48 @@ describe('Identity IPC handlers', () => {
     expect(stored).toBe('# My Soul');
   });
 
+  test('identity_write allows when admins file is empty (k8s agent-runtime)', async () => {
+    // In k8s, the agent-runtime pod creates an empty admins file at startup.
+    // Admin claims happen on the host pod (separate filesystem).
+    // The admin gate should be skipped when no admins are configured.
+    writeFileSync(join(agentTopDirPath, 'admins'), '', 'utf-8');
+
+    const documents = createMockDocumentStore();
+    const providers = stubProviders(documents);
+    const handlers = createIdentityHandlers(providers, {
+      agentName: 'main',
+      profile: 'balanced',
+    });
+
+    const result = await handlers.identity_write(
+      { file: 'SOUL.md', content: '# My Soul', reason: 'bootstrap', origin: 'user_request' },
+      ctx,
+    );
+
+    expect(result.applied).toBe(true);
+    const stored = await documents.get('identity', 'main/SOUL.md');
+    expect(stored).toBe('# My Soul');
+  });
+
+  test('identity_write allows when no admins file exists (fresh install)', async () => {
+    // No admins file at all — should allow writes (bootstrap scenario)
+    const documents = createMockDocumentStore();
+    const providers = stubProviders(documents);
+    const handlers = createIdentityHandlers(providers, {
+      agentName: 'main',
+      profile: 'balanced',
+    });
+
+    const result = await handlers.identity_write(
+      { file: 'IDENTITY.md', content: '# My Identity', reason: 'bootstrap', origin: 'user_request' },
+      ctx,
+    );
+
+    expect(result.applied).toBe(true);
+    const stored = await documents.get('identity', 'main/IDENTITY.md');
+    expect(stored).toBe('# My Identity');
+  });
+
   test('identity_write allows when no userId (system context)', async () => {
     const documents = createMockDocumentStore();
     const providers = stubProviders(documents);
@@ -222,6 +264,26 @@ describe('Identity IPC handlers', () => {
     expect(result.applied).toBe(true);
     const stored = await documents.get('identity', 'main/users/alice/USER.md');
     expect(stored).toBe('# Alice prefs');
+  });
+
+  test('user_write allows writing other user file when admins file is empty (k8s)', async () => {
+    writeFileSync(join(agentTopDirPath, 'admins'), '', 'utf-8');
+
+    const documents = createMockDocumentStore();
+    const providers = stubProviders(documents);
+    const handlers = createIdentityHandlers(providers, {
+      agentName: 'main',
+      profile: 'balanced',
+    });
+
+    const result = await handlers.user_write(
+      { userId: 'bob', content: '# Bob prefs', reason: 'test', origin: 'user_request' },
+      ctx, // alice writing bob's file — allowed because no admins configured
+    );
+
+    expect(result.applied).toBe(true);
+    const stored = await documents.get('identity', 'main/users/bob/USER.md');
+    expect(stored).toBe('# Bob prefs');
   });
 
   test('user_write allows admin writing another user file', async () => {

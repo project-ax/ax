@@ -8,9 +8,23 @@ import type { ProviderRegistry } from '../../types.js';
 import type { TaintBudget } from '../taint-budget.js';
 import type { IPCContext } from '../ipc-server.js';
 import { join } from 'node:path';
-import { unlinkSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { agentDir as agentDirPath, agentIdentityDir, agentIdentityFilesDir } from '../../paths.js';
 import { isAdmin } from '../server.js';
+
+/**
+ * Returns true when the admins file exists and contains at least one entry.
+ * In k8s, the agent-runtime pod creates an empty admins file at startup but
+ * never populates it (admin claims happen on the host pod with a separate
+ * filesystem). When no admins are configured locally, the admin gate is
+ * meaningless and should be skipped — access control is handled at the host layer.
+ */
+function hasAnyAdmin(agentDir: string): boolean {
+  const adminsPath = join(agentDir, 'admins');
+  if (!existsSync(adminsPath)) return false;
+  const lines = readFileSync(adminsPath, 'utf-8').split('\n').map(l => l.trim()).filter(Boolean);
+  return lines.length > 0;
+}
 
 export interface IdentityHandlerOptions {
   agentName: string;
@@ -32,8 +46,10 @@ export function createIdentityHandlers(providers: ProviderRegistry, opts: Identi
     },
 
     identity_write: async (req: any, ctx: IPCContext) => {
-      // 0a. Admin gate — non-admin users cannot directly modify identity files
-      if (ctx.userId && !isAdmin(topDir, ctx.userId)) {
+      // 0a. Admin gate — non-admin users cannot directly modify identity files.
+      // Skip when no admins are configured locally (e.g. k8s agent-runtime where
+      // admin state lives on the host pod's filesystem, not here).
+      if (ctx.userId && !isAdmin(topDir, ctx.userId) && hasAnyAdmin(topDir)) {
         await providers.audit.log({
           action: 'identity_write',
           sessionId: ctx.sessionId,
@@ -116,8 +132,9 @@ export function createIdentityHandlers(providers: ProviderRegistry, opts: Identi
         return { ok: false, error: 'user_write requires userId in payload' };
       }
 
-      // 0a. Admin gate — non-admins can only write their own user file
-      if (ctx.userId && ctx.userId !== req.userId && !isAdmin(topDir, ctx.userId)) {
+      // 0a. Admin gate — non-admins can only write their own user file.
+      // Skip when no admins are configured locally (k8s agent-runtime compat).
+      if (ctx.userId && ctx.userId !== req.userId && !isAdmin(topDir, ctx.userId) && hasAnyAdmin(topDir)) {
         await providers.audit.log({
           action: 'user_write',
           sessionId: ctx.sessionId,
