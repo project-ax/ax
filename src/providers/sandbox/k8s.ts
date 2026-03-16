@@ -398,12 +398,21 @@ export async function create(_config: Config): Promise<SandboxProvider> {
     const stderr = new PassThrough();
     const stdin = new PassThrough();
 
-    // The exec exit resolves when the command inside the pod finishes.
-    // We also watch pod phase as a safety net (pod may be killed externally).
+    // Delete the claimed pod (fire-and-forget). Called from every
+    // completion path so claimed pods don't accumulate as zombies.
+    function releaseClaimedPod() {
+      coreApi.deleteNamespacedPod({ name: podName, namespace }).catch((err: any) => {
+        logger.warn('warm_pod_release_failed', { podName, error: err?.message });
+      });
+    }
+
+    // The k8s Exec exit resolves when the command inside the pod finishes.
+    // Every resolution path also deletes the claimed pod.
     const execDone = new Promise<number>((resolve) => {
       let resolved = false;
 
-      // Start exec — the agent runs as a child process of the standby entrypoint.
+      // Start k8s Exec — the agent runs as a child of the standby entrypoint.
+      // Note: this is the k8s Exec API (not child_process.exec).
       exec.exec(
         namespace,
         podName,
@@ -417,6 +426,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
           if (resolved) return;
           resolved = true;
           activePods.delete(pid);
+          releaseClaimedPod();
 
           // status is a k8s V1Status object
           const exitCode = status?.status === 'Success' ? 0 : 1;
@@ -426,6 +436,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         if (!resolved) {
           resolved = true;
           activePods.delete(pid);
+          releaseClaimedPod();
           logger.warn('warm_exec_failed', { podName, error: (err as Error).message });
           resolve(1);
         }
@@ -437,6 +448,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         if (!resolved) {
           resolved = true;
           activePods.delete(pid);
+          releaseClaimedPod();
           logger.warn('warm_exec_timeout', { podName, timeoutMs });
           resolve(1);
         }

@@ -80,7 +80,13 @@ describe('warm-pool-client', () => {
       expect.objectContaining({
         namespace: 'test-ns',
         name: 'pod-old',
-        body: { metadata: { labels: { 'ax.io/status': 'claimed' } } },
+        body: [
+          { op: 'test', path: '/metadata/labels/ax.io~1status', value: 'warm' },
+          { op: 'replace', path: '/metadata/labels/ax.io~1status', value: 'claimed' },
+        ],
+      }),
+      expect.objectContaining({
+        headers: { 'Content-Type': 'application/json-patch+json' },
       }),
     );
   });
@@ -121,6 +127,52 @@ describe('warm-pool-client', () => {
 
     expect(result).toEqual({ name: 'pod-available', tier: 'light' });
     expect(mockPatchNamespacedPod).toHaveBeenCalledTimes(2);
+  });
+
+  test('claimPod retries on 422 (JSON Patch test failed — already claimed)', async () => {
+    mockPods.push(
+      makePod('pod-already-claimed', 'Running', 5),
+      makePod('pod-still-warm', 'Running', 1),
+    );
+
+    // First patch fails with 422 (JSON Patch test op failed), second succeeds
+    mockPatchNamespacedPod
+      .mockRejectedValueOnce({ response: { statusCode: 422 } })
+      .mockResolvedValueOnce({});
+
+    const { createWarmPoolClient } = await import(
+      '../../../src/providers/sandbox/warm-pool-client.js'
+    );
+    const client = await createWarmPoolClient('test-ns');
+
+    const result = await client.claimPod('light');
+
+    expect(result).toEqual({ name: 'pod-still-warm', tier: 'light' });
+    expect(mockPatchNamespacedPod).toHaveBeenCalledTimes(2);
+  });
+
+  test('claimPod uses JSON Patch with test precondition', async () => {
+    mockPods.push(makePod('pod-atomic', 'Running', 1));
+
+    const { createWarmPoolClient } = await import(
+      '../../../src/providers/sandbox/warm-pool-client.js'
+    );
+    const client = await createWarmPoolClient('test-ns');
+
+    await client.claimPod('light');
+
+    expect(mockPatchNamespacedPod).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'pod-atomic',
+        body: [
+          { op: 'test', path: '/metadata/labels/ax.io~1status', value: 'warm' },
+          { op: 'replace', path: '/metadata/labels/ax.io~1status', value: 'claimed' },
+        ],
+      }),
+      expect.objectContaining({
+        headers: { 'Content-Type': 'application/json-patch+json' },
+      }),
+    );
   });
 
   test('claimPod retries on 404 Not Found', async () => {

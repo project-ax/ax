@@ -88,24 +88,28 @@ export async function createWarmPoolClient(namespace?: string): Promise<WarmPool
         if (!podName) continue;
 
         try {
+          // Atomic compare-and-swap: the JSON Patch 'test' op verifies the
+          // label is still 'warm' before replacing it with 'claimed'. If
+          // another host already claimed this pod, the test fails with 422.
+          // Note: '/' in label key ax.io/status is escaped as ~1 per RFC 6901.
           await api.patchNamespacedPod(
             {
               namespace: ns,
               name: podName,
-              body: {
-                metadata: {
-                  labels: { 'ax.io/status': 'claimed' },
-                },
-              },
+              body: [
+                { op: 'test', path: '/metadata/labels/ax.io~1status', value: 'warm' },
+                { op: 'replace', path: '/metadata/labels/ax.io~1status', value: 'claimed' },
+              ],
             },
+            { headers: { 'Content-Type': 'application/json-patch+json' } },
           );
 
           logger.info('pod_claimed', { podName, tier });
           return { name: podName, tier };
         } catch (err: unknown) {
           const status = (err as { response?: { statusCode?: number } }).response?.statusCode;
-          if (status === 404 || status === 409) {
-            // Pod was already claimed or deleted — try next
+          if (status === 404 || status === 409 || status === 422) {
+            // 404: pod deleted, 409: conflict, 422: JSON Patch test failed (already claimed)
             logger.debug('claim_conflict', { podName, status });
             continue;
           }

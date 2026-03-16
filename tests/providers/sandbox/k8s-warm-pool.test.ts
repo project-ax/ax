@@ -309,6 +309,34 @@ describe('k8s provider warm pool integration', () => {
     expect(proc.pid).toBeGreaterThan(0);
   });
 
+  test('claimed pod is auto-deleted after exec completion', async () => {
+    process.env.WARM_POOL_ENABLED = 'true';
+
+    mockClaimPod.mockResolvedValueOnce({ name: 'warm-pod-auto', tier: 'light' });
+
+    const { create } = await import('../../../src/providers/sandbox/k8s.js');
+    const provider = await create(mockConfig());
+
+    const config: SandboxConfig = {
+      workspace: '/tmp/ws',
+      ipcSocket: '/tmp/ipc.sock',
+      command: ['node', 'runner.js'],
+      timeoutSec: 30,
+    };
+
+    const proc = await provider.spawn(config);
+
+    // Wait for exec to complete (the mock resolves after 20ms)
+    const exitCode = await proc.exitCode;
+    expect(exitCode).toBe(0);
+
+    // Pod should have been auto-deleted after exec finished — no need for kill()
+    await new Promise(r => setTimeout(r, 10));
+    expect(mockDeleteNamespacedPod).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'warm-pod-auto' }),
+    );
+  });
+
   test('warm pool kill deletes the claimed pod', async () => {
     process.env.WARM_POOL_ENABLED = 'true';
 
