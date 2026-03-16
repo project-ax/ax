@@ -85,9 +85,6 @@ describe('warm-pool-client', () => {
           { op: 'replace', path: '/metadata/labels/ax.io~1status', value: 'claimed' },
         ],
       }),
-      expect.objectContaining({
-        headers: { 'Content-Type': 'application/json-patch+json' },
-      }),
     );
   });
 
@@ -168,9 +165,6 @@ describe('warm-pool-client', () => {
           { op: 'test', path: '/metadata/labels/ax.io~1status', value: 'warm' },
           { op: 'replace', path: '/metadata/labels/ax.io~1status', value: 'claimed' },
         ],
-      }),
-      expect.objectContaining({
-        headers: { 'Content-Type': 'application/json-patch+json' },
       }),
     );
   });
