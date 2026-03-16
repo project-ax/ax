@@ -2,6 +2,14 @@
 
 Integration test fixes, CI stability, smoke test improvements.
 
+## [2026-03-16 00:24] — Add comprehensive regression test suite
+
+**Task:** Add regression tests to prevent recurrence of bugs fixed in recent commits
+**What I did:** Created tests/regression.test.ts with 67 tests across 16 describe blocks covering: IPC message correlation (_msgId), Apple Container bridge socket isolation, IPC server async readiness, Gemini parameter name fallback, container ENTRYPOINT handling (K8s vs Docker/Apple), DocumentStore bootstrap seeding, Docker/K8s security invariants, canonical path consistency, subprocess symlink lifecycle, enforceTimeout correctness, message framing protocol, identity-via-stdin, and network isolation per sandbox phase.
+**Files touched:** tests/regression.test.ts (created)
+**Outcome:** Success — all 67 new tests pass, full suite (2474 tests, 204 files) green
+**Notes:** Tests use source-level assertions (readFileSync + expect patterns) which run fast without requiring Docker/K8s infrastructure. Each describe block references the original bug commit hash for traceability.
+
 ## [2026-03-01 21:20] — Fix CI unhandled ENOENT in phase1.test.ts
 
 **Task:** Fix failing CI caused by unhandled ENOENT error when pino's async file transport races with temp directory cleanup
