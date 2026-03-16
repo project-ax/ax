@@ -111,14 +111,15 @@ export function createIPCMcpServer(client: IPCClient, opts?: MCPServerOptions): 
     ),
 
     // ── Web ──
-    tool('web',
-      'Fetch URLs and search the web.\n\n' +
-      'Use `type` to select:\n' +
-      '- fetch: Fetch content from a URL. Pass the URL in the `url` parameter.\n' +
-      '- search: Search the web. Pass the search terms in the `query` parameter.',
+    tool(
+      'web',
+      'Retrieve web content.\n\n' +
+      'If the user message contains a URL, ALWAYS use `type: "fetch"` with `url`.\n' +
+      'Only use `type: "search"` when no URL is provided and the user is asking to find information on the web.\n' +
+      'Never put a URL in `query`.',
       {
         type: z.enum(['fetch', 'search']),
-        url: z.string().optional(),
+        url: z.string().url().optional(),
         method: z.enum(['GET', 'HEAD']).optional(),
         headers: z.record(z.string(), z.string()).optional(),
         timeoutMs: z.number().optional(),
