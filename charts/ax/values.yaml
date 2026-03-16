@@ -133,7 +133,7 @@ poolController:
 sandbox:
   image:
     registry: ""
-    repository: ax-sandbox
+    repository: ax
     tag: "latest"
     pullPolicy: ""
   # Pod runtime class for sandbox pods (e.g., "gvisor" for GKE Autopilot).

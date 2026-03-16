@@ -120,10 +120,14 @@ export async function createPoolK8sClient(namespace?: string): Promise<PoolK8sCl
           hostNetwork: false,
           activeDeadlineSeconds: template.activeDeadlineSeconds ?? 3600,
           ...(template.nodeSelector ? { nodeSelector: template.nodeSelector } : {}),
+          ...(process.env.K8S_IMAGE_PULL_SECRETS ? {
+            imagePullSecrets: process.env.K8S_IMAGE_PULL_SECRETS.split(',').map(s => ({ name: s.trim() })),
+          } : {}),
           containers: [
             {
               name: 'sandbox',
               image: template.image,
+              ...(process.env.K8S_IMAGE_PULL_POLICY ? { imagePullPolicy: process.env.K8S_IMAGE_PULL_POLICY } : {}),
               command: template.command,
               workingDir: '/workspace',
               env: [

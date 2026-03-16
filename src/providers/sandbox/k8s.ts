@@ -21,6 +21,7 @@
  *   K8S_POD_IMAGE — container image (default: "ax/agent:latest")
  *   K8S_RUNTIME_CLASS — runtime class name (default: "gvisor")
  *   NATS_URL — NATS server URL passed to sandbox pods
+ *   K8S_IMAGE_PULL_SECRETS — comma-separated secret names for private registries
  *   WARM_POOL_ENABLED — enable warm pool claiming (default: true)
  *   WARM_POOL_TIER — tier to claim from (default: "light")
  */
@@ -84,10 +85,16 @@ function buildPodSpec(
       automountServiceAccountToken: false,
       hostNetwork: false,
 
+      // Private registry credentials
+      ...(process.env.K8S_IMAGE_PULL_SECRETS ? {
+        imagePullSecrets: process.env.K8S_IMAGE_PULL_SECRETS.split(',').map(s => ({ name: s.trim() })),
+      } : {}),
+
       containers: [
         {
           name: 'sandbox',
           image: options.image,
+          ...(process.env.K8S_IMAGE_PULL_POLICY ? { imagePullPolicy: process.env.K8S_IMAGE_PULL_POLICY } : {}),
           command: [cmd, ...args],
           workingDir: CANONICAL.root,
           stdin: true,

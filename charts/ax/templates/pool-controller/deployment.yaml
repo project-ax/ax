@@ -42,6 +42,15 @@ spec:
               value: {{ include "ax.image" (dict "image" .Values.sandbox.image "imageDefaults" .Values.imageDefaults "context" $) | quote }}
             - name: NATS_URL
               value: {{ include "ax.natsUrl" . | quote }}
+            {{- $sandboxPullPolicy := .Values.sandbox.image.pullPolicy | default .Values.imageDefaults.pullPolicy | default "" }}
+            {{- if $sandboxPullPolicy }}
+            - name: K8S_IMAGE_PULL_POLICY
+              value: {{ $sandboxPullPolicy | quote }}
+            {{- end }}
+            {{- if .Values.global.imagePullSecrets }}
+            - name: K8S_IMAGE_PULL_SECRETS
+              value: {{ join "," .Values.global.imagePullSecrets | quote }}
+            {{- end }}
             {{- with .Values.poolController.env }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
