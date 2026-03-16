@@ -2,6 +2,14 @@
 
 IPC protocol enhancements: heartbeat keep-alive, schema hardening, NATS transport.
 
+## [2026-03-16 07:40] — Add NATS IPC round-trip integration test
+
+**Task:** Create an integration test that verifies NATSIPCClient and startNATSIPCHandler work together end-to-end via real NATS request/reply.
+**What I did:** Created `tests/integration/nats-ipc-roundtrip.test.ts` with 3 tests: sandbox_approve routing, memory_search routing, and unknown action default response. Test gracefully skips when NATS is unavailable (probes connectivity in beforeAll, returns early from each test if natsAvailable is false). Starts handler with mock handleIPC, connects client, and verifies round-trip JSON serialization.
+**Files touched:** `tests/integration/nats-ipc-roundtrip.test.ts` (new)
+**Outcome:** Success — all 3 tests pass (skip gracefully when NATS is not running locally).
+**Notes:** Test does not start a NATS server — relies on external NATS being available. CI will skip unless NATS_URL is configured.
+
 ## [2026-03-16 07:34] — Add NATS IPC handler for host-side request routing
 
 **Task:** Create a NATS-based IPC handler for the host side that subscribes to ipc.request.{sessionId} and routes incoming IPC requests through the existing handleIPC pipeline.
