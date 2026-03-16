@@ -2,6 +2,20 @@
 
 Agent runner implementations, process management, dev/production mode split.
 
+## [2026-03-16 10:00] — Add NATS IPC transport support in runner.ts
+
+**Task:** Support AX_IPC_TRANSPORT=nats env var in runner.ts so k8s pods can use NATSIPCClient instead of IPCClient
+**What I did:**
+- Added `IIPCClient` interface to runner.ts that both IPCClient and NATSIPCClient satisfy (call, connect, setContext)
+- Changed `AgentConfig.ipcClient` type from `IPCClient` to `IIPCClient`
+- Updated `compactHistory` param type from `IPCClient` to `IIPCClient`
+- Relaxed `parseArgs()` validation: when `AX_IPC_TRANSPORT=nats`, `ipcSocket` is not required (only workspace)
+- Added three-way branch in `if (isMain)` block: NATS mode (dynamic import + connect), listen mode (Apple Container), default (runners create their own)
+- NATS client uses top-level `await` (ESM) for `import()` and `connect()`, session context set later via `setContext()` after stdin parse
+**Files touched:** `src/agent/runner.ts`
+**Outcome:** Success — all 359 agent tests pass (1 pre-existing failure unrelated: macOS /private/var symlink)
+**Notes:** NATSIPCClient is dynamically imported to avoid pulling in nats dependency in non-k8s environments
+
 ## [2026-03-14 10:15] — Fix: Apple Container sandbox_bash "No workspace registered" error
 
 **Task:** Debug "No workspace registered for session" error in sandbox_bash IPC handler when using Apple Container sandbox

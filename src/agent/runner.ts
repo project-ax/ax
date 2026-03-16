@@ -35,6 +35,13 @@ export interface SkillPayload {
   scope: 'agent' | 'user';
 }
 
+/** Minimal IPC client interface satisfied by both IPCClient and NATSIPCClient. */
+export interface IIPCClient {
+  call(request: Record<string, unknown>, timeoutMs?: number): Promise<Record<string, unknown>>;
+  connect(): Promise<void>;
+  setContext(ctx: { sessionId?: string; requestId?: string; userId?: string; sessionScope?: string }): void;
+}
+
 export interface AgentConfig {
   agent?: AgentType;
   model?: string;          // e.g. 'moonshotai/kimi-k2-instruct-0905' (provider prefix already stripped)
@@ -42,9 +49,9 @@ export interface AgentConfig {
   /** If true, the IPC client listens for an incoming connection instead of
    *  connecting out. Used by Apple Container sandbox (reverse bridge). */
   ipcListen?: boolean;
-  /** Pre-connected IPC client (created before stdin read in listen mode).
+  /** Pre-connected IPC client (created before stdin read in listen/NATS mode).
    *  Runners should use this instead of creating a new IPCClient. */
-  ipcClient?: IPCClient;
+  ipcClient?: IIPCClient;
   workspace: string;
   proxySocket?: string;
   maxTokens?: number;
@@ -136,7 +143,7 @@ function estimateHistoryTokens(messages: AgentMessage[]): number {
  */
 export async function compactHistory(
   history: ConversationTurn[],
-  client: IPCClient,
+  client: IIPCClient,
   contextWindow: number = DEFAULT_CONTEXT_WINDOW,
 ): Promise<ConversationTurn[]> {
   if (history.length <= KEEP_RECENT_TURNS) return history;
@@ -220,8 +227,14 @@ function parseArgs(): AgentConfig {
   const workspace = process.env.AX_WORKSPACE || '';
   const ipcListen = process.env.AX_IPC_LISTEN === '1';
 
-  if (!ipcSocket || !workspace) {
+  const ipcTransport = process.env.AX_IPC_TRANSPORT ?? 'socket';
+
+  if (ipcTransport === 'socket' && (!ipcSocket || !workspace)) {
     logger.error('missing_args', { message: 'Usage: agent-runner --agent <type> --ipc-socket <path> (AX_WORKSPACE env var required)' });
+    process.exit(1);
+  }
+  if (ipcTransport === 'nats' && !workspace) {
+    logger.error('missing_args', { message: 'AX_IPC_TRANSPORT=nats requires AX_WORKSPACE env var' });
     process.exit(1);
   }
 
@@ -350,11 +363,25 @@ if (isMain) {
   const config = parseArgs();
   logger.debug('main_start', { agent: config.agent, workspace: config.workspace });
 
-  // In listen mode (Apple Container), start the IPC listener BEFORE reading
-  // stdin. The host waits for "[signal] ipc_ready" in stderr before connecting
-  // the bridge — the runtime only forwards connections when the container-side
-  // listener exists. Starting before stdin maximizes boot time.
-  if (config.ipcListen) {
+  // Choose IPC transport based on env var. Three modes:
+  // 1. NATS (k8s): use NATS request/reply instead of Unix socket
+  // 2. Listen (Apple Container): listen for incoming connection before stdin
+  // 3. Default (socket connect): runners create their own IPCClient later
+  const ipcTransport = process.env.AX_IPC_TRANSPORT ?? 'socket';
+
+  if (ipcTransport === 'nats') {
+    // K8s mode: use NATS for IPC instead of Unix socket
+    const { NATSIPCClient } = await import('./nats-ipc-client.js');
+    const client = new NATSIPCClient({
+      sessionId: '', // set after stdin parse via setContext()
+    });
+    await client.connect();
+    config.ipcClient = client;
+  } else if (config.ipcListen) {
+    // Apple Container: listen mode — start the IPC listener BEFORE reading
+    // stdin. The host waits for "[signal] ipc_ready" in stderr before connecting
+    // the bridge — the runtime only forwards connections when the container-side
+    // listener exists. Starting before stdin maximizes boot time.
     const client = new IPCClient({ socketPath: config.ipcSocket, listen: true });
     client.connect().then(() => {
       logger.debug('ipc_listen_ready', { socketPath: config.ipcSocket });
