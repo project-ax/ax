@@ -1,6 +1,14 @@
 # IPC: Protocol
 
-IPC protocol enhancements: heartbeat keep-alive, schema hardening.
+IPC protocol enhancements: heartbeat keep-alive, schema hardening, NATS transport.
+
+## [2026-03-16 07:33] — Add NATS IPC client for k8s sandbox pods
+
+**Task:** Create a NATS-based IPC client as a drop-in replacement for IPCClient when running inside k8s sandbox pods, using NATS request/reply instead of Unix sockets.
+**What I did:** Created `NATSIPCClient` class in `src/agent/nats-ipc-client.ts` that matches the `IPCClient` interface (connect, call, disconnect, setContext) but communicates via NATS request/reply on `ipc.request.{sessionId}` subjects. Enriches requests with _sessionId, _requestId, _userId, _sessionScope context fields. Created comprehensive test file with 13 tests covering: request/reply flow, context enrichment, subject routing, setContext updates, timeout propagation, idempotent connect, custom NATS URL, drain on disconnect, auto-connect, and optional field omission.
+**Files touched:** `src/agent/nats-ipc-client.ts` (new), `tests/agent/nats-ipc-client.test.ts` (new)
+**Outcome:** Success — all 13 tests pass.
+**Notes:** Uses dynamic `import('nats')` like the existing nats-bridge.ts. NATS module is already in package.json dependencies. Selected by `AX_IPC_TRANSPORT=nats` env var (wiring into runner.ts is a separate task).
 
 ## [2026-03-15 16:23] — Fix proxy.sock ENOENT race on first message after restart
 
