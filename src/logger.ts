@@ -90,10 +90,10 @@ export function prettyFormat(obj: Record<string, unknown>): string {
 // Logger Factory
 // ═══════════════════════════════════════════════════════
 
-function getLogPath(): string {
+function getLogPath(): string | null {
   const home = process.env.AX_HOME || join(homedir(), '.ax');
   const dir = join(home, 'data');
-  try { mkdirSync(dir, { recursive: true }); } catch { /* best-effort */ }
+  try { mkdirSync(dir, { recursive: true }); } catch { return null; /* read-only filesystem */ }
   return join(dir, 'ax.log');
 }
 
@@ -125,10 +125,11 @@ export function createLogger(opts: LoggerOptions = {}): Logger {
   if (usePretty) {
     // Custom pretty printer using our own prettyFormat() — replaces pino-pretty
     const streams: Array<{ level: string; stream: DestinationStream }> = [];
-    if (useFile) {
+    const logPath = useFile ? getLogPath() : null;
+    if (logPath) {
       streams.push({
         level: 'debug',
-        stream: pino.destination({ dest: getLogPath(), mkdir: true, sync: syncFile }),
+        stream: pino.destination({ dest: logPath, mkdir: true, sync: syncFile }),
       });
     }
     streams.push({
@@ -153,10 +154,11 @@ export function createLogger(opts: LoggerOptions = {}): Logger {
   // so writes are synchronous and immediately visible in `tail -f`.
   if (syncFile) {
     const streams: Array<{ level: string; stream: DestinationStream }> = [];
-    if (useFile) {
+    const logPath = useFile ? getLogPath() : null;
+    if (logPath) {
       streams.push({
         level: 'debug',
-        stream: pino.destination({ dest: getLogPath(), mkdir: true, sync: true }),
+        stream: pino.destination({ dest: logPath, mkdir: true, sync: true }),
       });
     }
     streams.push({
@@ -169,10 +171,11 @@ export function createLogger(opts: LoggerOptions = {}): Logger {
 
   const targets: pino.TransportTargetOptions[] = [];
 
-  if (useFile) {
+  const logPath = useFile ? getLogPath() : null;
+  if (logPath) {
     targets.push({
       target: 'pino/file',
-      options: { destination: getLogPath(), mkdir: true },
+      options: { destination: logPath, mkdir: true },
       level: 'debug',
     });
   }
