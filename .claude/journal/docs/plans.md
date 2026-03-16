@@ -2,6 +2,14 @@
 
 Architecture analysis, gap analysis, design documents, implementation plans.
 
+## [2026-03-16 12:00] — Update architecture plans with k8s NATS IPC supersession notes
+
+**Task:** Add supersession notes to two architecture docs pointing to the new k8s NATS IPC sandbox plan.
+**What I did:** Added an "Updated 2026-03-16" blockquote to k8s-agent-compute-architecture.md and a "K8s update 2026-03-16" blockquote to agent-in-container-design.md, both referencing docs/plans/2026-03-16-k8s-nats-ipc-sandbox.md.
+**Files touched:** docs/plans/2026-03-04-k8s-agent-compute-architecture.md, docs/plans/2026-03-15-agent-in-container-design.md
+**Outcome:** Success — both docs now have clear pointers to the new plan.
+**Notes:** Minimal changes — only added supersession notes, no other content modified.
+
 ## [2026-03-15 14:26] — Review local sandbox execution architecture plan
 
 **Task:** Review `docs/plans/2026-03-15-local-sandbox-execution.md` and provide actionable feedback.

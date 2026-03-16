@@ -4,6 +4,10 @@
 > Agent containers now execute tools locally with host audit gate.
 > Ephemeral tool containers and NATS sandbox-worker pods removed.
 
+> **K8s update 2026-03-16:** K8s now follows the same pattern as docker/apple —
+> agent runs in pod, tools execute locally. IPC uses NATS instead of Unix sockets.
+> See `docs/plans/2026-03-16-k8s-nats-ipc-sandbox.md`.
+
 **Date:** 2026-03-15
 **Status:** Superseded
 

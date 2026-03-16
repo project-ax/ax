@@ -1,5 +1,10 @@
 # AX on Kubernetes — Agent Compute Architecture
 
+> **Updated 2026-03-16:** The k8s sandbox now uses the same `runner.js` as docker/apple.
+> IPC uses NATS request/reply instead of Unix sockets (`AX_IPC_TRANSPORT=nats`).
+> The sandbox-worker concept (separate tool pods) was removed — the agent runs inside
+> the pod with local tool execution. See `docs/plans/2026-03-16-k8s-nats-ipc-sandbox.md`.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Deploy AX on GKE Autopilot with multiple stateless replicas, shared PostgreSQL, and secure multi-tenant agent execution.
