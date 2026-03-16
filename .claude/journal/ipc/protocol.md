@@ -2,6 +2,14 @@
 
 IPC protocol enhancements: heartbeat keep-alive, schema hardening, NATS transport.
 
+## [2026-03-16 16:58] — Fix NATS IPC client receiving JetStream PubAck instead of IPC response
+
+**Task:** Investigate `ipc_llm_error: undefined` in k8s sandbox pods
+**What I did:** Traced the error through pi-session.ts → NATSIPCClient → NATS handler. Added diagnostic logging (`response.ok` value + `Object.keys(response)`) to determine the actual response shape. Discovered the response had `keys=[stream,seq]` — a JetStream PubAck, not the IPC response. Root cause: a JetStream stream captures the `ipc.request.>` subjects; when `nc.request()` publishes with a reply inbox, the server sends a PubAck to that inbox before the handler responds, and `nc.request()` takes the first message. Fixed by replacing `nc.request()` with manual `subscribe` + `publish` pattern that filters out JetStream PubAck responses.
+**Files touched:** `src/agent/nats-ipc-client.ts`, `tests/agent/nats-ipc-client.test.ts`, `tests/agent/nats-warm-pod-flow.test.ts`
+**Outcome:** Success — all 19 NATS tests pass, clean build
+**Notes:** The root cause is a JetStream stream (likely a catch-all `>` stream) on the NATS server capturing IPC subjects. The fix is resilient regardless of NATS config — it skips any response with `stream`+`seq` but no `ok` field. Also added a cleanup step to the NATS stream init job that deletes any stream capturing IPC subjects (`>`, `ipc.>`, or `ipc.request.>`) to prevent recurrence.
+
 ## [2026-03-16 07:40] — Add NATS IPC round-trip integration test
 
 **Task:** Create an integration test that verifies NATSIPCClient and startNATSIPCHandler work together end-to-end via real NATS request/reply.

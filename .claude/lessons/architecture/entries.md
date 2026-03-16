@@ -1,5 +1,11 @@
 # Architecture
 
+### NATS nc.request() is incompatible with JetStream-captured subjects
+**Date:** 2026-03-16
+**Context:** Debugging `ipc_llm_error: undefined` in k8s sandbox pods. NATSIPCClient used `nc.request()` for IPC calls, but the agent received `{stream, seq}` (JetStream PubAck) instead of the IPC response.
+**Lesson:** When a NATS JetStream stream captures the target subject, the NATS server sends a PubAck to the `nc.request()` reply inbox before the subscriber's `msg.respond()` arrives. Since `nc.request()` takes the first response, it returns the PubAck instead of the real response. Use manual `subscribe(inbox)` + `publish(subject, payload, {reply: inbox})` and filter out PubAck responses (messages with `stream`+`seq` fields but no `ok` field). This is resilient regardless of JetStream configuration.
+**Tags:** nats, jetstream, ipc, k8s, request-reply, puback
+
 ### Filesystem-based state doesn't survive pod filesystem boundaries in k8s
 **Date:** 2026-03-16
 **Context:** Debugging k8s agent identity loss on every session. The agent-runtime pod is a separate Kubernetes pod with its own filesystem. IPC handlers on the agent-runtime pod couldn't read the admins file from the host pod's filesystem, so state checks always saw an empty admins file. This made every identity_write handler skip persistence because it thought there were no admins configured.
