@@ -54,6 +54,8 @@ spec:
               value: {{ include "ax.namespace" . | quote }}
             - name: K8S_POD_IMAGE
               value: {{ include "ax.image" (dict "image" .Values.sandbox.image "imageDefaults" .Values.imageDefaults "context" $) | quote }}
+            - name: WARM_POOL_ENABLED
+              value: {{ .Values.poolController.enabled | quote }}
             {{- include "ax.databaseEnv" . | nindent 12 }}
             {{- range $envVar, $secretKey := .Values.apiCredentials.envVars }}
             {{- if $secretKey }}
