@@ -1,8 +1,50 @@
-### Warm pod exec avoids env var injection problems
+### encode() is for objects, not pre-serialized strings — watch for double-encoding
 **Date:** 2026-03-16
-**Context:** Implementing warm sandbox pool for k8s. Warm pods are pre-created but need per-turn env vars (IPC token, request ID) that aren't known at creation time. K8s pods can't change env vars after creation.
-**Lesson:** Use the k8s Exec API with the `env` command: warm pods run a standby entrypoint (sleep), and the host exec's `env KEY=VAL ... node runner.js` into the running container. This injects per-turn env vars at exec time without modifying the pod spec. Simpler than alternatives (NATS config delivery, wrapper scripts, ConfigMap injection). The `buildExecCommand()` function constructs the env-prefixed command array.
-**Tags:** k8s, warm-pool, exec-api, sandbox, env-vars
+**Context:** NATS 503 bug. `publishWork` called `encode(payload)` where `encode = (obj) => JSON.stringify(obj)` and payload was already a JSON string from `JSON.stringify()` in server-completions.ts. Double-encoding destroyed the entire payload — sandbox received a JSON string literal, not a JSON object. ALL fields (sessionId, requestId, ipcToken) were lost.
+**Lesson:** When a function takes `unknown` and does `JSON.stringify(obj)`, never pass a pre-serialized JSON string — you'll get double-encoding. Use `new TextEncoder().encode(str)` for raw string→bytes conversion. The diagnostic clue: byte count mismatch (sender < receiver, because escaping adds bytes) and ALL fields missing (not just one).
+**Tags:** nats, double-encoding, json, encode, 503, debugging
+
+### Add diagnostic logging to deployed systems before assuming code fixes work
+**Date:** 2026-03-16
+**Context:** Made three code fixes for NATS 503 (ipcToken, Helm, permissions) but user still saw same error. Adding `[diag]` stderr lines to trace token flow immediately revealed `ipcToken=MISSING requestId=MISSING` — proving the entire payload was corrupted, not just the token.
+**Lesson:** When a fix doesn't work in production, add targeted diagnostics to the deployed code and read the actual output before making more guesses. One line of `process.stderr.write` with the actual values is worth more than ten code reviews.
+**Tags:** debugging, diagnostics, production, verification
+
+### NATS 503 has three independent root causes in k8s sandbox
+**Date:** 2026-03-16
+**Context:** After initial ipcToken code fix, pods still got NATS 503. Deeper investigation revealed two more issues.
+**Lesson:** Three things must ALL be correct for warm pool NATS IPC: (1) ipcToken in work payload + setContext → correct subject `ipc.request.{requestId}.{token}`. (2) NATS_SANDBOX_PASS in Helm chart env for pool-controller AND host → pods get NATS credentials. (3) Sandbox NATS user needs `agent.work.>` subscribe permission → pods can receive work. Missing ANY ONE causes 503. Always check all three layers: application code, Helm chart deployment, NATS authorization config.
+**Tags:** nats, 503, helm, permissions, k8s, warm-pool, triple-root-cause
+
+### Write reproducing tests before claiming a fix works
+**Date:** 2026-03-16
+**Context:** First fix for NATS 503 was code-only without tests. User reported it still failed in production and asked "is there a way to reproduce and test your fix before saying it's fixed?"
+**Lesson:** Never claim a fix works without a test that reproduces the original failure. Write the test FIRST, confirm it captures the bug's behavior, then fix the code and verify the test passes. For infrastructure bugs (NATS, k8s), also check deployment config (Helm charts, auth config) — code fixes alone may be insufficient.
+**Tags:** testing, verification, test-first, bug-fix-policy
+
+### IPC token must travel in NATS work payload, not just pod env vars
+**Date:** 2026-03-16
+**Context:** Warm pool pods got NATS 503 (No Responders) on every IPC call — LLM calls AND agent_response. Cold-start pods worked fine.
+**Lesson:** For warm pool pods, per-turn secrets like `AX_IPC_TOKEN` cannot be passed via pod env vars because the pod is pre-created before the request. The token MUST be included in the NATS work payload (`ipcToken` field in stdinPayload). The runner's `applyPayload()` passes it to `NATSIPCClient.setContext({ token })` which rebuilds the subject to `ipc.request.{requestId}.{token}`. Cold-start pods get it from both env var AND payload (belt and suspenders). Always check: "does this per-turn value need to reach warm pods?"
+**Tags:** nats, ipc-token, warm-pool, k8s, 503, no-responders
+
+### NATS work delivery replaces k8s Exec API for warm pods (SUPERSEDED: exec approach)
+**Date:** 2026-03-16
+**Context:** Eliminated stdin/stdout/exec-based k8s sandbox communication. Previously used k8s Exec API with `env KEY=VAL ... node runner.js` to inject per-turn env vars. Now runner.js IS the standby — it boots at pod creation, connects to NATS, subscribes to `agent.work.{POD_NAME}`, and waits for work. Per-turn context (IPC token, request ID, session ID, message, history, identity, skills) is delivered via the NATS work payload.
+**Lesson:** For k8s NATS mode: (1) Runner subscribes to `agent.work.{POD_NAME}` with max=1 — one work message per pod. (2) Host publishes work payload with all per-turn context to this subject. (3) Agent sends response back via `agent_response` IPC action. (4) No exec, no attach, no stdin/stdout pipes. Per-turn env vars go in the NATS payload, not via `env` command injection.
+**Tags:** k8s, warm-pool, nats, sandbox, pure-nats
+
+### agent_response IPC action for NATS-mode response delivery
+**Date:** 2026-03-16
+**Context:** In k8s/NATS mode, stdout can't be used for response delivery (no exec/attach streams). Needed an alternative channel.
+**Lesson:** Add an `agent_response` IPC action. Agent runners buffer text output (instead of writing to stdout) when `AX_IPC_TRANSPORT=nats`, then send the buffered text via `client.call({ action: 'agent_response', content })` after session completes. Host intercepts this in the NATS IPC handler and resolves a Promise. Use `subscribeAgentEvents(session, config, { buffer: textBuffer })` to redirect text to an array instead of stdout.
+**Tags:** ipc, nats, agent-response, k8s, sandbox
+
+### Redirect pino to stderr (fd 2) in NATS mode to avoid stdout pollution
+**Date:** 2026-03-16
+**Context:** Even after removing stdout-based response capture for k8s, pino logs on stdout could interfere with future debugging and `kubectl logs` output.
+**Lesson:** In logger.ts, check `process.env.AX_IPC_TRANSPORT === 'nats'` and set the console output fd to 2 (stderr) instead of 1 (stdout). Must be applied in all three output modes: pretty formatter Writable stream, sync mode destination, and JSON transport targets. This keeps logs visible via `kubectl logs` stderr while keeping stdout clean.
+**Tags:** logging, pino, stderr, nats, k8s
 
 ### Mock warm-pool-client directly in integration tests, not via shared k8s mocks
 **Date:** 2026-03-16

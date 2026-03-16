@@ -185,6 +185,42 @@ describe('NATSIPCClient', () => {
     await client.disconnect();
   });
 
+  test('setContext with token switches from fallback to token-scoped subject (NATS 503 fix)', async () => {
+    // Reproduces the NATS 503 bug: warm pool pods start NATSIPCClient without
+    // a token (no AX_IPC_TOKEN env), so subject falls back to ipc.request.{sessionId}.
+    // The host subscribes to ipc.request.{requestId}.{token} — subject mismatch → 503.
+    //
+    // Fix: work payload carries ipcToken, applyPayload calls setContext({token}),
+    // which rebuilds the subject to ipc.request.{requestId}.{token}.
+
+    const { NATSIPCClient } = await import('../../src/agent/nats-ipc-client.js');
+
+    mockRequest
+      .mockResolvedValueOnce(makeNatsResponse({ ok: true, phase: 'before' }))
+      .mockResolvedValueOnce(makeNatsResponse({ ok: true, phase: 'after' }));
+
+    // 1. Create client without token (simulates warm pool pod startup)
+    const client = new NATSIPCClient({ sessionId: '' });
+    await client.call({ action: 'test_before' });
+
+    // Before setContext: falls back to wrong subject
+    expect(mockRequest.mock.calls[0][0]).toBe('ipc.request.');
+
+    // 2. Work payload arrives, applyPayload calls setContext with token
+    client.setContext({
+      sessionId: 'sess-123',
+      requestId: 'req-456',
+      token: 'turn-tok-789',
+    });
+
+    await client.call({ action: 'test_after' });
+
+    // After setContext: uses correct token-scoped subject
+    expect(mockRequest.mock.calls[1][0]).toBe('ipc.request.req-456.turn-tok-789');
+
+    await client.disconnect();
+  });
+
   test('NATS timeouts propagate as errors', async () => {
     const { NATSIPCClient } = await import('../../src/agent/nats-ipc-client.js');
 

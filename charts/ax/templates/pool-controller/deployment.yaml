@@ -42,6 +42,12 @@ spec:
               value: {{ include "ax.image" (dict "image" .Values.sandbox.image "imageDefaults" .Values.imageDefaults "context" $) | quote }}
             - name: NATS_URL
               value: {{ include "ax.natsUrl" . | quote }}
+            - name: NATS_SANDBOX_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "ax.fullname" . }}-nats-auth
+                  key: sandbox-password
+                  optional: true
             {{- $sandboxPullPolicy := .Values.sandbox.image.pullPolicy | default .Values.imageDefaults.pullPolicy | default "" }}
             {{- if $sandboxPullPolicy }}
             - name: K8S_IMAGE_PULL_POLICY

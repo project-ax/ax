@@ -54,11 +54,12 @@ export class NATSIPCClient {
     return `ipc.request.${this.sessionId}`;
   }
 
-  setContext(ctx: { sessionId?: string; requestId?: string; userId?: string; sessionScope?: string }): void {
+  setContext(ctx: { sessionId?: string; requestId?: string; userId?: string; sessionScope?: string; token?: string }): void {
     if (ctx.sessionId !== undefined) this.sessionId = ctx.sessionId;
     if (ctx.requestId !== undefined) this.requestId = ctx.requestId;
     if (ctx.userId !== undefined) this.userId = ctx.userId;
     if (ctx.sessionScope !== undefined) this.sessionScope = ctx.sessionScope;
+    if (ctx.token !== undefined) this.token = ctx.token;
     this.subject = this.buildSubject();
   }
 
@@ -88,7 +89,6 @@ export class NATSIPCClient {
       subject: this.subject,
       timeoutMs: effectiveTimeout,
     });
-
     const response = await this.nc.request(this.subject, payload, {
       timeout: effectiveTimeout,
     });

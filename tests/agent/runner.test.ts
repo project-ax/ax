@@ -279,6 +279,36 @@ describe('parseStdinPayload with taint state', () => {
     expect(result.identity).toBeUndefined();
     expect(result.skills).toBeUndefined();
   });
+
+  test('extracts ipcToken from JSON payload (NATS 503 fix)', () => {
+    // Reproduces: warm pool pods need the per-turn IPC token from the work
+    // payload to build the correct NATS subject ipc.request.{requestId}.{token}.
+    // Without ipcToken, NATSIPCClient falls back to ipc.request.{sessionId} → 503.
+    const payload = JSON.stringify({
+      message: 'hello',
+      history: [],
+      taintRatio: 0,
+      taintThreshold: 1,
+      profile: 'balanced',
+      sandboxType: 'k8s',
+      requestId: 'req-abc',
+      sessionId: 'sess-def',
+      ipcToken: 'turn-token-xyz',
+    });
+    const result = parseStdinPayload(payload);
+    expect(result.ipcToken).toBe('turn-token-xyz');
+    expect(result.requestId).toBe('req-abc');
+    expect(result.sessionId).toBe('sess-def');
+  });
+
+  test('defaults ipcToken to undefined when absent', () => {
+    const payload = JSON.stringify({
+      message: 'hello',
+      history: [],
+    });
+    const result = parseStdinPayload(payload);
+    expect(result.ipcToken).toBeUndefined();
+  });
 });
 
 // buildSystemPrompt tests removed — behavior is now covered by

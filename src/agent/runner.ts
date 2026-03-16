@@ -40,7 +40,7 @@ export interface IIPCClient {
   call(request: Record<string, unknown>, timeoutMs?: number): Promise<Record<string, unknown>>;
   connect(): Promise<void>;
   disconnect(): void;
-  setContext(ctx: { sessionId?: string; requestId?: string; userId?: string; sessionScope?: string }): void;
+  setContext(ctx: { sessionId?: string; requestId?: string; userId?: string; sessionScope?: string; token?: string }): void;
 }
 
 export interface AgentConfig {
@@ -272,6 +272,8 @@ export interface StdinPayload {
   requestId?: string;
   /** Session scope from channel provider — determines memory scoping (dm = user-scoped, channel = agent-scoped). */
   sessionScope?: 'dm' | 'channel' | 'thread' | 'group';
+  /** Per-turn IPC capability token (for NATS subject scoping in k8s mode). */
+  ipcToken?: string;
   // Enterprise fields
   agentId?: string;
   agentWorkspace?: string;
@@ -319,6 +321,7 @@ export function parseStdinPayload(data: string): StdinPayload {
         sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : undefined,
         requestId: typeof parsed.requestId === 'string' ? parsed.requestId : undefined,
         sessionScope: typeof parsed.sessionScope === 'string' ? parsed.sessionScope as StdinPayload['sessionScope'] : undefined,
+        ipcToken: typeof parsed.ipcToken === 'string' ? parsed.ipcToken : undefined,
         // Enterprise fields
         agentId: typeof parsed.agentId === 'string' ? parsed.agentId : undefined,
         agentWorkspace: typeof parsed.agentWorkspace === 'string' ? parsed.agentWorkspace : undefined,
@@ -357,6 +360,96 @@ export async function run(config: AgentConfig): Promise<void> {
   }
 }
 
+/**
+ * Apply a parsed StdinPayload to the AgentConfig.
+ * Shared between stdin and NATS work subscription paths.
+ */
+function applyPayload(config: AgentConfig, payload: StdinPayload): void {
+  const msgText = typeof payload.message === 'string' ? payload.message : extractText(payload.message);
+  logger.debug('payload_parsed', {
+    messageLength: msgText.length,
+    historyTurns: payload.history.length,
+    messagePreview: truncate(msgText, 200),
+    taintRatio: payload.taintRatio,
+    profile: payload.profile,
+    hasImageBlocks: typeof payload.message !== 'string',
+  });
+  config.userMessage = payload.message;
+  config.history = payload.history;
+  config.taintRatio = payload.taintRatio;
+  config.taintThreshold = payload.taintThreshold;
+  config.profile = payload.profile;
+  config.sandboxType = payload.sandboxType;
+  config.userId = payload.userId;
+  config.replyOptional = payload.replyOptional;
+  config.sessionId = payload.sessionId;
+  config.requestId = payload.requestId;
+  config.sessionScope = payload.sessionScope;
+  // Update the IPC client with session context from the payload.
+  // For NATS mode, the token is critical — it scopes the IPC subject to
+  // ipc.request.{requestId}.{token} which the host handler subscribes to.
+  if (config.ipcClient) {
+    config.ipcClient.setContext({
+      sessionId: payload.sessionId,
+      requestId: payload.requestId,
+      userId: payload.userId,
+      sessionScope: payload.sessionScope,
+      token: payload.ipcToken,
+    });
+  }
+  // Enterprise fields — prefer canonical env vars (set by sandbox provider)
+  // over payload (which carries host paths).
+  config.agentId = payload.agentId;
+  config.agentWorkspace = process.env.AX_AGENT_WORKSPACE || payload.agentWorkspace;
+  config.userWorkspace = process.env.AX_USER_WORKSPACE || payload.userWorkspace;
+  config.workspaceProvider = payload.workspaceProvider;
+  // Identity and skills from host (loaded from DocumentStore)
+  if (payload.identity) {
+    config.identity = {
+      agents: payload.identity.agents ?? '',
+      soul: payload.identity.soul ?? '',
+      identity: payload.identity.identity ?? '',
+      user: payload.identity.user ?? '',
+      bootstrap: payload.identity.bootstrap ?? '',
+      userBootstrap: payload.identity.userBootstrap ?? '',
+      heartbeat: payload.identity.heartbeat ?? '',
+    };
+  }
+  config.skills = payload.skills;
+}
+
+/**
+ * NATS work subscription: subscribe to agent.work.{POD_NAME}, wait for one
+ * message containing the work payload. The runner IS the standby — it starts,
+ * connects to NATS, and blocks until work arrives.
+ */
+async function waitForNATSWork(): Promise<string> {
+  const podName = process.env.POD_NAME;
+  if (!podName) {
+    throw new Error('NATS work mode requires POD_NAME env var');
+  }
+
+  const natsModule = await import('nats');
+  const { natsConnectOptions } = await import('../utils/nats.js');
+  const nc = await natsModule.connect(natsConnectOptions('runner', podName));
+
+  const subject = `agent.work.${podName}`;
+  const sub = nc.subscribe(subject, { max: 1 });
+  logger.info('nats_work_waiting', { subject, podName });
+  process.stderr.write(`[diag] waiting for work on ${subject}\n`);
+
+  for await (const msg of sub) {
+    const data = new TextDecoder().decode(msg.data);
+    logger.info('nats_work_received', { subject, bytes: data.length });
+    process.stderr.write(`[diag] work received: ${data.length} bytes\n`);
+    await nc.drain();
+    return data;
+  }
+
+  await nc.drain();
+  throw new Error('NATS work subscription ended without receiving a message');
+}
+
 // Run if this is the main module
 const isMain = process.argv[1]?.endsWith('runner.js') ||
                process.argv[1]?.endsWith('runner.ts');
@@ -371,87 +464,49 @@ if (isMain) {
   const ipcTransport = process.env.AX_IPC_TRANSPORT ?? 'socket';
 
   if (ipcTransport === 'nats') {
-    // K8s mode: use NATS for IPC instead of Unix socket
+    // K8s mode: use NATS for IPC instead of Unix socket.
+    // Connect IPC client first, then wait for work via NATS subscription.
     const { NATSIPCClient } = await import('./nats-ipc-client.js');
     const client = new NATSIPCClient({
-      sessionId: '', // set after stdin parse via setContext()
+      sessionId: '', // set after work payload arrives via setContext()
     });
     await client.connect();
     config.ipcClient = client;
-  } else if (config.ipcListen) {
-    // Apple Container: listen mode — start the IPC listener BEFORE reading
-    // stdin. The host waits for "[signal] ipc_ready" in stderr before connecting
-    // the bridge — the runtime only forwards connections when the container-side
-    // listener exists. Starting before stdin maximizes boot time.
-    const client = new IPCClient({ socketPath: config.ipcSocket, listen: true });
-    client.connect().then(() => {
-      logger.debug('ipc_listen_ready', { socketPath: config.ipcSocket });
-    }).catch((err) => {
-      logger.error('ipc_listen_failed', { error: (err as Error).message });
-      process.exitCode = 1;
-    });
-    config.ipcClient = client;
-  }
 
-  readStdin().then((data) => {
-    const payload = parseStdinPayload(data);
-    const msgText = typeof payload.message === 'string' ? payload.message : extractText(payload.message);
-    logger.debug('stdin_parsed', {
-      messageLength: msgText.length,
-      historyTurns: payload.history.length,
-      messagePreview: truncate(msgText, 200),
-      taintRatio: payload.taintRatio,
-      profile: payload.profile,
-      hasImageBlocks: typeof payload.message !== 'string',
+    // Wait for work payload via NATS (replaces readStdin())
+    waitForNATSWork().then((data) => {
+      const payload = parseStdinPayload(data);
+      applyPayload(config, payload);
+      return run(config);
+    }).catch((err) => {
+      logger.error('main_error', { error: (err as Error).message, stack: (err as Error).stack });
+      process.exitCode = 1;
+      process.stderr.write(`Agent runner error: ${(err as Error).message ?? err}\n`);
     });
-    config.userMessage = payload.message;
-    config.history = payload.history;
-    config.taintRatio = payload.taintRatio;
-    config.taintThreshold = payload.taintThreshold;
-    config.profile = payload.profile;
-    config.sandboxType = payload.sandboxType;
-    config.userId = payload.userId;
-    config.replyOptional = payload.replyOptional;
-    config.sessionId = payload.sessionId;
-    config.requestId = payload.requestId;
-    config.sessionScope = payload.sessionScope;
-    // Update the early IPCClient (created in listen mode before stdin) with
-    // session context from the host. Without this, the client sends IPC
-    // requests without _sessionId and workspace lookups fail.
-    if (config.ipcClient) {
-      config.ipcClient.setContext({
-        sessionId: payload.sessionId,
-        requestId: payload.requestId,
-        userId: payload.userId,
-        sessionScope: payload.sessionScope,
+  } else {
+    if (config.ipcListen) {
+      // Apple Container: listen mode — start the IPC listener BEFORE reading
+      // stdin. The host waits for "[signal] ipc_ready" in stderr before connecting
+      // the bridge — the runtime only forwards connections when the container-side
+      // listener exists. Starting before stdin maximizes boot time.
+      const client = new IPCClient({ socketPath: config.ipcSocket, listen: true });
+      client.connect().then(() => {
+        logger.debug('ipc_listen_ready', { socketPath: config.ipcSocket });
+      }).catch((err) => {
+        logger.error('ipc_listen_failed', { error: (err as Error).message });
+        process.exitCode = 1;
       });
+      config.ipcClient = client;
     }
-    // Enterprise fields — prefer canonical env vars (set by sandbox provider)
-    // over stdin payload (which carries host paths).
-    config.agentId = payload.agentId;
-    config.agentWorkspace = process.env.AX_AGENT_WORKSPACE || payload.agentWorkspace;
-    config.userWorkspace = process.env.AX_USER_WORKSPACE || payload.userWorkspace;
-    config.workspaceProvider = payload.workspaceProvider;
-    // Identity and skills from host (loaded from DocumentStore)
-    if (payload.identity) {
-      config.identity = {
-        agents: payload.identity.agents ?? '',
-        soul: payload.identity.soul ?? '',
-        identity: payload.identity.identity ?? '',
-        user: payload.identity.user ?? '',
-        bootstrap: payload.identity.bootstrap ?? '',
-        userBootstrap: payload.identity.userBootstrap ?? '',
-        heartbeat: payload.identity.heartbeat ?? '',
-      };
-    }
-    config.skills = payload.skills;
-    return run(config);
-  }).catch((err) => {
-    logger.error('main_error', { error: (err as Error).message, stack: (err as Error).stack });
-    // Use process.exitCode instead of process.exit() so Node.js drains
-    // the event loop and flushes stderr before terminating. process.exit()
-    // kills immediately and can lose piped stderr output.
-    process.exitCode = 1;
-    process.stderr.write(`Agent runner error: ${(err as Error).message ?? err}\n`);
-  });
+
+    readStdin().then((data) => {
+      const payload = parseStdinPayload(data);
+      applyPayload(config, payload);
+      return run(config);
+    }).catch((err) => {
+      logger.error('main_error', { error: (err as Error).message, stack: (err as Error).stack });
+      process.exitCode = 1;
+      process.stderr.write(`Agent runner error: ${(err as Error).message ?? err}\n`);
+    });
+  }
 }

@@ -30,6 +30,12 @@
 **Lesson:** Use actual class definitions (`class MockKubeConfig { ... }`) in `vi.mock()` factories instead of `vi.fn().mockImplementation()` when mocking constructors that will be used with `new`.
 **Tags:** vitest, mocking, kubernetes, dynamic-import
 
+### K8s sandbox uses pure NATS — no exec, no attach, no stdin/stdout
+**Date:** 2026-03-16
+**Context:** Eliminated all k8s Exec/Attach API usage for sandbox communication. Warm and cold pods communicate entirely via NATS.
+**Lesson:** In k8s mode, the sandbox provider returns `podName` + dummy streams (ended immediately). The host publishes work to `agent.work.{podName}` via NATS. The agent processes work and sends response via `agent_response` IPC action. `processCompletion` in server-completions.ts checks `proc.podName && deps.publishWork` to use NATS delivery instead of stdin. The `agentResponsePromise` on CompletionDeps replaces stdout capture. Subprocess/seatbelt modes are completely unchanged — they still use stdin/stdout.
+**Tags:** k8s, nats, sandbox, pure-nats, architecture
+
 ### child.killed is true after ANY kill() call, not just after the process is dead
 **Date:** 2026-02-22
 **Context:** `enforceTimeout` was checking `child.killed` to skip SIGKILL after SIGTERM, but `child.killed` is set to `true` the moment `kill()` is called, regardless of whether the process actually exited.

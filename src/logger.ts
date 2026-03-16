@@ -116,6 +116,10 @@ export function createLogger(opts: LoggerOptions = {}): Logger {
   // immediately. Without this, pino buffers ~4KB before flushing.
   const syncFile = process.env.LOG_SYNC === '1';
 
+  // In NATS mode (k8s sandbox), write console logs to stderr (fd 2) so they
+  // don't pollute stdout. Logs stay visible via `kubectl logs` stderr stream.
+  const consoleFd = process.env.AX_IPC_TRANSPORT === 'nats' ? 2 : 1;
+
   // If a test stream is provided, use it directly (no transports)
   if (opts.stream) {
     const pinoInstance = pino({ level }, opts.stream);
@@ -132,14 +136,15 @@ export function createLogger(opts: LoggerOptions = {}): Logger {
         stream: pino.destination({ dest: logPath, mkdir: true, sync: syncFile }),
       });
     }
+    const consoleOut = consoleFd === 2 ? process.stderr : process.stdout;
     streams.push({
       level,
       stream: new Writable({
         write(chunk, _encoding, callback) {
           try {
-            process.stdout.write(prettyFormat(JSON.parse(chunk.toString())));
+            consoleOut.write(prettyFormat(JSON.parse(chunk.toString())));
           } catch {
-            process.stdout.write(chunk);
+            consoleOut.write(chunk);
           }
           callback();
         },
@@ -163,7 +168,7 @@ export function createLogger(opts: LoggerOptions = {}): Logger {
     }
     streams.push({
       level,
-      stream: pino.destination({ dest: 1, sync: true }), // stdout
+      stream: pino.destination({ dest: consoleFd, sync: true }),
     });
     const pinoInstance = pino({ level: 'debug' }, pino.multistream(streams));
     return wrapPino(pinoInstance);
@@ -180,10 +185,10 @@ export function createLogger(opts: LoggerOptions = {}): Logger {
     });
   }
 
-  // JSON to stdout for production/piping/--json
+  // JSON to console for production/piping/--json (stderr in NATS mode)
   targets.push({
     target: 'pino/file',
-    options: { destination: 1 }, // fd 1 = stdout
+    options: { destination: consoleFd },
     level,
   });
 

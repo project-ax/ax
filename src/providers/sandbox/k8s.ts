@@ -2,19 +2,20 @@
  * k8s sandbox provider — Kubernetes pod-based isolation.
  *
  * Supports two modes:
- *   1. Warm pool (default): Claims a pre-warmed pod from the pool controller,
- *      then execs the agent command inside it. Falls back to cold start if no
- *      warm pods are available.
+ *   1. Warm pool (default): Claims a pre-warmed pod from the pool controller.
+ *      The warm pod is already running runner.js, waiting for work via NATS.
+ *      Falls back to cold start if no warm pods are available.
  *   2. Cold start (WARM_POOL_ENABLED=false): Creates a new pod for each
- *      sandbox request.
+ *      sandbox request. The pod runs runner.js which connects to NATS and
+ *      waits for work.
  *
- * Warm pool pods run a standby entrypoint (sleep) and wait for work.
- * When claimed, the host uses the k8s Exec API to start the agent with
- * the correct environment variables — no pod creation latency.
+ * Communication is entirely via NATS:
+ *   - Host publishes work payload to agent.work.{podName}
+ *   - Agent sends IPC requests via ipc.request.{requestId}.{token}
+ *   - Agent sends response via agent_response IPC action
  *
- * Communication: stdin/stdout are connected via the k8s Attach API (cold)
- * or Exec API (warm). The host writes the conversation payload to stdin
- * and reads the agent response from stdout.
+ * No k8s Exec or Attach API — eliminates stdin/stdout complexity and
+ * log pollution issues.
  *
  * Environment:
  *   K8S_NAMESPACE — target namespace (default: "ax")
@@ -97,7 +98,6 @@ function buildPodSpec(
           ...(process.env.K8S_IMAGE_PULL_POLICY ? { imagePullPolicy: process.env.K8S_IMAGE_PULL_POLICY } : {}),
           command: [cmd, ...args],
           workingDir: CANONICAL.root,
-          stdin: true,
 
           resources: {
             requests: {
@@ -165,49 +165,6 @@ function buildPodSpec(
   };
 }
 
-/**
- * Build the env + command array for k8s exec into a warm pod.
- *
- * Uses `env` to inject per-turn environment variables, then execs the
- * agent command. This lets us reuse warm pods that were created with
- * base env (NATS, canonical paths) while adding request-specific vars.
- */
-export function buildExecCommand(
-  config: SandboxConfig,
-  natsUrl: string,
-): string[] {
-  const envVars = canonicalEnv(config);
-
-  // Build KEY=VALUE pairs for env command
-  const envPairs: string[] = [];
-
-  // Canonical paths (skip AX_IPC_SOCKET — using NATS)
-  for (const [key, value] of Object.entries(envVars)) {
-    if (key !== 'AX_IPC_SOCKET') {
-      envPairs.push(`${key}=${value}`);
-    }
-  }
-
-  // Per-turn extra env vars (IPC token, request ID, etc.)
-  for (const [key, value] of Object.entries(config.extraEnv ?? {})) {
-    envPairs.push(`${key}=${value}`);
-  }
-
-  // NATS sandbox credentials (if set on host)
-  if (process.env.NATS_SANDBOX_PASS) {
-    envPairs.push('NATS_USER=sandbox');
-    envPairs.push(`NATS_PASS=${process.env.NATS_SANDBOX_PASS}`);
-  }
-
-  // IPC transport
-  envPairs.push('AX_IPC_TRANSPORT=nats');
-  envPairs.push(`NATS_URL=${natsUrl}`);
-  envPairs.push(`LOG_LEVEL=${process.env.K8S_POD_LOG_LEVEL ?? (process.env.AX_VERBOSE === '1' ? 'debug' : 'warn')}`);
-
-  // Final command: env KEY=VAL ... <agent-command>
-  return ['env', ...envPairs, ...config.command];
-}
-
 export async function create(_config: Config): Promise<SandboxProvider> {
   // Lazy import to avoid requiring @kubernetes/client-node when using other sandbox providers
   const k8s = await import('@kubernetes/client-node');
@@ -223,8 +180,6 @@ export async function create(_config: Config): Promise<SandboxProvider> {
   }
 
   const coreApi = kc.makeApiClient(k8s.CoreV1Api);
-  const attach = new k8s.Attach(kc);
-  const exec = new k8s.Exec(kc);
   const watch = new k8s.Watch(kc);
 
   const image = process.env.K8S_POD_IMAGE ?? DEFAULT_IMAGE;
@@ -304,6 +259,9 @@ export async function create(_config: Config): Promise<SandboxProvider> {
 
   /**
    * Cold-start path: create a new pod from scratch.
+   *
+   * The pod runs runner.js which connects to NATS and waits for work.
+   * No k8s Attach — communication is entirely via NATS.
    */
   async function spawnCold(config: SandboxConfig): Promise<SandboxProcess> {
     const podName = `ax-sandbox-${randomUUID().slice(0, 8)}`;
@@ -329,33 +287,32 @@ export async function create(_config: Config): Promise<SandboxProvider> {
 
     const exitCode = watchPodExit(podName, pid, config.timeoutSec ?? 600);
 
+    // Dummy streams — response comes via NATS agent_response, not stdout.
     const stdout = new PassThrough();
     const stderr = new PassThrough();
     const stdin = new PassThrough();
+    stdout.end();
+    stderr.end();
+    stdin.end();
 
-    // Wait for pod to reach Running, then attach stdin/stdout via WebSocket.
+    // Wait for pod to reach Running (so NATS work delivery can succeed).
     (async () => {
       try {
         for (let i = 0; i < 120; i++) {
           const pod = await coreApi.readNamespacedPod({ name: podName, namespace });
           const phase = (pod as any)?.status?.phase;
-          if (phase === 'Running') break;
+          if (phase === 'Running') {
+            logger.info('pod_running', { podName });
+            break;
+          }
           if (phase === 'Failed' || phase === 'Succeeded') {
-            logger.warn('pod_ended_before_attach', { podName, phase });
-            stdout.end();
-            stderr.end();
+            logger.warn('pod_ended_before_running', { podName, phase });
             return;
           }
           await new Promise(r => setTimeout(r, 500));
         }
-
-        logger.info('attaching_to_pod', { podName });
-        await attach.attach(namespace, podName, 'sandbox', stdout, stderr, stdin, false);
-        logger.info('pod_attached', { podName });
       } catch (err: unknown) {
-        logger.warn('pod_attach_failed', { podName, error: (err as Error).message });
-        stdout.end();
-        stderr.end();
+        logger.warn('pod_status_check_failed', { podName, error: (err as Error).message });
       }
     })();
 
@@ -363,6 +320,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
 
     return {
       pid,
+      podName,
       exitCode,
       stdout,
       stderr,
@@ -377,11 +335,11 @@ export async function create(_config: Config): Promise<SandboxProvider> {
   }
 
   /**
-   * Warm-start path: claim a pre-warmed pod and exec the agent inside it.
+   * Warm-start path: claim a pre-warmed pod.
    *
-   * The warm pod is running a standby entrypoint (sleep). We use the k8s
-   * Exec API to start the agent with the correct env vars. The exec'd
-   * process gets its own stdin/stdout connected via WebSocket.
+   * The warm pod is already running runner.js, which connects to NATS
+   * and subscribes to agent.work.{podName}. The host publishes work
+   * to that subject — no k8s Exec needed.
    */
   async function spawnWarm(config: SandboxConfig): Promise<SandboxProcess | null> {
     if (!warmPoolClient) return null;
@@ -399,79 +357,25 @@ export async function create(_config: Config): Promise<SandboxProvider> {
 
     activePods.set(pid, podName);
 
-    // Build exec command with per-turn env vars
-    const execCommand = buildExecCommand(config, natsUrl);
+    // Watch for pod completion (runner exits after processing one request)
+    const exitCode = watchPodExit(podName, pid, config.timeoutSec ?? 600);
 
+    // Dummy streams — communication is via NATS, not stdin/stdout.
     const stdout = new PassThrough();
     const stderr = new PassThrough();
     const stdin = new PassThrough();
-
-    // Delete the claimed pod (fire-and-forget). Called from every
-    // completion path so claimed pods don't accumulate as zombies.
-    function releaseClaimedPod() {
-      coreApi.deleteNamespacedPod({ name: podName, namespace }).catch((err: any) => {
-        logger.warn('warm_pod_release_failed', { podName, error: err?.message });
-      });
-    }
-
-    // The k8s Exec exit resolves when the command inside the pod finishes.
-    // Every resolution path also deletes the claimed pod.
-    const execDone = new Promise<number>((resolve) => {
-      let resolved = false;
-
-      // Start k8s Exec — the agent runs as a child of the standby entrypoint.
-      // Note: this is the k8s Exec API (not child_process.exec).
-      exec.exec(
-        namespace,
-        podName,
-        'sandbox',
-        execCommand,
-        stdout,
-        stderr,
-        stdin,
-        false, // tty
-        (status: any) => {
-          if (resolved) return;
-          resolved = true;
-          activePods.delete(pid);
-          releaseClaimedPod();
-
-          // status is a k8s V1Status object
-          const exitCode = status?.status === 'Success' ? 0 : 1;
-          resolve(exitCode);
-        },
-      ).catch((err: unknown) => {
-        if (!resolved) {
-          resolved = true;
-          activePods.delete(pid);
-          releaseClaimedPod();
-          logger.warn('warm_exec_failed', { podName, error: (err as Error).message });
-          resolve(1);
-        }
-      });
-
-      // Safety timeout
-      const timeoutMs = ((config.timeoutSec ?? 600) + 30) * 1000;
-      const timer = setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          activePods.delete(pid);
-          releaseClaimedPod();
-          logger.warn('warm_exec_timeout', { podName, timeoutMs });
-          resolve(1);
-        }
-      }, timeoutMs);
-      if (timer.unref) timer.unref();
-    });
+    stdout.end();
+    stderr.end();
+    stdin.end();
 
     return {
       pid,
-      exitCode: execDone,
+      podName,
+      exitCode,
       stdout,
       stderr,
       stdin,
       kill() {
-        // Delete the whole pod — the exec'd process dies with it
         coreApi.deleteNamespacedPod({ name: podName, namespace }).catch((err: any) => {
           logger.warn('warm_pod_delete_failed', { podName, error: err?.message });
         });

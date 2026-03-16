@@ -56,6 +56,12 @@ export interface CompletionDeps {
   ipcHandler?: (raw: string, ctx: import('./ipc-server.js').IPCContext) => Promise<string>;
   /** Extra env vars to inject into sandbox pods (per-turn IPC token, request ID). */
   extraSandboxEnv?: Record<string, string>;
+  /** Promise that resolves with the agent response content (NATS mode).
+   *  When set, processCompletion waits on this instead of reading stdout. */
+  agentResponsePromise?: Promise<string>;
+  /** Callback to publish work payload via NATS to a pod (NATS mode).
+   *  Called with (podName, stdinPayload) after sandbox spawn. */
+  publishWork?: (podName: string, payload: string) => Promise<void>;
 }
 
 export interface ExtractedFile {
@@ -757,6 +763,9 @@ export async function processCompletion(
       sessionId,
       requestId,
       sessionScope: sessionScope ?? 'dm',
+      // Per-turn IPC token for NATS subject scoping (warm pods need this in the payload
+      // since they don't have AX_IPC_TOKEN env var — it's set at pod creation time for cold pods only)
+      ipcToken: deps.extraSandboxEnv?.AX_IPC_TOKEN,
       // Enterprise fields
       agentId: agentName,
       agentWorkspace: agentWsPath,
@@ -909,18 +918,46 @@ export async function processCompletion(
         }
       }
 
-      // Send raw user message to agent (not the taint-tagged queued.content).
-      // Guard: if the bridge connect failed and we killed the process, stdin
-      // is already closed — writing would throw EPIPE.
-      try {
-        reqLogger.debug('stdin_write', { payloadBytes: stdinPayload.length });
-        proc.stdin.write(stdinPayload);
-        proc.stdin.end();
-      } catch {
-        // Process already killed (bridge failure) — stdin write throws EPIPE
+      // Deliver work payload to agent.
+      // NATS mode (k8s): publish to agent.work.{podName} — no stdin.
+      // Stdin mode (subprocess/apple/cold k8s): write to proc.stdin.
+      if (proc.podName && deps.publishWork) {
+        reqLogger.debug('nats_work_publish', { podName: proc.podName, payloadBytes: stdinPayload.length });
+        try {
+          await deps.publishWork(proc.podName, stdinPayload);
+        } catch (err) {
+          reqLogger.error('nats_work_publish_failed', { podName: proc.podName, error: (err as Error).message });
+          agentSandbox.kill(proc.pid);
+        }
+      } else {
+        // Send raw user message to agent (not the taint-tagged queued.content).
+        // Guard: if the bridge connect failed and we killed the process, stdin
+        // is already closed — writing would throw EPIPE.
+        try {
+          reqLogger.debug('stdin_write', { payloadBytes: stdinPayload.length });
+          proc.stdin.write(stdinPayload);
+          proc.stdin.end();
+        } catch {
+          // Process already killed (bridge failure) — stdin write throws EPIPE
+        }
       }
 
-      await Promise.all([stdoutDone, stderrDone]);
+      // Wait for agent to complete.
+      // NATS mode: response comes via agent_response IPC (agentResponsePromise).
+      // Stdin mode: response comes from stdout.
+      if (deps.agentResponsePromise) {
+        // In NATS mode, we race the agent_response promise against pod exit.
+        // The stdout/stderr are already closed (dummy streams) for k8s.
+        try {
+          response = await deps.agentResponsePromise;
+          reqLogger.debug('nats_agent_response_received', { responseLength: response.length });
+        } catch (err) {
+          reqLogger.warn('nats_agent_response_error', { error: (err as Error).message });
+          // Fall through to let exitCode determine retry
+        }
+      } else {
+        await Promise.all([stdoutDone, stderrDone]);
+      }
       exitCode = await proc.exitCode;
       bridge?.close();
 

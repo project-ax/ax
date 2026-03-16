@@ -2,6 +2,14 @@
 
 Agent runner implementations, process management, dev/production mode split.
 
+## [2026-03-16 15:00] — Runner NATS work subscription mode (replace stdin)
+
+**Task:** In NATS/k8s mode, runner subscribes to agent.work.{POD_NAME} for work instead of reading stdin
+**What I did:** Added `waitForNATSWork()` function that connects to NATS, subscribes to `agent.work.{POD_NAME}` with max=1, returns the work payload as string. Extracted `applyPayload()` helper to deduplicate stdin/NATS payload parsing. Restructured main block: NATS mode uses waitForNATSWork(), subprocess mode still uses readStdin(). Also modified agent-setup.ts to accept buffer array for text buffering (instead of stdout), and both runners (pi-session, claude-code) to send buffered text via `agent_response` IPC call in NATS mode.
+**Files touched:** src/agent/runner.ts, src/agent/agent-setup.ts, src/agent/runners/pi-session.ts, src/agent/runners/claude-code.ts
+**Outcome:** Success — all tests pass
+**Notes:** The waitForNATSWork uses `{ max: 1 }` subscription — one message per pod lifetime. After receiving work, the runner processes it and exits. This makes runner.js itself the warm pool standby process.
+
 ## [2026-03-16 10:00] — Add NATS IPC transport support in runner.ts
 
 **Task:** Support AX_IPC_TRANSPORT=nats env var in runner.ts so k8s pods can use NATSIPCClient instead of IPCClient

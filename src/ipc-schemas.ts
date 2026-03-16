@@ -381,6 +381,12 @@ export const AgentOrchTimelineSchema = ipcAction('agent_orch_timeline', {
   eventType: safeString(200).optional(),
 });
 
+// ── Agent Response (NATS mode) ──────────────────────
+
+export const AgentResponseSchema = ipcAction('agent_response', {
+  content: safeString(2_000_000),
+});
+
 // ── Sandbox Tools ────────────────────────────────────
 
 export const SandboxBashSchema = ipcAction('sandbox_bash', {

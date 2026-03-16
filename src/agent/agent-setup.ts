@@ -82,18 +82,25 @@ export function buildSystemPrompt(config: AgentConfig): PromptBuildResult {
 }
 
 /**
- * Subscribe to pi-ai agent events — streams text to stdout, logs tools
- * and errors to stderr. Returns a state object for tracking output.
+ * Subscribe to pi-ai agent events — streams text to stdout (or buffers it
+ * for NATS mode), logs tools and errors to stderr. Returns a state object
+ * for tracking output and retrieving buffered content.
  *
  * Works with pi-coding-agent AgentSession.subscribe() event shape.
+ *
+ * @param opts.buffer - When provided, text is appended to this array instead
+ *   of writing to stdout. Used in NATS mode where the response is sent via
+ *   IPC agent_response instead of stdout.
  */
 export function subscribeAgentEvents(
   subscribable: { subscribe(fn: (event: any) => void): void },
   config: { verbose?: boolean },
-): { hasOutput: () => boolean; eventCount: () => number } {
+  opts?: { buffer?: string[] },
+): { hasOutput: () => boolean; eventCount: () => number; getBuffered: () => string } {
   let hasOutput = false;
   let eventCount = 0;
   let turnCount = 0;
+  const buffer = opts?.buffer;
 
   subscribable.subscribe((event: any) => {
     eventCount++;
@@ -102,10 +109,18 @@ export function subscribeAgentEvents(
       logger.debug('agent_event', { type: ame.type, eventCount });
 
       if (ame.type === 'text_start' && hasOutput) {
-        process.stdout.write('\n\n');
+        if (buffer) {
+          buffer.push('\n\n');
+        } else {
+          process.stdout.write('\n\n');
+        }
       }
       if (ame.type === 'text_delta') {
-        process.stdout.write(ame.delta);
+        if (buffer) {
+          buffer.push(ame.delta);
+        } else {
+          process.stdout.write(ame.delta);
+        }
         hasOutput = true;
       }
       if (ame.type === 'toolcall_end') {
@@ -118,9 +133,13 @@ export function subscribeAgentEvents(
         const errText = ame.error?.errorMessage ?? String(ame.error);
         logger.error('agent_error_event', { error: errText });
         process.stderr.write(`Agent error: ${errText}\n`);
-        // Also write to stdout so the server can surface the error in the response
+        // Also surface the error in the response
         if (!hasOutput) {
-          process.stdout.write(errText);
+          if (buffer) {
+            buffer.push(errText);
+          } else {
+            process.stdout.write(errText);
+          }
           hasOutput = true;
         }
       }
@@ -137,5 +156,6 @@ export function subscribeAgentEvents(
   return {
     hasOutput: () => hasOutput,
     eventCount: () => eventCount,
+    getBuffered: () => buffer ? buffer.join('') : '',
   };
 }

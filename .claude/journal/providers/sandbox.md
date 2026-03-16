@@ -2,6 +2,51 @@
 
 Sandbox providers, canonical paths, workspace tiers.
 
+## [2026-03-16 16:30] — Fix: NATS 503 actual root cause — double-encoded work payload
+
+**Task:** Debug persistent NATS 503 after three prior fix attempts (ipcToken, Helm, permissions)
+**What I did:** Added diagnostic stderr logging to NATSIPCClient.setContext and call() to trace the exact subject used. Deployed and saw `applyPayload ipcToken=MISSING requestId=MISSING sessionId=MISSING` — ALL fields missing, not just ipcToken. Also noticed host sends 6309 bytes but sandbox receives 6567 bytes. Traced to `publishWork` in host-process.ts calling `encode(payload)` where `encode()` does `JSON.stringify(obj)` and `payload` is already a JSON string. Double-serialization wraps the JSON in quotes and escapes everything: `"{\"message\":\"hello\",...}"`. Sandbox receives this, `JSON.parse` produces a plain string (not an object), `parseStdinPayload` falls through to defaults with all fields undefined.
+**Fix:** Replace `encode(payload)` with `new TextEncoder().encode(payload)` — raw UTF-8 encoding without extra JSON.stringify.
+**Files touched:** src/host/host-process.ts (fix), src/agent/nats-ipc-client.ts (diagnostics), src/agent/runner.ts (diagnostics), tests/agent/nats-warm-pod-flow.test.ts (reproducing test)
+**Outcome:** Success — 212 test files, 2477 tests pass. Reproducing test confirms double-encoding destroys the payload and direct TextEncoder preserves it.
+**Notes:** The byte count mismatch (6309 vs 6567 = +258 bytes) was the clue — extra bytes from JSON string escaping/quoting. The diagnostic `ipcToken=MISSING requestId=MISSING` proved ALL fields were lost, not just ipcToken. Previous fixes (ipcToken in payload, Helm NATS_SANDBOX_PASS, NATS permissions) were all real bugs but masked by this upstream double-encoding.
+
+## [2026-03-16 15:45] — Fix: complete NATS 503 triple root cause (Helm + permissions + token)
+
+**Task:** Fix remaining NATS 503 after ipcToken code fix — pods still failing in k8s
+**What I did:** Discovered two additional root causes beyond the ipcToken fix:
+1. **Helm: missing NATS_SANDBOX_PASS** — Pool controller and host deployments didn't inject `NATS_SANDBOX_PASS` from the nats-auth secret. Sandbox pods were created without NATS credentials → connected anonymously → restricted permissions.
+2. **NATS permissions: missing agent.work.> subscribe** — Sandbox user could only subscribe to `_INBOX.>`. Warm pods need `agent.work.>` to receive work payloads. Added it to subscribe allow list.
+3. **Tests first** — Added 8 new tests before fixing: NATSIPCClient setContext with token reproducing the 503 subject mismatch, parseStdinPayload ipcToken extraction, pool controller k8s-client NATS credential injection (5 tests).
+**Files touched:** charts/ax/templates/pool-controller/deployment.yaml, charts/ax/templates/host/deployment.yaml, charts/ax/values.yaml, tests/agent/nats-ipc-client.test.ts, tests/agent/runner.test.ts, tests/pool-controller/k8s-client.test.ts
+**Outcome:** Success — build clean, 210 test files, 2471 tests pass
+**Notes:** Three independent bugs conspired: (a) wrong NATS subject (missing token), (b) no NATS credentials (Helm chart gap), (c) no subscribe permission for work delivery subject. All three needed fixing for production.
+
+## [2026-03-16 15:30] — Fix: warm pool pods missing IPC token (NATS 503 No Responders)
+
+**Task:** Fix agent_response and LLM calls failing with NATS 503 for warm pool pods
+**What I did:** The IPC token (`AX_IPC_TOKEN`) was only passed as a pod env var via `extraSandboxEnv`, but warm pool pods are pre-created before the request — they don't have this env var. The NATSIPCClient fell back to `ipc.request.{sessionId}` instead of `ipc.request.{requestId}.{token}`, causing "No Responders" since the host handler subscribes to the token-scoped subject. Fix: (1) Added `ipcToken` to the stdinPayload in server-completions.ts. (2) Added `token` to `IIPCClient.setContext()` interface and both implementations. (3) `applyPayload()` now passes `payload.ipcToken` via `setContext()` to the NATSIPCClient, which rebuilds the subject.
+**Files touched:** src/agent/runner.ts, src/agent/ipc-client.ts, src/agent/nats-ipc-client.ts, src/host/server-completions.ts
+**Outcome:** Success — build clean, 209 test files, 2463 tests pass
+**Notes:** Cold-start pods still get the token via env var (both paths work). For warm pods, the work payload is the only delivery mechanism since the pod exists before the request.
+
+## [2026-03-16 15:00] — Pure NATS communication for k8s sandbox (eliminate stdin/stdout/exec)
+
+**Task:** Replace legacy stdin/stdout/exec-based k8s sandbox communication with pure NATS. Eliminate k8s Exec API, Attach API, and stdout-based response capture for k8s mode.
+**What I did:** Major refactor across 11 files:
+1. Added `agent_response` IPC action in ipc-schemas.ts for agents to send responses via NATS
+2. Redirected logger to stderr (fd 2) when AX_IPC_TRANSPORT=nats to prevent pino log pollution
+3. Runner: added `waitForNATSWork()` — subscribes to `agent.work.{POD_NAME}`, extracted `applyPayload()` helper
+4. Agent runners (pi-session, claude-code): buffer text instead of stdout, send via `agent_response` IPC in NATS mode
+5. K8s provider: removed `buildExecCommand()`, exec/attach APIs. spawnCold/spawnWarm return podName + dummy streams
+6. Host: processCompletionWithNATS intercepts agent_response, publishes work to `agent.work.{podName}` via NATS
+7. Pool controller: renamed WARM_POD_STANDBY_COMMAND → WARM_POD_RUNNER_COMMAND (runner IS the standby)
+8. Added `podName` to SandboxProcess interface in types.ts
+9. Fixed 3 test files (tool-catalog-sync, main.test, k8s-warm-pool)
+**Files touched:** src/ipc-schemas.ts, src/logger.ts, src/agent/runner.ts, src/agent/agent-setup.ts, src/agent/runners/pi-session.ts, src/agent/runners/claude-code.ts, src/providers/sandbox/k8s.ts, src/providers/sandbox/types.ts, src/host/host-process.ts, src/host/server-completions.ts, src/pool-controller/k8s-client.ts, src/pool-controller/main.ts, tests/agent/tool-catalog-sync.test.ts, tests/pool-controller/main.test.ts, tests/providers/sandbox/k8s-warm-pool.test.ts
+**Outcome:** Success — 209 test files, 2463 tests all passing. Build clean.
+**Notes:** Subprocess/seatbelt modes completely unchanged. The key insight: warm pool pods run runner.js directly (not sleep), runner subscribes to NATS for work → IS the standby. This eliminates the k8s Exec API entirely.
+
 ## [2026-03-16 07:37] — Set AX_IPC_TRANSPORT=nats in k8s pod env
 
 **Task:** Update k8s sandbox provider to use NATS IPC instead of Unix sockets (pods can't access host filesystem)

@@ -215,7 +215,7 @@ nats:
             publish:
               allow: ["ipc.request.*.*", "ipc.llm.*.*", "_INBOX.>"]
             subscribe:
-              allow: ["_INBOX.>"]
+              allow: ["_INBOX.>", "agent.work.>"]
               deny: ["session.>", "results.>", "events.>"]
 
 # ─── Network Policies ────────────────────────────────────────────

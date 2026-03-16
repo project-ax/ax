@@ -78,12 +78,12 @@ describe('loadTierConfigs', () => {
     expect(result[1]?.minReady).toBe(0); // default
   });
 
-  test('default templates use standby command (sleep), not agent runner', () => {
+  test('default templates use runner command (NATS work subscription)', () => {
     delete process.env.SANDBOX_TEMPLATE_DIR;
     const result = loadTierConfigs();
 
     for (const tier of result) {
-      expect(tier.template.command).toEqual(['sleep', '86400']);
+      expect(tier.template.command).toEqual(['node', '/opt/ax/dist/agent/runner.js', '--agent', 'pi-coding-agent']);
     }
   });
 });

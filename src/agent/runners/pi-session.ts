@@ -418,8 +418,12 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
     });
   }
 
-  // Subscribe to events — stream text to stdout, log tools/errors to stderr
-  const eventState = subscribeAgentEvents(session, config);
+  // In NATS mode, buffer text instead of writing to stdout — response goes via IPC
+  const isNATS = process.env.AX_IPC_TRANSPORT === 'nats';
+  const textBuffer: string[] | undefined = isNATS ? [] : undefined;
+
+  // Subscribe to events — stream text to stdout (or buffer for NATS), log tools/errors to stderr
+  const eventState = subscribeAgentEvents(session, config, { buffer: textBuffer });
 
   // Send message and wait — log tools that are actually on the agent
   const agentTools = (session.agent.state as any).tools ?? [];
@@ -451,6 +455,19 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
   }
 
   logger.debug('session_complete', { eventCount: eventState.eventCount(), hasOutput: eventState.hasOutput() });
+
+  // In NATS mode, send the buffered response via IPC agent_response
+  if (isNATS) {
+    const buffered = eventState.getBuffered();
+    logger.debug('nats_agent_response', { contentLength: buffered.length });
+    try {
+      await client.call({ action: 'agent_response', content: buffered });
+    } catch (err) {
+      logger.error('agent_response_failed', { error: (err as Error).message });
+      process.stderr.write(`Failed to send agent_response: ${(err as Error).message}\n`);
+    }
+  }
+
   session.dispose();
   client.disconnect();
 }

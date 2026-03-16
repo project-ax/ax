@@ -196,6 +196,8 @@ describe('tool-catalog <-> IPC schemas sync', () => {
       'agent_orch_timeline',
       // Sandbox audit gate (container-local execution, agent → host pre/post hooks)
       'sandbox_approve', 'sandbox_result',
+      // Agent response (NATS mode — agent sends response via IPC instead of stdout)
+      'agent_response',
     ]);
 
     for (const action of schemaActions) {

@@ -37,11 +37,11 @@ export interface PodTemplate {
 }
 
 /**
- * Standby command for warm pods. The container sleeps until the host
- * claims the pod and uses the k8s Exec API to start the agent.
- * Using 86400s (24h) — pods are GC'd by activeDeadlineSeconds anyway.
+ * Default warm pod command. The runner connects to NATS and subscribes
+ * to agent.work.{POD_NAME}, waiting for work. When work arrives, it
+ * processes one request and exits. The runner IS the standby.
  */
-export const WARM_POD_STANDBY_COMMAND = ['sleep', '86400'];
+export const WARM_POD_RUNNER_COMMAND = ['node', '/opt/ax/dist/agent/runner.js', '--agent', 'pi-coding-agent'];
 
 /** Summary of a sandbox pod for pool management. */
 export interface PoolPod {
@@ -139,6 +139,11 @@ export async function createPoolK8sClient(namespace?: string): Promise<PoolK8sCl
                 { name: 'SANDBOX_TIER', value: template.tier },
                 { name: 'LOG_LEVEL', value: process.env.AX_VERBOSE === '1' ? 'debug' : 'warn' },
                 { name: 'POD_NAME', valueFrom: { fieldRef: { fieldPath: 'metadata.name' } } },
+                // NATS sandbox user credentials (static auth)
+                ...(process.env.NATS_SANDBOX_PASS ? [
+                  { name: 'NATS_USER', value: 'sandbox' },
+                  { name: 'NATS_PASS', value: process.env.NATS_SANDBOX_PASS },
+                ] : []),
               ],
               resources: {
                 requests: { cpu: template.cpu, memory: template.memory },

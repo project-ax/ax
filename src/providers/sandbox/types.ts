@@ -37,6 +37,9 @@ export interface SandboxProcess {
   /** Host-side socket path for reverse IPC bridge (Apple containers).
    *  When set, the host connects to this socket instead of the agent connecting to the IPC server. */
   bridgeSocketPath?: string;
+  /** Pod name for NATS work delivery (k8s mode only).
+   *  The host publishes work to agent.work.{podName} via NATS. */
+  podName?: string;
 }
 
 export interface SandboxProvider {

@@ -75,11 +75,12 @@ export class IPCClient {
    * stdin is parsed (to start the listener early), then session context is
    * applied once the stdin payload arrives with the host-assigned sessionId.
    */
-  setContext(ctx: { sessionId?: string; requestId?: string; userId?: string; sessionScope?: string }): void {
+  setContext(ctx: { sessionId?: string; requestId?: string; userId?: string; sessionScope?: string; token?: string }): void {
     if (ctx.sessionId !== undefined) this.sessionId = ctx.sessionId;
     if (ctx.requestId !== undefined) this.requestId = ctx.requestId;
     if (ctx.userId !== undefined) this.userId = ctx.userId;
     if (ctx.sessionScope !== undefined) this.sessionScope = ctx.sessionScope;
+    // token is used by NATSIPCClient only — ignored for socket transport
   }
 
   async connect(): Promise<void> {

@@ -147,6 +147,10 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
     fullPrompt = userMessage;
   }
 
+  // In NATS mode, buffer text instead of writing to stdout — response goes via IPC
+  const isNATS = process.env.AX_IPC_TRANSPORT === 'nats';
+  const textBuffer: string[] = [];
+
   try {
     // 5. Build prompt — structured with images, or plain string
     const prompt = buildSDKPrompt(fullPrompt, imageBlocks);
@@ -174,14 +178,18 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
       },
     });
 
-    // 7. Stream output
+    // 7. Stream output (buffer in NATS mode, write to stdout otherwise)
     let hasOutput = false;
     for await (const msg of result) {
       if (msg.type === 'assistant') {
         for (const block of msg.message.content) {
           if (block.type === 'text') {
-            if (hasOutput) process.stdout.write('\n\n');
-            process.stdout.write(block.text);
+            if (hasOutput) {
+              if (isNATS) textBuffer.push('\n\n');
+              else process.stdout.write('\n\n');
+            }
+            if (isNATS) textBuffer.push(block.text);
+            else process.stdout.write(block.text);
             hasOutput = true;
           }
         }
@@ -191,7 +199,19 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
         process.stderr.write(`Claude Code error: ${errText}\n`);
       }
     }
-    if (hasOutput) process.stdout.write('\n');
+    if (hasOutput && !isNATS) process.stdout.write('\n');
+
+    // In NATS mode, send the buffered response via IPC agent_response
+    if (isNATS) {
+      const buffered = textBuffer.join('');
+      logger.debug('nats_agent_response', { contentLength: buffered.length });
+      try {
+        await client.call({ action: 'agent_response', content: buffered });
+      } catch (err) {
+        logger.error('agent_response_failed', { error: (err as Error).message });
+        process.stderr.write(`Failed to send agent_response: ${(err as Error).message}\n`);
+      }
+    }
   } catch (err) {
     // Surface the error clearly — expired OAuth, network failures, etc.
     const message = (err as Error).message ?? String(err);
