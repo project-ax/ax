@@ -101,7 +101,7 @@ export async function createWarmPoolClient(namespace?: string): Promise<WarmPool
                 { op: 'replace', path: '/metadata/labels/ax.io~1status', value: 'claimed' },
               ],
             },
-            { headers: { 'Content-Type': 'application/json-patch+json' } },
+            // Content-Type: application/json-patch+json is set automatically by the K8s client for patch ops
           );
 
           logger.info('pod_claimed', { podName, tier });
