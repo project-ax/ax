@@ -14,6 +14,7 @@ import { writeFileSync } from 'node:fs';
 
 export interface InitOptions {
   preset?: string;
+  tier?: string;
   registryUrl?: string;
   registryUser?: string;
   registryPassword?: string;
@@ -27,7 +28,8 @@ export interface InitOptions {
   output?: string;
 }
 
-const VALID_PRESETS = ['small', 'medium', 'large'];
+const VALID_PRESETS = ['small', 'large'];
+const VALID_TIERS = ['light', 'heavy'];
 
 /** Extract provider name from a compound `provider/model` ID (split on first `/`). */
 function extractProvider(compoundId: string): string {
@@ -55,6 +57,7 @@ export function parseArgs(args: string[]): InitOptions {
     const next = () => args[++i];
     switch (arg) {
       case '--preset': opts.preset = next(); break;
+      case '--tier': opts.tier = next(); break;
       case '--registry-url': opts.registryUrl = next(); break;
       case '--registry-user': opts.registryUser = next(); break;
       case '--registry-password': opts.registryPassword = next(); break;
@@ -164,6 +167,7 @@ async function createOrSkipSecret(
 
 export function generateValuesYaml(opts: {
   preset: string;
+  tier: string;
   registryUrl?: string;
   model: string;
   embeddingsModel?: string;
@@ -208,6 +212,25 @@ export function generateValuesYaml(opts: {
     }
   }
 
+  // Sandbox tier — only enable the selected tier's warm pool
+  lines.push('sandbox:');
+  lines.push('  tiers:');
+  if (opts.tier === 'light') {
+    lines.push('    light:');
+    lines.push('      minReady: 2');
+    lines.push('      maxReady: 10');
+    lines.push('    heavy:');
+    lines.push('      minReady: 0');
+    lines.push('      maxReady: 0');
+  } else {
+    lines.push('    light:');
+    lines.push('      minReady: 0');
+    lines.push('      maxReady: 0');
+    lines.push('    heavy:');
+    lines.push('      minReady: 2');
+    lines.push('      maxReady: 10');
+  }
+
   // PostgreSQL
   if (opts.database === 'external') {
     lines.push('postgresql:');
@@ -225,12 +248,12 @@ export function generateValuesYaml(opts: {
     lines.push('    enabled: true');
   }
 
-  // NATS preset overrides for small (single node, no cluster)
+  // NATS preset overrides for small (single replica)
   if (opts.preset === 'small') {
     lines.push('nats:');
     lines.push('  config:');
     lines.push('    cluster:');
-    lines.push('      enabled: false');
+    lines.push('      enabled: true');
     lines.push('      replicas: 1');
   }
 
@@ -250,8 +273,7 @@ export async function runK8sInit(args: string[]): Promise<void> {
 
     // 1. Preset
     const preset = opts.preset ?? await askChoice(rl, 'Cluster size?', [
-      { value: 'small', description: 'single team, low volume' },
-      { value: 'medium', description: 'production, moderate load' },
+      { value: 'small', description: 'production, single replica' },
       { value: 'large', description: 'high-scale, autoscaling' },
     ]);
     if (!VALID_PRESETS.includes(preset)) {
@@ -259,7 +281,14 @@ export async function runK8sInit(args: string[]): Promise<void> {
       process.exit(1);
     }
 
-    // 2. Docker registry (optional)
+    // 2. Sandbox tier (defaults to light)
+    const tier = opts.tier ?? 'light';
+    if (!VALID_TIERS.includes(tier)) {
+      console.error(`Invalid tier: ${tier}. Must be one of: ${VALID_TIERS.join(', ')}`);
+      process.exit(1);
+    }
+
+    // 3. Docker registry (optional)
     let registryUrl = opts.registryUrl;
     let registryUser = opts.registryUser;
     let registryPassword = opts.registryPassword;
@@ -272,7 +301,7 @@ export async function runK8sInit(args: string[]): Promise<void> {
       registryPassword = registryPassword ?? await ask(rl, 'Registry password: ');
     }
 
-    // 3. Model (compound provider/model ID)
+    // 4. Model (compound provider/model ID)
     const model = opts.model ?? await ask(rl, '\nModel (provider/model, e.g. anthropic/claude-sonnet-4-20250514): ');
     if (!model || !model.includes('/')) {
       console.error(`Invalid model: "${model}". Must be a compound provider/model ID (e.g. "anthropic/claude-sonnet-4-20250514")`);
@@ -281,7 +310,7 @@ export async function runK8sInit(args: string[]): Promise<void> {
     const llmProvider = extractProvider(model);
     const apiKey = opts.apiKey ?? await ask(rl, `${llmProvider} API key: `);
 
-    // 4. Embeddings model (optional, compound provider/model ID)
+    // 5. Embeddings model (optional, compound provider/model ID)
     let embeddingsModel = opts.embeddingsModel;
     let embeddingsApiKey = opts.embeddingsApiKey;
     if (embeddingsModel === undefined) {
@@ -299,7 +328,7 @@ export async function runK8sInit(args: string[]): Promise<void> {
       }
     }
 
-    // 5. Database
+    // 6. Database
     const database = opts.database ?? await askChoice(rl, 'Database?', [
       { value: 'internal', description: 'chart provisions PostgreSQL for you' },
       { value: 'external', description: 'connect to existing PostgreSQL' },
@@ -309,7 +338,7 @@ export async function runK8sInit(args: string[]): Promise<void> {
       databaseUrl = databaseUrl ?? await ask(rl, 'PostgreSQL connection URL: ');
     }
 
-    // 6. Namespace + output
+    // 7. Namespace + output
     const namespace = opts.namespace ?? 'ax';
     const outputFile = opts.output ?? 'ax-values.yaml';
 
@@ -354,6 +383,7 @@ export async function runK8sInit(args: string[]): Promise<void> {
     // Generate values file
     const valuesYaml = generateValuesYaml({
       preset,
+      tier,
       registryUrl,
       model,
       embeddingsModel,

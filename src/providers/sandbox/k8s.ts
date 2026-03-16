@@ -2,10 +2,11 @@
  * k8s sandbox provider — Kubernetes pod-based isolation.
  *
  * Supports two modes:
- *   1. Cold start (default): Creates a new pod for each sandbox request.
- *   2. Warm pool (WARM_POOL_ENABLED=true): Claims a pre-warmed pod from the
- *      pool controller, then execs the agent command inside it. Falls back
- *      to cold start if no warm pods are available.
+ *   1. Warm pool (default): Claims a pre-warmed pod from the pool controller,
+ *      then execs the agent command inside it. Falls back to cold start if no
+ *      warm pods are available.
+ *   2. Cold start (WARM_POOL_ENABLED=false): Creates a new pod for each
+ *      sandbox request.
  *
  * Warm pool pods run a standby entrypoint (sleep) and wait for work.
  * When claimed, the host uses the k8s Exec API to start the agent with
@@ -20,7 +21,7 @@
  *   K8S_POD_IMAGE — container image (default: "ax/agent:latest")
  *   K8S_RUNTIME_CLASS — runtime class name (default: "gvisor")
  *   NATS_URL — NATS server URL passed to sandbox pods
- *   WARM_POOL_ENABLED — enable warm pool claiming (default: false)
+ *   WARM_POOL_ENABLED — enable warm pool claiming (default: true)
  *   WARM_POOL_TIER — tier to claim from (default: "light")
  */
 
@@ -227,7 +228,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
   const natsUrl = process.env.NATS_URL ?? 'nats://nats:4222';
 
   // Warm pool config
-  const warmPoolEnabled = process.env.WARM_POOL_ENABLED === 'true';
+  const warmPoolEnabled = process.env.WARM_POOL_ENABLED !== 'false';
   const warmPoolTier = process.env.WARM_POOL_TIER ?? 'light';
 
   // Lazy-init warm pool client (only when warm pool is enabled)

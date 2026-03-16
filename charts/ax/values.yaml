@@ -1,7 +1,7 @@
 # AX Helm Chart — values.yaml
 # Single source of truth for AX configuration.
 
-# Preset: set to "small", "medium", or "large" for opinionated defaults.
+# Preset: set to "small" or "large" for opinionated defaults.
 # When empty (default), all values below are used as-is.
 # When set, preset values apply for any field left null.
 # User overrides (non-null) always take precedence over preset defaults.
@@ -62,7 +62,7 @@ config:
 
 # ─── Host (Ingress Layer) ────────────────────────────────────────
 host:
-  replicas:   # null → use preset (small=1, medium=2, large=3) or default 2
+  replicas:   # null → use preset (small=1, large=3) or default 2
   image:
     registry: ""
     repository: ax
@@ -74,7 +74,7 @@ host:
   ports:
     http: 8080
     metrics: 9090
-  resources:   # null → use preset (small=250m/256Mi, medium/large=500m/512Mi) or default 500m/512Mi
+  resources:   # null → use preset (500m/512Mi) or default 500m/512Mi
   readinessProbe:
     httpGet:
       path: /health
@@ -138,7 +138,7 @@ sandbox:
     pullPolicy: ""
   # Pod runtime class for sandbox pods (e.g., "gvisor" for GKE Autopilot).
   # Set to "" to disable (for kind/minikube/non-gVisor clusters).
-  # null → use preset (small="", medium/large=gvisor) or default gvisor.
+  # null → use preset (gvisor) or default gvisor.
   runtimeClass:
   # Sandbox tiers — null → use preset or default (light 2-10 + heavy 0-3).
   tiers:

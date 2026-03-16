@@ -225,7 +225,8 @@ describe('k8s provider warm pool integration', () => {
     delete process.env.WARM_POOL_TIER;
   });
 
-  test('cold start when warm pool is disabled (default)', async () => {
+  test('cold start when warm pool is explicitly disabled', async () => {
+    process.env.WARM_POOL_ENABLED = 'false';
     const { create } = await import('../../../src/providers/sandbox/k8s.js');
     const provider = await create(mockConfig());
 
@@ -246,8 +247,6 @@ describe('k8s provider warm pool integration', () => {
   });
 
   test('warm pool spawn uses exec API when warm pod is claimed', async () => {
-    process.env.WARM_POOL_ENABLED = 'true';
-
     // Warm pool returns a claimed pod
     mockClaimPod.mockResolvedValueOnce({ name: 'warm-pod-1', tier: 'light' });
 
@@ -285,8 +284,6 @@ describe('k8s provider warm pool integration', () => {
   });
 
   test('falls back to cold start when no warm pods available', async () => {
-    process.env.WARM_POOL_ENABLED = 'true';
-
     // claimPod returns null → no warm pods
     mockClaimPod.mockResolvedValueOnce(null);
 
@@ -310,8 +307,6 @@ describe('k8s provider warm pool integration', () => {
   });
 
   test('claimed pod is auto-deleted after exec completion', async () => {
-    process.env.WARM_POOL_ENABLED = 'true';
-
     mockClaimPod.mockResolvedValueOnce({ name: 'warm-pod-auto', tier: 'light' });
 
     const { create } = await import('../../../src/providers/sandbox/k8s.js');
