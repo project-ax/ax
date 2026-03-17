@@ -28,6 +28,7 @@ import { mkdirSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import { loadConfig } from '../../../src/config.js';
 import { loadProviders } from '../../../src/host/registry.js';
 import { createIPCHandler, createIPCServer, type IPCContext } from '../../../src/host/ipc-server.js';
@@ -51,6 +52,12 @@ const activeTokens = new Map<string, {
   handleIPC: (raw: string, ctx: IPCContext) => Promise<string>;
   ctx: IPCContext;
 }>();
+
+/** Max staging upload size (50MB). */
+const MAX_STAGING_BYTES = 50 * 1024 * 1024;
+
+/** In-memory staging store for workspace uploads (same as host-process.ts). */
+const stagingStore = new Map<string, { data: Buffer; createdAt: number }>();
 
 async function main() {
   const port = parseInt(process.env.PORT ?? '8080', 10);
@@ -168,6 +175,113 @@ async function main() {
       return;
     }
 
+    // ── LLM proxy over HTTP (agent → Anthropic API via host) ──
+    // claude-code runner sets ANTHROPIC_BASE_URL to ${AX_HOST_URL}/internal/llm-proxy
+    // and uses the per-turn token as ANTHROPIC_API_KEY (x-api-key header).
+    if (url.startsWith('/internal/llm-proxy/') && req.method === 'POST') {
+      const token = req.headers['x-api-key'] as string;
+      const entry = token ? activeTokens.get(token) : undefined;
+      if (!entry) {
+        console.log(`[run-http-local] /internal/llm-proxy: invalid token (${token?.slice(0, 8)}...)`);
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'invalid token' }));
+        return;
+      }
+      try {
+        const targetPath = url.replace('/internal/llm-proxy', '');
+        const body = await readBody(req, 10_485_760); // 10MB
+        console.log(`[run-http-local] /internal/llm-proxy: ${targetPath} (${body.length} bytes)`);
+        const { forwardLLMRequest } = await import('../../../src/host/llm-proxy-core.js');
+        await forwardLLMRequest({
+          targetPath,
+          body,
+          incomingHeaders: req.headers,
+          res,
+        });
+      } catch (err) {
+        console.error('[run-http-local] LLM proxy error:', err);
+        if (!res.headersSent) sendError(res, 502, 'LLM proxy request failed');
+      }
+      return;
+    }
+
+    // ── Direct workspace release from agent (k8s HTTP mode) ──
+    // Agent POSTs gzipped changes with bearer token auth.
+    if (url === '/internal/workspace/release' && req.method === 'POST') {
+      const token = req.headers.authorization?.replace('Bearer ', '');
+      const entry = token ? activeTokens.get(token) : undefined;
+      if (!entry) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'invalid token' }));
+        return;
+      }
+      try {
+        const chunks: Buffer[] = [];
+        let totalSize = 0;
+        for await (const chunk of req) {
+          totalSize += (chunk as Buffer).length;
+          if (totalSize > MAX_STAGING_BYTES) {
+            sendError(res, 413, 'Payload too large');
+            return;
+          }
+          chunks.push(chunk as Buffer);
+        }
+        const compressed = Buffer.concat(chunks);
+        const json = gunzipSync(compressed).toString('utf-8');
+        const payload = JSON.parse(json) as { changes: Array<{ scope: string; path: string; type: string; content_base64?: string; size: number }> };
+        const changes = (payload.changes ?? []).map((c: any) => ({
+          scope: c.scope as 'agent' | 'user' | 'session',
+          path: c.path,
+          type: c.type as 'added' | 'modified' | 'deleted',
+          content: c.content_base64 ? Buffer.from(c.content_base64, 'base64') : undefined,
+          size: c.size,
+        }));
+
+        if (providers.workspace?.setRemoteChanges) {
+          providers.workspace.setRemoteChanges(entry.ctx.sessionId, changes);
+        }
+
+        console.log(`[run-http-local] /internal/workspace/release: ${changes.length} changes`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, changeCount: changes.length }));
+      } catch (err) {
+        console.error('[run-http-local] Workspace release error:', err);
+        if (!res.headersSent) sendError(res, 500, 'Workspace release failed');
+      }
+      return;
+    }
+
+    // ── Workspace staging upload (legacy path) ──
+    // Agent uploads gzipped data, gets back staging_key for later IPC workspace_release.
+    if (url === '/internal/workspace-staging' && req.method === 'POST') {
+      try {
+        const chunks: Buffer[] = [];
+        let totalSize = 0;
+        for await (const chunk of req) {
+          totalSize += (chunk as Buffer).length;
+          if (totalSize > MAX_STAGING_BYTES) {
+            sendError(res, 413, 'Staging payload too large');
+            return;
+          }
+          chunks.push(chunk as Buffer);
+        }
+        const body = Buffer.concat(chunks);
+        if (body.length === 0) {
+          sendError(res, 400, 'Empty staging payload');
+          return;
+        }
+        const key = randomUUID();
+        stagingStore.set(key, { data: body, createdAt: Date.now() });
+        console.log(`[run-http-local] /internal/workspace-staging: key=${key} (${body.length} bytes)`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ staging_key: key }));
+      } catch (err) {
+        console.error('[run-http-local] Workspace staging error:', err);
+        if (!res.headersSent) sendError(res, 500, 'Staging upload failed');
+      }
+      return;
+    }
+
     // ── Chat completions (simplified — non-streaming only) ──
     if (url === '/v1/chat/completions' && req.method === 'POST') {
       try {
@@ -198,10 +312,36 @@ async function main() {
         if (timer.unref) timer.unref();
         agentResponsePromise.catch(() => {}); // prevent unhandled rejection
 
-        // Wrap handleIPC to intercept agent_response
+        // Wrap handleIPC to intercept workspace_release and agent_response
         const wrappedHandleIPC = async (raw: string, ctx: IPCContext): Promise<string> => {
           try {
             const parsed = JSON.parse(raw);
+
+            // Intercept workspace_release: look up staged changes by key
+            if (parsed.action === 'workspace_release') {
+              const stagingKey = parsed.staging_key as string;
+              const staged = stagingStore.get(stagingKey);
+              if (!staged) {
+                console.log(`[run-http-local] workspace_release: staging_key not found (${stagingKey})`);
+                return JSON.stringify({ ok: false, error: 'staging_key not found' });
+              }
+              stagingStore.delete(stagingKey);
+              const json = gunzipSync(staged.data).toString('utf-8');
+              const payload = JSON.parse(json) as { changes: Array<{ scope: string; path: string; type: string; content_base64?: string; size: number }> };
+              const changes = (payload.changes ?? []).map((c: any) => ({
+                scope: c.scope as 'agent' | 'user' | 'session',
+                path: c.path,
+                type: c.type as 'added' | 'modified' | 'deleted',
+                content: c.content_base64 ? Buffer.from(c.content_base64, 'base64') : undefined,
+                size: c.size,
+              }));
+              if (providers.workspace?.setRemoteChanges) {
+                providers.workspace.setRemoteChanges(sessionId, changes);
+              }
+              console.log(`[run-http-local] workspace_release: ${changes.length} changes from staging`);
+              return JSON.stringify({ ok: true });
+            }
+
             if (parsed.action === 'agent_response') {
               console.log(`[run-http-local] agent_response received (${(parsed.content ?? '').length} bytes)`);
               agentResponseResolve?.(parsed.content ?? '');
@@ -286,6 +426,7 @@ async function main() {
     console.log(`[run-http-local] AX listening on http://localhost:${port}`);
     console.log('[run-http-local] IPC transport: HTTP (HttpIPCClient)');
     console.log('[run-http-local] Work delivery: NATS (sandbox.work queue group)');
+    console.log('[run-http-local] Routes: /internal/ipc, /internal/llm-proxy/*, /internal/workspace/release, /internal/workspace-staging');
     console.log('[run-http-local]');
     console.log('[run-http-local] Test with:');
     console.log(`[run-http-local]   curl -X POST http://localhost:${port}/v1/chat/completions \\`);

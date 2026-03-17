@@ -1,3 +1,9 @@
+### run-http-local.ts debug harness must mirror host-process.ts route surface
+**Date:** 2026-03-17
+**Context:** Debugging why LLM responses hang and identity isn't saved in real k8s clusters. The e2e tests passed but production failed.
+**Lesson:** The `run-http-local.ts` harness must expose ALL three k8s HTTP routes that `host-process.ts` provides: (1) `/internal/llm-proxy/*` — claude-code sets `ANTHROPIC_BASE_URL=${AX_HOST_URL}/internal/llm-proxy` and uses per-turn token as `x-api-key`; missing this causes LLM calls to 404 and hang. (2) `/internal/workspace/release` — direct workspace upload from agent. (3) `/internal/workspace-staging` — legacy two-phase upload. Also need `workspace_release` IPC intercept in `wrappedHandleIPC` for the legacy staging path. Any time you add a new `/internal/*` route to `host-process.ts`, add it to the debug harness too.
+**Tags:** k8s, debug-harness, llm-proxy, workspace-release, http-ipc, run-http-local
+
 ### Queue-group work delivery only happens when the host does not preselect a pod
 **Date:** 2026-03-17
 **Context:** Reviewing the NATS-centric workspace provisioning plan against the current k8s execution path.
