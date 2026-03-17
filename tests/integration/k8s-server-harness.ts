@@ -140,8 +140,14 @@ const activeTokens = new Map<string, {
 // ═══════════════════════════════════════════════════════
 
 export async function createK8sHarness(opts: K8sHarnessOptions): Promise<K8sServerHarness> {
-  // Save and override AX_HOME
+  // Save and override AX_HOME.
+  // Note: AX_HOST_URL and PORT must be set by the caller BEFORE creating
+  // the sandbox provider (nats-subprocess reads them at create() time).
+  // Docker-based providers (docker-nats) set their own AX_HOST_URL via
+  // Docker -e flags and ignore process.env.
   const originalAxHome = process.env.AX_HOME;
+  const originalHostUrl = process.env.AX_HOST_URL;
+  const originalPort = process.env.PORT;
   const ownsHome = !opts.existingHome;
   const home = opts.existingHome ?? mkdtempSync(join(tmpdir(), 'ax-k8s-test-'));
   process.env.AX_HOME = home;
@@ -382,7 +388,9 @@ export async function createK8sHarness(opts: K8sHarnessOptions): Promise<K8sServ
       extraSandboxEnv: {
         AX_IPC_TOKEN: turnToken,
         AX_IPC_REQUEST_ID: requestId,
-        AX_HOST_URL: `http://localhost:${opts.port}`,
+        // AX_HOST_URL is set by the sandbox provider (docker-nats uses
+        // host.docker.internal, nats-subprocess uses localhost). Don't
+        // override it here — inside Docker, localhost is the container.
       },
       agentResponsePromise,
       publishWork,
@@ -439,11 +447,21 @@ export async function createK8sHarness(opts: K8sHarnessOptions): Promise<K8sServ
       // Best-effort
     }
 
-    // Restore AX_HOME
+    // Restore env vars
     if (originalAxHome !== undefined) {
       process.env.AX_HOME = originalAxHome;
     } else {
       delete process.env.AX_HOME;
+    }
+    if (originalHostUrl !== undefined) {
+      process.env.AX_HOST_URL = originalHostUrl;
+    } else {
+      delete process.env.AX_HOST_URL;
+    }
+    if (originalPort !== undefined) {
+      process.env.PORT = originalPort;
+    } else {
+      delete process.env.PORT;
     }
 
     // Reset logger

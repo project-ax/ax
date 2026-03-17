@@ -54,6 +54,10 @@ function isPortOpen(port: number, timeoutMs = 1000): Promise<boolean> {
 const port = 18000 + Math.floor(Math.random() * 1000);
 
 async function k8sSandbox() {
+  // Set host URL env vars BEFORE creating the sandbox — nats-subprocess
+  // reads AX_HOST_URL at create() time to tell the agent where to POST IPC.
+  process.env.AX_HOST_URL = `http://localhost:${port}`;
+  process.env.PORT = String(port);
   const config = loadConfig();
   return createNATSSubprocess(config, { ipcTransport: 'http' });
 }
