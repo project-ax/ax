@@ -4,6 +4,8 @@ Test infrastructure, integration tests, E2E framework, migration tests.
 
 ## Entries
 
+- 2026-03-17 16:00 — Create K8s-mode server test harness [integration.md](integration.md)
+- 2026-03-17 14:00 — Docker+NATS hybrid sandbox provider [e2e.md](e2e.md)
 - 2026-03-17 11:00 — Create Docker sandbox E2E test suite [integration.md](integration.md)
 - 2026-03-17 10:00 — Create in-process server test harness [integration.md](integration.md)
 - 2026-03-06 12:42 — Cortex Memory local acceptance re-run (48/51 PASS, 1 SKIP) [acceptance.md](acceptance.md)

@@ -2,6 +2,14 @@
 
 Integration test fixes, CI stability, smoke test improvements.
 
+## [2026-03-17 16:00] — Create K8s-mode server test harness
+
+**Task:** Create `tests/integration/k8s-server-harness.ts` — a reusable K8s-mode test fixture
+**What I did:** Wrote a standalone harness that wires up NATS work delivery + HTTP IPC routes using `processCompletion()` directly (not `createServer()`). Includes per-turn token registry, agent_response interception, `/internal/ipc` and `/internal/workspace/release` HTTP routes, and the same public API shape as `ServerHarness`.
+**Files touched:** `tests/integration/k8s-server-harness.ts` (created)
+**Outcome:** Success — file written with all verified imports and matching API shape
+**Notes:** Uses `processCompletion()` directly because `createServer()` lacks k8s-mode deps (publishWork, agentResponsePromise, /internal/ipc route, token registry). Pattern based on `tests/providers/sandbox/run-http-local.ts`.
+
 ## [2026-03-17 11:00] — Create Docker sandbox E2E test suite
 
 **Task:** Create `tests/integration/e2e-docker.test.ts` — full feature test suite running all scenarios through the Docker sandbox provider

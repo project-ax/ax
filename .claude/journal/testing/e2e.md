@@ -2,6 +2,38 @@
 
 End-to-end test framework, simulated providers, scenario coverage.
 
+## [2026-03-17 16:00] — K8s Docker E2E simulation: full stack implementation
+
+**Task:** Create Docker+NATS E2E tests simulating k8s host+sandbox communication
+**What I did:** Built three new files + fixed existing k8s path tests:
+1. `tests/providers/sandbox/docker-nats.ts` — Docker container with NATS/HTTP IPC (k8s simulation)
+2. `tests/integration/k8s-server-harness.ts` — Server harness with NATS publishWork, /internal/ipc route, token registry, agent_response interception
+3. `tests/integration/e2e-k8s-docker.test.ts` — 7 E2E tests through Docker + NATS + HTTP IPC
+4. Fixed `tests/integration/e2e-k8s-path.test.ts` — switched to k8s-server-harness, fixing pre-existing publishWork gap
+**Files touched:**
+- New: tests/providers/sandbox/docker-nats.ts, tests/integration/k8s-server-harness.ts, tests/integration/e2e-k8s-docker.test.ts, docs/plans/2026-03-17-k8s-docker-e2e-tests.md
+- Modified: tests/integration/e2e-k8s-path.test.ts
+**Outcome:** Success — K8s path tests: 7/7 passed (~10s). Docker+NATS tests created, require Docker + nats-server.
+**Notes:** Key bugs found: (1) NATS subject mismatch — agents subscribe to `sandbox.work` queue group, not the old `agent.work.{podName}` per-pod subject. (2) Streaming test assertion — k8s mode uses agentResponsePromise, not SSE. (3) Docker E2E tests on macOS are fundamentally broken — Unix domain sockets don't work across Docker Desktop VM boundary (ENOTSUP). Pre-existing issue, not introduced by our changes.
+
+## [2026-03-17 15:00] — Docker+NATS E2E test file
+
+**Task:** Create the E2E test file that exercises feature scenarios through a real Docker container communicating via NATS+HTTP IPC
+**What I did:** Created `tests/integration/e2e-k8s-docker.test.ts` with 7 test scenarios: basic message, tool use, streaming, bootstrap, scheduler CRUD, guardian injection blocking, and web proxy SSRF blocking. Tests auto-detect Docker + nats-server; skip when unavailable. Auto-starts nats-server if not running. Builds fresh Docker image in beforeAll (npm run build + docker build). Uses `createK8sHarness` from k8s-server-harness.ts and `createDockerNATS` from docker-nats.ts.
+**Files touched:**
+- New: tests/integration/e2e-k8s-docker.test.ts
+**Outcome:** Success — file created with all 7 scenarios matching the pattern from e2e-docker.test.ts and e2e-k8s-path.test.ts.
+**Notes:** 180s timeouts for container tests, 300s for beforeAll (build+docker build). Uses `AX_DOCKER_IMAGE` env var save/restore pattern. Port randomized in 19000-19999 range.
+
+## [2026-03-17 14:00] — Docker+NATS hybrid sandbox provider
+
+**Task:** Create a hybrid sandbox provider that runs agent in Docker container but communicates via NATS work delivery + HTTP IPC (like real k8s)
+**What I did:** Created `tests/providers/sandbox/docker-nats.ts` with `create(config, opts)` factory. Combines Docker container isolation (security hardening: read-only root, cap-drop=ALL, non-root user 1000, no-new-privileges, 64MB tmpfs) with k8s communication path (NATS work delivery, HTTP IPC). Uses bridge network + `host.docker.internal` to reach NATS and host HTTP endpoints.
+**Files touched:**
+- New: tests/providers/sandbox/docker-nats.ts
+**Outcome:** Success — file created with full Docker args, canonical path mounts, NATS/HTTP env vars, podName for triggering host's NATS code path.
+**Notes:** Sits alongside existing `nats-subprocess.ts` (bare process + NATS). Key difference: this one adds Docker container isolation. Uses `canonicalEnv()` then deletes `AX_IPC_SOCKET` since HTTP IPC replaces Unix sockets. `DockerNATSOptions` requires `hostUrl` and optionally `natsUrl` (defaults to `nats://host.docker.internal:4222`).
+
 ## [2026-03-17 12:00] — K8s path (NATS subprocess) E2E test file
 
 **Task:** Create E2E tests for the NATS work delivery + HTTP IPC code path (k8s sandbox)

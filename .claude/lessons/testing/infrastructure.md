@@ -1,5 +1,23 @@
 # Testing Infrastructure
 
+### NATS agents subscribe to sandbox.work queue group — never publish to agent.work.{podName}
+**Date:** 2026-03-17
+**Context:** K8s path E2E tests timed out because publishWork sent to `agent.work.{podName}` but agents subscribe to `sandbox.work` queue group.
+**Lesson:** After the k8s networking simplification, agents always subscribe to `sandbox.work` (with tier-based queue group). The old per-pod subject `agent.work.{podName}` is dead — no agent listens on it. Always publish to `sandbox.work` in test harnesses. The `podName` parameter in `publishWork` is only used for the response (returned to caller), not for routing.
+**Tags:** nats, k8s, sandbox, queue-group, publishWork, e2e
+
+### Unix domain sockets don't work across Docker Desktop VM boundary on macOS
+**Date:** 2026-03-17
+**Context:** Docker E2E tests fail on macOS — agent inside Docker gets `ENOTSUP` connecting to host Unix socket mounted via volume.
+**Lesson:** On macOS, Docker Desktop runs containers in a Linux VM. Volume-mounted Unix domain socket files appear in the container filesystem but connecting to them fails with `ENOTSUP` because the VM boundary doesn't support socket forwarding. This means the Docker sandbox provider's IPC via Unix socket only works on Linux (same kernel). On macOS, use either: (1) TCP-based IPC, (2) Apple container's `--publish-socket` bridge, or (3) NATS+HTTP IPC (the docker-nats test provider).
+**Tags:** docker, macos, unix-socket, ipc, docker-desktop, vm-boundary, ENOTSUP
+
+### K8s-mode server harness needs processCompletion directly — createServer lacks k8s wiring
+**Date:** 2026-03-17
+**Context:** Built k8s-server-harness.ts to wire up NATS publishWork + HTTP IPC for tests. The standard server-harness.ts uses createServer() from server.ts which doesn't support publishWork, agentResponsePromise, /internal/ipc, or token registry.
+**Lesson:** `server.ts` (createServer) builds `completionDeps` internally without k8s-mode fields. `host-process.ts` adds them per-turn. For tests needing k8s mode, use `processCompletion()` directly with per-turn deps (following the run-http-local.ts pattern), not createServer(). The k8s-server-harness provides this as a reusable test fixture.
+**Tags:** testing, k8s, harness, processCompletion, server, nats, ipc
+
 ### Agent stdin payload must parse ALL fields — missing fields cause silent feature loss
 **Date:** 2026-03-13
 **Context:** Running workspace acceptance tests, found workspace_mount tool never registered because workspaceProvider field not parsed from stdin payload in src/agent/runner.ts parseStdinPayload().
