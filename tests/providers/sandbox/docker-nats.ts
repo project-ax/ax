@@ -33,6 +33,7 @@ export async function create(_config: Config, opts: DockerNATSOptions): Promise<
   const hostUrl = opts.hostUrl;
 
   return {
+    workspaceLocation: 'sandbox' as const,
     async spawn(config: SandboxConfig): Promise<SandboxProcess> {
       const podName = `docker-nats-${randomUUID().slice(0, 8)}`;
       const containerName = `ax-agent-${randomUUID().slice(0, 8)}`;

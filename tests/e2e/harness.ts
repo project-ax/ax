@@ -651,6 +651,7 @@ export class TestHarness {
       },
 
       sandbox: {
+        workspaceLocation: 'host' as const,
         async spawn() { throw new Error('Sandbox disabled in E2E harness'); },
         async kill() {},
         async isAvailable() { return false; },

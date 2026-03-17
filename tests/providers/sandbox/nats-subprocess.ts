@@ -32,6 +32,7 @@ export async function create(config: Config, opts?: NATSSubprocessOptions): Prom
   console.log(`[nats-subprocess] NATS: ${natsUrl}, Host: ${hostUrl}, Transport: ${ipcTransport}, Debug: ${debugAgent}`);
 
   return {
+    workspaceLocation: 'sandbox' as const,
     async spawn(sandboxConfig: SandboxConfig): Promise<SandboxProcess> {
       const podName = `local-nats-${randomUUID().slice(0, 8)}`;
 
