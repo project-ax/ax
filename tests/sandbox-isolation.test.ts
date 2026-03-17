@@ -233,10 +233,8 @@ describe('server workspace isolation', () => {
 
     // Workspace is NOT passed as a CLI arg to the agent — it's set via canonical env
     // vars by the sandbox provider. Identity and skills come via stdin payload.
-    // Note: the spawnCommand section only covers the agent spawn args, not the
-    // three-phase workspace-cli provision/cleanup args which are separate spawn calls.
     const spawnStart = source.indexOf('spawnCommand');
-    const spawnEnd = source.indexOf('needsProvisioning', spawnStart);
+    const spawnEnd = source.indexOf('host_prepare', spawnStart);
     const spawnSection = source.slice(spawnStart, spawnEnd !== -1 ? spawnEnd : undefined);
     expect(spawnSection).not.toContain("'--workspace'");
     expect(spawnSection).not.toContain("'--skills'");
@@ -543,6 +541,28 @@ describe('sandbox workspaceLocation capability', () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(resolve('src/providers/sandbox/k8s.ts'), 'utf-8');
     expect(source).toContain("workspaceLocation: 'sandbox'");
+  });
+});
+
+// ── Lifecycle Dispatch Replaces Three-Phase Orchestration ─────────────
+
+describe('lifecycle dispatch replaces three-phase orchestration', () => {
+  test('server-completions no longer spawns separate provision or cleanup pods', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/host/server-completions.ts'), 'utf-8');
+    expect(source).not.toContain('provision_phase_start');
+    expect(source).not.toContain('cleanup_phase_start');
+    expect(source).not.toContain('workspace-cli.js provision');
+    expect(source).not.toContain('workspace-cli.js cleanup');
+  });
+
+  test('server-completions uses workspaceLocation for lifecycle dispatch', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/host/server-completions.ts'), 'utf-8');
+    expect(source).toContain('workspaceLocation');
+    expect(source).toContain('prepareGitWorkspace');
+    expect(source).toContain('finalizeGitWorkspace');
+    expect(source).toContain('buildLifecyclePlan');
   });
 });
 
