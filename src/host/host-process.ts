@@ -33,8 +33,6 @@ import { processCompletion, type CompletionDeps } from './server-completions.js'
 import { createOrchestrator } from './orchestration/orchestrator.js';
 import { FileStore } from '../file-store.js';
 import { templatesDir as resolveTemplatesDir, seedSkillsDir as resolveSeedSkillsDir } from '../utils/assets.js';
-// NATS IPC handler and LLM proxy removed — HTTP routes handle all IPC now.
-// These imports will be deleted in Task 11 along with the source files.
 import { startWebProxy, type WebProxy } from './web-proxy.js';
 import { decode, eventSubject } from './nats-session-protocol.js';
 import type { StreamEvent } from './event-bus.js';

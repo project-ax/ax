@@ -91,29 +91,18 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
 
   // Detect transport mode
   const isHTTPTransport = process.env.AX_IPC_TRANSPORT === 'http';
-  const useNATSBridge = !isHTTPTransport && !config.proxySocket && !!process.env.NATS_URL;
 
-  if (!isHTTPTransport && !config.proxySocket && !useNATSBridge) {
-    logger.error('missing_proxy_socket', { message: 'claude-code agent requires --proxy-socket, NATS_URL, or AX_IPC_TRANSPORT=http' });
+  if (!isHTTPTransport && !config.proxySocket) {
+    logger.error('missing_proxy_socket', { message: 'claude-code agent requires --proxy-socket or AX_IPC_TRANSPORT=http' });
     process.exit(1);
   }
 
-  // 1. Start bridge — HTTP mode needs no bridge, NATS and socket modes start bridges
+  // 1. Start bridge — HTTP mode needs no bridge, socket mode starts TCP bridge
   let bridge: { port: number; stop: () => void | Promise<void> } | undefined;
   if (isHTTPTransport) {
     // K8s HTTP mode: agent hits host LLM proxy directly via /internal/llm-proxy.
     // No bridge needed — ANTHROPIC_BASE_URL points to host, per-turn token as API key.
     logger.info('http_llm_proxy', { hostUrl: process.env.AX_HOST_URL });
-  } else if (useNATSBridge) {
-    if (!config.sessionId) {
-      logger.error('missing_session_id', { message: 'claude-code NATS bridge requires sessionId' });
-      process.exit(1);
-    }
-    const { startNATSBridge } = await import('../nats-bridge.js');
-    const requestId = process.env.AX_IPC_REQUEST_ID ?? config.requestId ?? config.sessionId;
-    const token = process.env.AX_IPC_TOKEN ?? '';
-    bridge = await startNATSBridge({ sessionId: config.sessionId, requestId, token });
-    logger.info('nats_bridge_started', { port: bridge.port, sessionId: config.sessionId });
   } else {
     bridge = await startTCPBridge(config.proxySocket!);
   }

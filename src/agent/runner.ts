@@ -234,8 +234,8 @@ function parseArgs(): AgentConfig {
     logger.error('missing_args', { message: 'Usage: agent-runner --agent <type> --ipc-socket <path> (AX_WORKSPACE env var required)' });
     process.exit(1);
   }
-  if ((ipcTransport === 'nats' || ipcTransport === 'http') && !workspace) {
-    logger.error('missing_args', { message: `AX_IPC_TRANSPORT=${ipcTransport} requires AX_WORKSPACE env var` });
+  if (ipcTransport === 'http' && !workspace) {
+    logger.error('missing_args', { message: 'AX_IPC_TRANSPORT=http requires AX_WORKSPACE env var' });
     process.exit(1);
   }
 
@@ -473,25 +473,6 @@ if (isMain) {
     const { HttpIPCClient } = await import('./http-ipc-client.js');
     const client = new HttpIPCClient({
       hostUrl: process.env.AX_HOST_URL!,
-    });
-    await client.connect();
-    config.ipcClient = client;
-
-    // Wait for work payload via NATS queue group
-    waitForNATSWork().then((data) => {
-      const payload = parseStdinPayload(data);
-      applyPayload(config, payload);
-      return run(config);
-    }).catch((err) => {
-      logger.error('main_error', { error: (err as Error).message, stack: (err as Error).stack });
-      process.exitCode = 1;
-      process.stderr.write(`Agent runner error: ${(err as Error).message ?? err}\n`);
-    });
-  } else if (ipcTransport === 'nats') {
-    // Legacy k8s mode: use NATS for IPC (kept during migration).
-    const { NATSIPCClient } = await import('./nats-ipc-client.js');
-    const client = new NATSIPCClient({
-      sessionId: '', // set after work payload arrives via setContext()
     });
     await client.connect();
     config.ipcClient = client;
