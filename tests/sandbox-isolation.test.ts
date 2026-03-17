@@ -474,6 +474,18 @@ describe('k8s pod spec workspace tier volumes', () => {
   });
 });
 
+// ── K8s Pod Spec GCS/Git Env Vars ─────────────────────────────────────
+
+describe('k8s pod spec GCS/git env vars', () => {
+  test('k8s pod spec includes GCS and git workspace env vars', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/k8s.ts'), 'utf-8');
+    expect(source).toContain('GCS_WORKSPACE_BUCKET');
+    expect(source).toContain('WORKSPACE_CACHE_BUCKET');
+    expect(source).toContain('AX_WORKSPACE_GIT_URL');
+  });
+});
+
 // ── /workspace Root Is Read-Only ──────────────────────────────────────
 
 describe('/workspace root is read-only', () => {

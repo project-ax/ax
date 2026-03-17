@@ -128,6 +128,11 @@ function buildPodSpec(
             // SandboxProcess.stdout stream which becomes the HTTP response.
             // Without this, pino JSON lines pollute the response content.
             { name: 'LOG_LEVEL', value: process.env.K8S_POD_LOG_LEVEL ?? (process.env.AX_VERBOSE === '1' ? 'debug' : 'warn') },
+            // GCS + git workspace config — used by in-pod provisionScope() and provisionWorkspace()
+            ...(process.env.GCS_WORKSPACE_BUCKET ? [{ name: 'GCS_WORKSPACE_BUCKET', value: process.env.GCS_WORKSPACE_BUCKET }] : []),
+            ...(process.env.WORKSPACE_CACHE_BUCKET ? [{ name: 'WORKSPACE_CACHE_BUCKET', value: process.env.WORKSPACE_CACHE_BUCKET }] : []),
+            ...(process.env.AX_WORKSPACE_GIT_URL ? [{ name: 'AX_WORKSPACE_GIT_URL', value: process.env.AX_WORKSPACE_GIT_URL }] : []),
+            ...(process.env.AX_WORKSPACE_GIT_REF ? [{ name: 'AX_WORKSPACE_GIT_REF', value: process.env.AX_WORKSPACE_GIT_REF }] : []),
             // Canonical paths from sandbox config (filter out AX_IPC_SOCKET — using NATS instead)
             ...Object.entries(envVars)
               .filter(([k]) => k !== 'AX_IPC_SOCKET')
