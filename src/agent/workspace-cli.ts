@@ -180,6 +180,20 @@ async function release(args: Record<string, string>): Promise<void> {
 
   const allChanges: ChangeEntry[] = [];
 
+  // Read provisioned hash baselines if available (written by runner.ts provisionWorkspaceFromPayload).
+  // When present, diffs are accurate (only actual changes). When absent (non-k8s, first run),
+  // falls back to empty baseline (treats all files as "added").
+  let hashSnapshot: HashSnapshot = {};
+  const hashSnapshotPath = '/tmp/.ax-hashes.json';
+  if (existsSync(hashSnapshotPath)) {
+    try {
+      hashSnapshot = JSON.parse(readFileSync(hashSnapshotPath, 'utf-8'));
+      console.error(`[release] using provisioned baselines: ${Object.keys(hashSnapshot).join(', ')}`);
+    } catch {
+      console.error('[release] failed to read hash snapshot, using empty baselines');
+    }
+  }
+
   for (const scope of scopeNames) {
     const mountPath = scopePaths[scope];
     if (!mountPath || !existsSync(mountPath)) {
@@ -187,8 +201,9 @@ async function release(args: Record<string, string>): Promise<void> {
       continue;
     }
 
-    // Empty baseline — pod starts with empty emptyDir volumes, so every file is new
-    const baseHashes: FileHashMap = new Map();
+    // Use provisioned hashes as baseline (accurate diff) or empty map (all files = added)
+    const snapshotEntries = hashSnapshot[scope];
+    const baseHashes: FileHashMap = snapshotEntries ? new Map(snapshotEntries) : new Map();
     const diffs = diffScope(mountPath, baseHashes);
     if (diffs.length === 0) continue;
 
