@@ -4,6 +4,7 @@ Host process work: server, router, IPC handlers, event console, event bus, deleg
 
 ## Entries
 
+- 2026-03-16 18:00 — Update ax-host skill to reflect NATS IPC handler and deleted files [sandbox-dispatch.md](sandbox-dispatch.md)
 - 2026-03-16 12:22 — Fix delegation CPU tier, git push without GCS, and missing cache key [server.md](server.md)
 - 2026-03-16 12:15 — Fix stream keepalive timer leak on client disconnect [server.md](server.md)
 - 2026-03-16 07:35 — Fix k8s agent identity persistence with empty admins file [k8s-deployment.md](k8s-deployment.md)

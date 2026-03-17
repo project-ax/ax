@@ -1,6 +1,14 @@
 # Sandbox Dispatch
 
-Local and NATS-based sandbox dispatching, lazy sandbox spawning.
+Local and NATS-based sandbox dispatching, lazy sandbox spawning, NATS IPC handler.
+
+## [2026-03-16 18:00] — Update ax-host skill to reflect NATS IPC handler and deleted files
+
+**Task:** Update `.claude/skills/ax-host/SKILL.md` to reflect deleted files (nats-sandbox-dispatch.ts, agent-runtime-process.ts, local-sandbox-dispatch.ts), new nats-ipc-handler.ts, three-phase container orchestration, warm pool, IPC server fixes, sandbox-tools audit gate, provider-map changes, and streaming fixes.
+**What I did:** Removed references to deleted files, added entries for nats-ipc-handler.ts, host-process.ts, sandbox-tools.ts. Rewrote NATS Subsystem section with three-component model. Added Warm Pool subsection. Updated Provider Map with sandbox/workspace/skills categories. Added 9 new gotchas covering concurrent IPC, proxy.sock race, agent_response timeout, three-phase orchestration, per-turn NATS handler, deleted files, and error redaction.
+**Files touched:** `.claude/skills/ax-host/SKILL.md`
+**Outcome:** Success — skill file now accurately reflects current codebase state
+**Notes:** Verified against actual filesystem: nats-sandbox-dispatch.ts, agent-runtime-process.ts, local-sandbox-dispatch.ts are all confirmed deleted. nats-ipc-handler.ts, host-process.ts, sandbox-tools.ts are all confirmed present.
 
 ## [2026-03-15 04:20] — Implement agent-in-container design for Docker/Apple sandboxes
 

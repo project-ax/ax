@@ -1,5 +1,13 @@
 # Workspace Provider Journal
 
+## [2026-03-16 21:10] — Fix k8s workspace file syncing to GCS via NATS IPC
+
+**Task:** Files written to /workspace/scratch, /workspace/user, and /workspace/agent inside k8s sandbox pods never got synced back to the GCS bucket. RemoteTransport.diff() read from an empty _staging/ prefix, and pods have no network.
+**What I did:** Rewrote RemoteTransport to store changes from setRemoteChanges() and return them from diff(). Added workspace_release IPC schema for agent→host file transfer. Created agent-side workspace-release.ts that diffs scope dirs, base64-encodes files, and sends via chunked IPC. Integrated into both claude-code and pi-session runners before agent_response. Added host-process interception of workspace_release in wrappedHandleIPC. Added RemoteFileChange type and optional setRemoteChanges to WorkspaceProvider interface.
+**Files touched:** src/ipc-schemas.ts, src/providers/workspace/types.ts, src/providers/workspace/gcs.ts, src/agent/workspace-release.ts (new), src/agent/runners/claude-code.ts, src/agent/runners/pi-session.ts, src/host/host-process.ts, tests/providers/workspace/gcs-remote-transport.test.ts (new), tests/agent/workspace-release.test.ts (new), tests/agent/tool-catalog-sync.test.ts
+**Outcome:** Success — 213 test files, 2492 tests pass (all new tests included)
+**Notes:** Changes flow: agent pod diffs workspace dirs → base64-encodes → sends workspace_release IPC → host decodes + stores via setRemoteChanges → workspace.commit() picks up via RemoteTransport.diff() → structural filter + scanner → GCS upload. Chunking at ~800KB keeps within NATS 1MB limit. Pod starts with empty emptyDir volumes so baseHashes is empty Map (every file is "new").
+
 ## [2026-03-13 14:50] — Wire workspace provider directories into sandbox as writable mounts
 
 **Task:** Close the gap where workspace provider directories (System 2) were not mounted into the sandbox, making them unreachable from the agent process. The removed workspace_write tool had masked this gap.

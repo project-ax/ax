@@ -1,0 +1,116 @@
+---
+name: ax-security
+description: Use when modifying security mechanisms — taint budget, canary tokens, path traversal defense, sandbox isolation, scanner patterns, plugin integrity, or any security-sensitive code paths
+---
+
+## Overview
+
+AX enforces four security controls across the host/agent boundary. **SC-SEC-001** isolates agents in sandboxed containers with no network or credentials. **SC-SEC-002** loads providers only from a static allowlist in `src/host/provider-map.ts` -- no dynamic imports from config values. **SC-SEC-003** tracks per-session taint ratios and blocks sensitive actions when external content dominates the conversation. **SC-SEC-004** prevents path traversal via `safePath()` on every file-based provider.
+
+## Taint Budget (SC-SEC-003)
+
+| Profile   | Threshold | Meaning                                    |
+|-----------|-----------|--------------------------------------------|
+| paranoid  | 10%       | Blocks if >10% of session tokens are tainted |
+| balanced  | 30%       | Default -- moderate external content allowed |
+| yolo      | 60%       | Permissive, still blocks majority-tainted    |
+
+- `TaintBudget` class in `src/host/taint-budget.ts` tracks `taintedTokens / totalTokens` per session.
+- `recordContent(sessionId, content, isTainted)` called in `router.processInbound()`.
+- `checkAction(sessionId, action)` called in `src/host/ipc-server.ts` as a global gate before handler execution.
+- Actions with custom taint handling (`identity_write`, `user_write`, `identity_propose`) skip the global gate and do soft queuing.
+- Default sensitive actions: `identity_write`, `user_write`, `oauth_call`, `skill_propose`, `browser_navigate`, `scheduler_add_cron`.
+
+## Canary Tokens
+
+1. **Injection** -- `router.processInbound()` generates canary via `providers.scanner.canaryToken()` (`CANARY-<32hex>`). Appended as `<!-- canary:<token> -->`.
+2. **Detection** -- `router.processOutbound()` calls `providers.scanner.checkCanary()`. Canary in response -> full redaction.
+3. **Audit** -- Leakage triggers audit log entry (`canary_leaked`, result: `blocked`).
+4. **Cleanup** -- Residual tokens stripped via `replaceAll(token, '[REDACTED]')`.
+
+## Safe Path (SC-SEC-004)
+
+`src/utils/safe-path.ts`:
+- **`safePath(baseDir, ...segments)`** -- Sanitizes segments (strips `..`, path separators, null bytes, colons), joins to base, resolves, verifies containment. Throws on escape.
+- **`assertWithinBase(baseDir, targetPath)`** -- Validates existing path is inside base.
+- **Required** in every file-based provider constructing paths from external input.
+
+## Provider Map Security (SC-SEC-002)
+
+- **Static allowlist**: `PROVIDER_MAP` in `src/host/provider-map.ts` maps all (kind, name) pairs to static import paths.
+- **URL scheme guard**: Post-resolution `assertFileUrl()` check ensures all resolved paths are `file://` URLs. Prevents protocol confusion attacks (e.g., `data:`, `http:` URLs bypassing the allowlist).
+- **Package resolution pinned to module location**: `import.meta.resolve()` resolves relative to the AX installation, not CWD. Prevents attackers from placing malicious packages in project node_modules.
+- **Plugin registration**: Runtime allowlist (`_pluginProviderMap`) separate from built-in allowlist. Plugins must pass integrity verification before registration.
+- **Cross-provider import prevention**: Shared types extracted to `src/providers/shared-types.ts` and `src/providers/router-utils.ts` to avoid providers importing from sibling provider directories.
+
+## Plugin Integrity
+
+- **SHA-512 hashing**: Plugin lock file (`~/.ax/plugins.lock`) stores SHA-512 hashes of installed packages.
+- **Startup verification**: `verifyPluginIntegrity()` called before PluginHost registers providers.
+- **Capability declarations**: Plugins declare network, filesystem, and credential needs in MANIFEST.json. No wildcards allowed.
+- **Worker isolation**: Plugin workers spawned via fork() with restricted env vars (no credentials).
+- **Credential injection**: Plugins never see the credential store. Server resolves credentials and injects via IPC.
+
+## Subagent Delegation Security
+
+- **Depth/concurrency limits**: `maxDepth` (default 2), `maxConcurrent` (default 3) prevent runaway delegation chains.
+- **Zombie counter prevention**: `activeDelegations` counter wrapped in try/finally to prevent stuck counters blocking all future delegations.
+- **Taint budget inheritance**: Child agents inherit parent's remaining taint budget.
+- **Separate sandbox**: Each delegated agent gets its own sandbox, IPC socket, and taint budget.
+
+## Skill Screening
+
+- **Static screener** (`src/providers/screener/static.ts`): 5-layer analysis with scoring:
+  1. Hard-reject (BLOCK): exec(), spawn(), eval(), fetch()
+  2. Exfiltration (FLAG): webhook.site, requestbin, data exfil URLs
+  3. Prompt injection (FLAG): zero-width chars, role reassignment
+  4. External deps (FLAG): CDN scripts, curl-pipe-to-shell
+  5. Capability mismatch (FLAG): undeclared fs.write, process.env
+- **Score thresholds**: >= 0.8 -> REJECT, >= 0.3 -> REVIEW, < 0.3 -> APPROVE
+
+## Taint Tagging
+
+- All external content is wrapped: `<external_content trust="external" source="...">...</external_content>`.
+- `TaintTag` structure: `{ source, trust: 'user' | 'external' | 'system', timestamp }`.
+- Wrapping happens in `router.processInbound()`. Messages from `provider !== 'system'` are marked tainted.
+
+## Sandbox Isolation (SC-SEC-001)
+
+- **No network** -- Agent containers deny all TCP/IP. Unix sockets allowed only for IPC (local). NATS messaging for K8s pods.
+- **No credentials** -- API keys and OAuth tokens never enter the container.
+- **Three-phase orchestration** -- Containers use provision (network) -> run (no network) -> cleanup (network). Network is only available during provisioning and cleanup phases.
+- **4 canonical mounts**: `/workspace` (root/CWD), `/workspace/scratch` (rw), `/workspace/agent` (ro), `/workspace/user` (ro). Identity files and skills are sent via stdin payload from DocumentStore, not mounted as filesystem directories.
+- **Local sandbox execution with audit gate** -- In container mode, tools execute inside the agent's container with host audit approval (`sandbox_approve` -> execute -> `sandbox_result`).
+- **Sandbox tools via IPC** -- bash, read_file, write_file, edit_file route through IPC to host-side handlers (`src/host/ipc-handlers/sandbox-tools.ts`), enforcing `safePath()` containment.
+- **NATS IPC for K8s** -- Per-turn capability tokens (`AX_IPC_TOKEN`) scope NATS subjects. Uses `NATSIPCClient` + `NATSIPCHandler`.
+- **Warm pool** -- Pre-warmed pods with atomic claiming for K8s deployments.
+- Providers: subprocess (dev fallback), Docker, Apple Container, K8s pods (NATS IPC).
+
+## Install Validation
+
+- **`src/utils/install-validator.ts`**: Validates skill install commands against prefix allowlist (npm, brew, pip, cargo). Hard-rejects privilege escalation (sudo/su/doas/pkexec). Blocks shell operators.
+- **`src/utils/bin-exists.ts`**: Cross-platform binary lookup with strict regex validation (`[a-zA-Z0-9_.-]+`). Rejects paths and shell metacharacters.
+
+## Common Tasks
+
+### Adding a new sensitive action to taint budget
+1. Add to `DEFAULT_SENSITIVE_ACTIONS` in `src/host/taint-budget.ts`.
+2. If soft blocking needed, skip it in the global gate in `ipc-server.ts` and call `checkAction()` inside the handler.
+3. Add test in `tests/host/taint-budget.test.ts`.
+
+### Adding a new scanner pattern
+1. Add pattern to `src/providers/scanner/patterns.ts`.
+2. Add test cases in `tests/providers/scanner/`.
+
+## Invariants
+
+- Credentials never enter agent containers.
+- No network access from agent processes (TCP/IP denied; Unix socket IPC only).
+- All external content is taint-tagged before reaching the agent.
+- Provider loading uses static allowlist only -- no dynamic path construction from config.
+- Every file path from untrusted input passes through `safePath()`.
+- Canary tokens are stripped or redacted before responses reach the user.
+- All security-relevant actions are audit-logged.
+- `ipc-schemas.ts` uses `.strict()` mode -- no unexpected fields pass validation.
+- Plugin providers verified against SHA-512 hashes before loading.
+- Resolved provider paths must be `file://` URLs (SC-SEC-002 defense-in-depth).

@@ -2,6 +2,14 @@
 
 README.md updates, docs/web site updates, dashboard, warning banners, GitHub Pages deployment, skill syncs.
 
+## [2026-03-16 18:00] — Rewrite ax-provider-sandbox skill for unified container model
+
+**Task:** Update the ax-provider-sandbox skill to reflect major architecture changes: removed seatbelt/nsjail/bwrap providers, removed sandbox-worker and nats-sandbox-dispatch, new unified container model with three-phase orchestration, NATS IPC for k8s, warm pool, local sandbox execution, workspace CLI.
+**What I did:** Complete rewrite of `.claude/skills/ax-provider-sandbox/SKILL.md`. Removed all references to seatbelt, nsjail, bwrap, sandbox-worker, nats-sandbox-dispatch. Updated implementations table (now: subprocess, docker, apple, k8s). Added sections for three-phase container orchestration, Docker/Apple/K8s provider details, warm pod pool, local sandbox execution, workspace CLI. Updated SandboxConfig/SandboxProcess interface tables with new fields (cpus, network, extraEnv, bridgeSocketPath, podName). Updated gotchas and key files.
+**Files touched:** `.claude/skills/ax-provider-sandbox/SKILL.md`, `.claude/journal/docs/index.md`, `.claude/journal/docs/website.md`
+**Outcome:** Success
+**Notes:** Verified all file references against actual codebase. Provider map confirms only subprocess, docker, apple, k8s in sandbox section.
+
 ## [2026-03-13 16:30] — Add GCS workspace K8s setup instructions to README
 
 **Task:** Add instructions to README.md for setting up a K8s AX cluster with GCS as the workspace provider
