@@ -38,6 +38,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
   const image = process.env.AX_CONTAINER_IMAGE ?? DEFAULT_IMAGE;
 
   return {
+    workspaceLocation: 'host' as const,
     async spawn(config: SandboxConfig): Promise<SandboxProcess> {
       const [cmd, ...args] = config.command;
       const containerName = `ax-agent-${randomUUID().slice(0, 8)}`;
@@ -65,10 +66,6 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         '--rm',                                    // auto-remove container on exit
         '-i',                                      // interactive (stdin)
         '--name', containerName,                   // named for debugging
-        // No network by default. When config.network is true (provision/cleanup),
-        // Apple Container needs an explicit --network flag to enable connectivity.
-        ...(config.network ? ['--network', 'default'] : []),
-
         // Resource limits
         '--memory', `${config.memoryMB ?? 256}m`,
         '--cpus', String(config.cpus ?? 1),

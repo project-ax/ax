@@ -55,6 +55,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
   }
 
   return {
+    workspaceLocation: 'host' as const,
     async spawn(config: SandboxConfig): Promise<SandboxProcess> {
       const [cmd, ...args] = config.command;
       const containerName = `ax-agent-${randomUUID().slice(0, 8)}`;
@@ -65,8 +66,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         '--rm',                                    // auto-remove container on exit
         '-i',                                      // interactive (stdin)
         '--name', containerName,                   // named for debugging
-        // Network: disabled by default for run phase; enabled for provision/cleanup
-        ...(config.network ? [] : ['--network=none']),
+        '--network=none',
 
         // Resource limits
         '--memory', `${config.memoryMB ?? 256}m`,

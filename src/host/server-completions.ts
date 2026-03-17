@@ -24,6 +24,7 @@ import { startAnthropicProxy } from './proxy.js';
 import { startWebProxy, type WebProxy } from './web-proxy.js';
 import { connectIPCBridge } from './ipc-server.js';
 import { diagnoseError } from '../errors.js';
+import { buildLifecyclePlan, prepareGitWorkspace, finalizeGitWorkspace } from '../providers/workspace/lifecycle.js';
 import { ensureOAuthTokenFreshViaProvider, ensureOAuthTokenFresh, refreshOAuthTokenFromEnv, forceRefreshOAuthViaProvider } from '../dotenv.js';
 import { runnerPath as resolveRunnerPath, tsxLoader, isDevMode } from '../utils/assets.js';
 import type { OpenAIChatRequest } from './server-http.js';
@@ -799,6 +800,25 @@ export async function processCompletion(
     // GCS-backed, and writing on every request would create unnecessary cloud
     // I/O and stale files. The agent workspace mount is read-only for identity.
 
+    // ── Workspace lifecycle ──
+    // Build a plan once per turn. Host-side providers (Docker/Apple) use it to
+    // prepare/finalize on bind-mounted paths. Sandbox-side providers (k8s) include
+    // the plan fields in the NATS work payload for in-pod provisioning.
+    const workspaceGitUrl = process.env.AX_WORKSPACE_GIT_URL;
+    const workspaceGcsPrefix = process.env.AX_WORKSPACE_GCS_PREFIX;
+
+    const lifecyclePlan = buildLifecyclePlan({
+      gitUrl: workspaceGitUrl,
+      gitRef: process.env.AX_WORKSPACE_GIT_REF,
+      gcsPrefix: workspaceGcsPrefix,
+      agentName,
+      userId: currentUserId,
+      sessionId,
+      agentWorkspaceWritable,
+      scratchPath: workspace,
+    });
+    const workspaceCacheKey = lifecyclePlan.cacheKey;
+
     // Build stdin payload once — reused across retry attempts.
     const taintState = taintBudget.getState(sessionId);
     const stdinPayload = JSON.stringify({
@@ -824,6 +844,14 @@ export async function processCompletion(
       // Identity and skills from DocumentStore (not filesystem)
       identity: identityPayload,
       skills: skillsPayload,
+      // Workspace provisioning fields (sandbox-side providers provision in-pod)
+      workspaceGitUrl: process.env.AX_WORKSPACE_GIT_URL,
+      workspaceGitRef: process.env.AX_WORKSPACE_GIT_REF,
+      workspaceCacheKey,
+      agentGcsPrefix: workspaceGcsPrefix ? `${workspaceGcsPrefix}agent/${agentName}/` : undefined,
+      userGcsPrefix: workspaceGcsPrefix ? `${workspaceGcsPrefix}user/${currentUserId}/` : undefined,
+      sessionGcsPrefix: workspaceGcsPrefix ? `${workspaceGcsPrefix}scratch/${sessionId}/` : undefined,
+      agentReadOnly: !agentWorkspaceWritable,
     });
 
     // Spawn, run, and collect agent output — with retry on transient crashes.
@@ -847,35 +875,15 @@ export async function processCompletion(
       },
     };
 
-    // ── Three-phase container orchestration ──
-    // When workspace has GCS config, run provision phase (with network) before
-    // the agent and cleanup phase (with network) after.
-    const workspaceGitUrl = process.env.AX_WORKSPACE_GIT_URL;
-    const workspaceGcsPrefix = process.env.AX_WORKSPACE_GCS_PREFIX;
-    const needsProvisioning = isContainerSandbox && workspaceGitUrl;
-
-    // Compute deterministic cache key from git URL (mirrors agent/workspace.ts computeCacheKey).
-    // Used by both provision and cleanup phases for GCS cache restore/update.
-    const workspaceCacheKey = workspaceGitUrl
-      ? createHash('sha256').update(`${workspaceGitUrl}:HEAD`).digest('hex').slice(0, 16)
-      : undefined;
-
-    if (needsProvisioning) {
-      reqLogger.debug('provision_phase_start', { gitUrl: workspaceGitUrl });
-      const provisionArgs = [
-        '/opt/ax/dist/agent/workspace-cli.js', 'provision',
-        '--workspace', workspace,
-        '--session', sessionId,
-        '--git-url', workspaceGitUrl,
-        ...(workspaceCacheKey ? ['--cache-key', workspaceCacheKey] : []),
-        ...(workspaceGcsPrefix ? ['--session-gcs-prefix', workspaceGcsPrefix] : []),
-      ];
-      await agentSandbox.spawn({
-        ...sandboxConfig,
-        command: ['node', ...provisionArgs],
-        network: true,  // provision phase needs network for GCS/git
-      }).then(proc => proc.exitCode);
-      reqLogger.debug('provision_phase_done');
+    // Host-side prepare: provision git workspace on bind-mount paths before spawn.
+    // Sandbox-side (k8s) skips this — the runner provisions in-pod from payload.
+    if (agentSandbox.workspaceLocation === 'host' && lifecyclePlan.gitUrl) {
+      try {
+        await prepareGitWorkspace(lifecyclePlan);
+        reqLogger.debug('host_prepare_done', { gitUrl: lifecyclePlan.gitUrl });
+      } catch (err) {
+        reqLogger.warn('host_prepare_failed', { error: (err as Error).message });
+      }
     }
 
     let response = '';
@@ -1109,26 +1117,14 @@ export async function processCompletion(
       }
     }
 
-    // ── Phase 3: Cleanup (with network) ──
-    if (needsProvisioning) {
+    // Host-side finalize: git push + GCS cache update on bind-mount paths after exit.
+    // Sandbox-side (k8s) skips this — the runner handles it in-pod.
+    if (agentSandbox.workspaceLocation === 'host' && lifecyclePlan.gitUrl) {
       try {
-        reqLogger.debug('cleanup_phase_start');
-        const cleanupArgs = [
-          '/opt/ax/dist/agent/workspace-cli.js', 'cleanup',
-          '--workspace', workspace,
-          '--session', sessionId,
-          '--push-changes', 'true',
-          ...(workspaceGcsPrefix ? ['--update-cache', 'true'] : []),
-          ...(workspaceCacheKey ? ['--cache-key', workspaceCacheKey] : []),
-        ];
-        await agentSandbox.spawn({
-          ...sandboxConfig,
-          command: ['node', ...cleanupArgs],
-          network: true,  // cleanup phase needs network for GCS/git push
-        }).then(proc => proc.exitCode);
-        reqLogger.debug('cleanup_phase_done');
+        await finalizeGitWorkspace(lifecyclePlan);
+        reqLogger.debug('host_finalize_done');
       } catch (err) {
-        reqLogger.warn('cleanup_phase_failed', { error: (err as Error).message });
+        reqLogger.warn('host_finalize_failed', { error: (err as Error).message });
       }
     }
 

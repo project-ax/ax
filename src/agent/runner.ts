@@ -8,6 +8,7 @@ import { IPCClient } from './ipc-client.js';
 import { getLogger, truncate } from '../logger.js';
 import type { ContentBlock } from '../types.js';
 import type { IdentityFiles, SkillSummary } from './prompt/types.js';
+import { writeFileSync } from 'node:fs';
 
 const logger = getLogger().child({ component: 'runner' });
 
@@ -284,6 +285,20 @@ export interface StdinPayload {
   identity?: Partial<IdentityFiles>;
   /** Pre-loaded skills from host (loaded from DocumentStore). */
   skills?: SkillPayload[];
+  /** Git URL for scratch workspace provisioning (k8s in-pod). */
+  workspaceGitUrl?: string;
+  /** Git ref for workspace checkout. */
+  workspaceGitRef?: string;
+  /** GCS cache key for workspace restore. */
+  workspaceCacheKey?: string;
+  /** GCS prefix for agent scope provisioning. */
+  agentGcsPrefix?: string;
+  /** GCS prefix for user scope provisioning. */
+  userGcsPrefix?: string;
+  /** GCS prefix for session/scratch scope provisioning. */
+  sessionGcsPrefix?: string;
+  /** Whether agent scope is read-only (non-admin users). */
+  agentReadOnly?: boolean;
 }
 
 /**
@@ -330,12 +345,88 @@ export function parseStdinPayload(data: string): StdinPayload {
         // Identity and skills from host (loaded from DocumentStore)
         identity: parsed.identity && typeof parsed.identity === 'object' ? parsed.identity as Partial<IdentityFiles> : undefined,
         skills: Array.isArray(parsed.skills) ? parsed.skills as SkillPayload[] : undefined,
+        // Workspace provisioning fields (sandbox-side providers provision in-pod)
+        workspaceGitUrl: typeof parsed.workspaceGitUrl === 'string' ? parsed.workspaceGitUrl : undefined,
+        workspaceGitRef: typeof parsed.workspaceGitRef === 'string' ? parsed.workspaceGitRef : undefined,
+        workspaceCacheKey: typeof parsed.workspaceCacheKey === 'string' ? parsed.workspaceCacheKey : undefined,
+        agentGcsPrefix: typeof parsed.agentGcsPrefix === 'string' ? parsed.agentGcsPrefix : undefined,
+        userGcsPrefix: typeof parsed.userGcsPrefix === 'string' ? parsed.userGcsPrefix : undefined,
+        sessionGcsPrefix: typeof parsed.sessionGcsPrefix === 'string' ? parsed.sessionGcsPrefix : undefined,
+        agentReadOnly: parsed.agentReadOnly === true,
       };
     }
   } catch {
     // Not JSON — fall through to plain text
   }
   return defaults;
+}
+
+/**
+ * Provision workspace scopes inside the pod (k8s sandbox-side lifecycle).
+ * Called after receiving work payload, before running the agent.
+ * Writes hash snapshots to /tmp/.ax-hashes.json for the release step.
+ */
+async function provisionWorkspaceFromPayload(payload: StdinPayload): Promise<void> {
+  const { provisionScope, provisionWorkspace } = await import('./workspace.js');
+  const { CANONICAL } = await import('../providers/sandbox/canonical-paths.js');
+  const snapshot: Record<string, [string, string][]> = {};
+
+  // Git workspace → /workspace/scratch
+  if (payload.workspaceGitUrl) {
+    try {
+      const result = await provisionWorkspace(CANONICAL.scratch, '', {
+        gitUrl: payload.workspaceGitUrl,
+        ref: payload.workspaceGitRef,
+        cacheKey: payload.workspaceCacheKey,
+      });
+      logger.info('provision_workspace', { source: result.source, durationMs: result.durationMs });
+    } catch (err) {
+      logger.warn('provision_workspace_failed', { error: (err as Error).message });
+    }
+  }
+
+  // Agent scope → /workspace/agent
+  if (payload.agentGcsPrefix) {
+    try {
+      const result = await provisionScope(CANONICAL.agent, payload.agentGcsPrefix, payload.agentReadOnly ?? true);
+      snapshot.agent = [...result.hashes.entries()];
+      logger.info('provision_agent_scope', { source: result.source, fileCount: result.fileCount });
+    } catch (err) {
+      logger.warn('provision_agent_scope_failed', { error: (err as Error).message });
+    }
+  }
+
+  // User scope → /workspace/user
+  if (payload.userGcsPrefix) {
+    try {
+      const result = await provisionScope(CANONICAL.user, payload.userGcsPrefix, false);
+      snapshot.user = [...result.hashes.entries()];
+      logger.info('provision_user_scope', { source: result.source, fileCount: result.fileCount });
+    } catch (err) {
+      logger.warn('provision_user_scope_failed', { error: (err as Error).message });
+    }
+  }
+
+  // Session scope → /workspace/scratch (GCS overlay on top of git workspace)
+  if (payload.sessionGcsPrefix) {
+    try {
+      const result = await provisionScope(CANONICAL.scratch, payload.sessionGcsPrefix, false);
+      snapshot.session = [...result.hashes.entries()];
+      logger.info('provision_session_scope', { source: result.source, fileCount: result.fileCount });
+    } catch (err) {
+      logger.warn('provision_session_scope_failed', { error: (err as Error).message });
+    }
+  }
+
+  // Write hash snapshot for workspace release to diff against
+  if (Object.keys(snapshot).length > 0) {
+    try {
+      writeFileSync('/tmp/.ax-hashes.json', JSON.stringify(snapshot), 'utf-8');
+      logger.debug('hash_snapshot_written', { scopes: Object.keys(snapshot) });
+    } catch (err) {
+      logger.warn('hash_snapshot_write_failed', { error: (err as Error).message });
+    }
+  }
 }
 
 /**
@@ -478,9 +569,13 @@ if (isMain) {
     config.ipcClient = client;
 
     // Wait for work payload via NATS queue group
-    waitForNATSWork().then((data) => {
+    waitForNATSWork().then(async (data) => {
       const payload = parseStdinPayload(data);
       applyPayload(config, payload);
+
+      // Sandbox-side workspace lifecycle: provision before agent runs
+      await provisionWorkspaceFromPayload(payload);
+
       return run(config);
     }).catch((err) => {
       logger.error('main_error', { error: (err as Error).message, stack: (err as Error).stack });

@@ -7,7 +7,7 @@ description: Use when modifying agent sandbox isolation -- subprocess (dev), Doc
 
 Sandbox providers isolate agent processes with zero network access (by default), no credentials, and mount-only filesystem access. Each provider implements `SandboxProvider` from `src/providers/sandbox/types.ts` and exports `create(config: Config)`.
 
-Agents run INSIDE their containers and execute tools locally. Docker and Apple containers use three-phase orchestration: provision (with network) -> run (without network) -> cleanup (with network). The `network` flag on `SandboxConfig` controls per-phase connectivity.
+Agents run INSIDE their containers and execute tools locally. Workspace lifecycle is driven by `workspaceLocation` on SandboxProvider: host-side providers (Docker/Apple/subprocess) prepare/finalize on bind-mounted paths; k8s provisions in-pod from the NATS work payload.
 
 ## Interface
 
@@ -21,7 +21,6 @@ Agents run INSIDE their containers and execute tools locally. Docker and Apple c
 | memoryMB                 | `number?`                  | Memory limit                                             |
 | cpus                     | `number?`                  | CPU limit                                                |
 | command                  | `string[]`                 | Command + args to execute                                |
-| network                  | `boolean?`                 | When true, container has network (provision/cleanup phases). Default: false |
 | agentWorkspace           | `string?`                  | Agent's shared workspace                                 |
 | userWorkspace            | `string?`                  | Per-user persistent storage                              |
 | agentWorkspaceWritable   | `boolean?`                 | rw when admin + workspace provider active                |
@@ -43,7 +42,11 @@ Note: Identity files and skills are no longer mounted as filesystem directories.
 | bridgeSocketPath  | `string?`              | Host-side socket for reverse IPC bridge (Apple containers)|
 | podName           | `string?`              | Pod name for NATS work delivery (k8s)                     |
 
-**SandboxProvider**: `spawn(config)`, `kill(pid)`, `isAvailable()`.
+**SandboxProvider**: `spawn(config)`, `kill(pid)`, `isAvailable()`, plus:
+
+| Field              | Type                    | Notes                                                     |
+|--------------------|-------------------------|-----------------------------------------------------------|
+| workspaceLocation  | `'host' \| 'sandbox'`  | Where workspace prepare/release runs. `host` = bind-mounted paths (Docker/Apple/subprocess). `sandbox` = in-pod provisioning from NATS payload (k8s). |
 
 ## Canonical Paths (`canonical-paths.ts`)
 
@@ -86,20 +89,32 @@ Only subprocess uses symlink fallback (it can't remap filesystems). `createCanon
 
 Shared helpers in `utils.ts`: `exitCodePromise`, `enforceTimeout`, `killProcess`, `checkCommand`, `sandboxProcess`.
 
-## Three-Phase Container Orchestration
+## Unified Workspace Lifecycle
 
-Docker and Apple containers support three-phase execution for agents that need network access during setup/teardown but not during the main run:
+Workspace prepare/release is driven by `workspaceLocation` on each SandboxProvider:
 
-1. **Provision** (`network: true`): Container runs with network to restore workspace (GCS, git clone). Handled by `workspace-cli.ts provision`.
-2. **Run** (`network: false`): Container runs agent with no network. Agent executes tools locally inside the container.
-3. **Cleanup** (`network: true`): Container runs with network to upload workspace changes. Handled by `workspace-cli.ts cleanup`.
+**Host-side** (`workspaceLocation: 'host'` -- Docker/Apple/subprocess):
+1. `workspace.mount()` provisions GCS scopes to host paths (existing)
+2. `prepareGitWorkspace(plan)` clones/restores git workspace to host path (NEW)
+3. One container spawns -- bind-mounts host paths (no network needed)
+4. Agent runs and exits -- changes visible on host via bind-mount
+5. `workspace.commit()` diffs and persists changes (existing)
+6. `finalizeGitWorkspace(plan)` pushes changes + updates GCS cache (NEW)
 
-The `network` field on `SandboxConfig` controls whether `--network=none` (Docker) or no network flag (Apple) is applied.
+**Sandbox-side** (`workspaceLocation: 'sandbox'` -- k8s):
+1. `workspace.mount()` is a no-op (returns empty paths)
+2. Work payload includes scope info + git URL
+3. One pod spawns -- runner provisions from payload before agent starts (`provisionWorkspaceFromPayload`)
+4. Agent runs -- reads/writes canonical paths in emptyDir volumes
+5. Runner releases -- diffs against provisioned hashes, HTTP upload to host
+6. Runner finalizes -- git push + GCS cache update (in-pod)
+
+Key types: `WorkspaceLifecyclePlan`, `buildLifecyclePlan()`, `prepareGitWorkspace()`, `finalizeGitWorkspace()` in `src/providers/workspace/lifecycle.ts`.
 
 ## Docker Provider (`docker.ts`)
 
 Uses `docker run` with:
-- `--network=none` by default (omitted when `config.network` is true)
+- `--network=none` always (no container ever needs network -- workspace lifecycle runs host-side)
 - `--memory`, `--cpus`, `--pids-limit` resource limits
 - `--cap-drop=ALL`, `--security-opt no-new-privileges`, `--read-only` root
 - Volume mounts to canonical paths (`-v host:canonical:mode`)
@@ -111,7 +126,7 @@ Uses `docker run` with:
 
 Uses Apple's `container` CLI (Virtualization.framework):
 - Per-container VM boundary -- stronger isolation than process-level sandboxing
-- No network by default; `--network default` when `config.network` is true
+- No network (workspace lifecycle runs host-side, no container needs network)
 - `--publish-socket` bridges IPC across the VM boundary via virtio-vsock
 - Agent LISTENS inside the container (`AX_IPC_LISTEN=1`), host connects via bridge socket
 - Bridge sockets isolated in a `bridges/` subdirectory to prevent cleanup conflicts
@@ -255,4 +270,6 @@ In k8s mode, workspace file changes flow back to GCS via HTTP staging:
 - `src/agent/workspace-cli.ts` -- Container provision/cleanup/release phase CLI
 - `src/agent/workspace-release.ts` -- Thin wrapper that spawns workspace-cli.ts release as subprocess, sends staging_key via IPC
 - `src/host/provider-map.ts` -- Static allowlist (sandbox: subprocess, docker, apple, k8s)
+- `tests/providers/sandbox/` -- Tests: k8s, docker, apple, subprocess, warm-pool-client, canonical-paths, utils
+ss, docker, apple, k8s)
 - `tests/providers/sandbox/` -- Tests: k8s, docker, apple, subprocess, warm-pool-client, canonical-paths, utils

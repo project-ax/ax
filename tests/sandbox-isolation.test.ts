@@ -233,10 +233,8 @@ describe('server workspace isolation', () => {
 
     // Workspace is NOT passed as a CLI arg to the agent — it's set via canonical env
     // vars by the sandbox provider. Identity and skills come via stdin payload.
-    // Note: the spawnCommand section only covers the agent spawn args, not the
-    // three-phase workspace-cli provision/cleanup args which are separate spawn calls.
     const spawnStart = source.indexOf('spawnCommand');
-    const spawnEnd = source.indexOf('needsProvisioning', spawnStart);
+    const spawnEnd = source.indexOf('host_prepare', spawnStart);
     const spawnSection = source.slice(spawnStart, spawnEnd !== -1 ? spawnEnd : undefined);
     expect(spawnSection).not.toContain("'--workspace'");
     expect(spawnSection).not.toContain("'--skills'");
@@ -474,6 +472,18 @@ describe('k8s pod spec workspace tier volumes', () => {
   });
 });
 
+// ── K8s Pod Spec GCS/Git Env Vars ─────────────────────────────────────
+
+describe('k8s pod spec GCS/git env vars', () => {
+  test('k8s pod spec includes GCS and git workspace env vars', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/k8s.ts'), 'utf-8');
+    expect(source).toContain('GCS_WORKSPACE_BUCKET');
+    expect(source).toContain('WORKSPACE_CACHE_BUCKET');
+    expect(source).toContain('AX_WORKSPACE_GIT_URL');
+  });
+});
+
 // ── /workspace Root Is Read-Only ──────────────────────────────────────
 
 describe('/workspace root is read-only', () => {
@@ -497,6 +507,111 @@ describe('per-tier writable workspace flags', () => {
     expect(source).toContain('userWorkspaceWritable');
     // Old flag should be removed
     expect(source).not.toContain('workspaceMountsWritable');
+  });
+});
+
+// ── Sandbox workspaceLocation Capability ──────────────────────────────
+
+describe('sandbox workspaceLocation capability', () => {
+  test('SandboxProvider has workspaceLocation field', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/types.ts'), 'utf-8');
+    expect(source).toContain('workspaceLocation');
+  });
+
+  test('docker provider sets workspaceLocation to host', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/docker.ts'), 'utf-8');
+    expect(source).toContain("workspaceLocation: 'host'");
+  });
+
+  test('apple provider sets workspaceLocation to host', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/apple.ts'), 'utf-8');
+    expect(source).toContain("workspaceLocation: 'host'");
+  });
+
+  test('subprocess provider sets workspaceLocation to host', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/subprocess.ts'), 'utf-8');
+    expect(source).toContain("workspaceLocation: 'host'");
+  });
+
+  test('k8s provider sets workspaceLocation to sandbox', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/k8s.ts'), 'utf-8');
+    expect(source).toContain("workspaceLocation: 'sandbox'");
+  });
+});
+
+// ── SandboxConfig Network Flag Removed ────────────────────────────────
+
+describe('SandboxConfig network flag removed', () => {
+  test('SandboxConfig no longer has network flag', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/types.ts'), 'utf-8');
+    expect(source).not.toContain('network?:');
+    expect(source).not.toContain('Three-phase orchestration');
+  });
+});
+
+// ── Lifecycle Dispatch Replaces Three-Phase Orchestration ─────────────
+
+describe('lifecycle dispatch replaces three-phase orchestration', () => {
+  test('server-completions no longer spawns separate provision or cleanup pods', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/host/server-completions.ts'), 'utf-8');
+    expect(source).not.toContain('provision_phase_start');
+    expect(source).not.toContain('cleanup_phase_start');
+    expect(source).not.toContain('workspace-cli.js provision');
+    expect(source).not.toContain('workspace-cli.js cleanup');
+  });
+
+  test('server-completions uses workspaceLocation for lifecycle dispatch', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/host/server-completions.ts'), 'utf-8');
+    expect(source).toContain('workspaceLocation');
+    expect(source).toContain('prepareGitWorkspace');
+    expect(source).toContain('finalizeGitWorkspace');
+    expect(source).toContain('buildLifecyclePlan');
+  });
+});
+
+// ── In-Pod Workspace Cleanup (Sandbox-Side Finalize) ─────────────────
+
+describe('in-pod workspace cleanup (sandbox-side finalize)', () => {
+  test('claude-code runner calls releaseWorkspace after workspace release', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/agent/runners/claude-code.ts'), 'utf-8');
+    expect(source).toContain('releaseWorkspace');
+    expect(source).toContain('workspace_cleanup');
+  });
+
+  test('pi-session runner calls releaseWorkspace after workspace release', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/agent/runners/pi-session.ts'), 'utf-8');
+    expect(source).toContain('releaseWorkspace');
+    expect(source).toContain('workspace_cleanup');
+  });
+});
+
+// ── Work Payload Workspace Provisioning Fields ───────────────────────
+
+describe('work payload includes workspace provisioning fields', () => {
+  test('stdinPayload includes GCS scope fields when workspace provider is active', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/host/server-completions.ts'), 'utf-8');
+    expect(source).toContain('agentGcsPrefix');
+    expect(source).toContain('userGcsPrefix');
+    expect(source).toContain('sessionGcsPrefix');
+  });
+
+  test('StdinPayload type includes provisioning fields', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/agent/runner.ts'), 'utf-8');
+    expect(source).toContain('workspaceGitUrl');
+    expect(source).toContain('agentGcsPrefix');
+    expect(source).toContain('agentReadOnly');
   });
 });
 

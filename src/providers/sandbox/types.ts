@@ -8,10 +8,6 @@ export interface SandboxConfig {
   cpus?: number;
   command: string[];
 
-  // ── Three-phase orchestration ──
-  /** When true, container has network access (provision/cleanup phases). Default: false. */
-  network?: boolean;
-
   // ── Enterprise mounts (optional) ──
   /** Agent's shared workspace: ~/.ax/agents/<id>/agent/workspace/ */
   agentWorkspace?: string;
@@ -46,4 +42,11 @@ export interface SandboxProvider {
   spawn(config: SandboxConfig): Promise<SandboxProcess>;
   kill(pid: number): Promise<void>;
   isAvailable(): Promise<boolean>;
+
+  /**
+   * Where workspace prepare/release should run.
+   * - 'host': bind-mounted paths — host prepares before spawn, releases after exit.
+   * - 'sandbox': pod-local volumes — runner provisions in-pod, releases via HTTP.
+   */
+  workspaceLocation: 'host' | 'sandbox';
 }
