@@ -9,6 +9,7 @@ export default defineConfig({
       '**/dist/**',
       '**/.worktrees/**',
       'dashboard/tests/**',
+      'tests/e2e/**',
     ],
   },
 });
