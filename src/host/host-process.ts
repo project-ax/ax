@@ -655,7 +655,51 @@ async function main(): Promise<void> {
       return;
     }
 
-    // Workspace staging upload from sandbox pods (k8s)
+    // Direct workspace release from sandbox pods (k8s HTTP mode)
+    if (url === '/internal/workspace/release' && req.method === 'POST') {
+      const token = req.headers.authorization?.replace('Bearer ', '');
+      const entry = token ? activeTokens.get(token) : undefined;
+      if (!entry) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'invalid token' }));
+        return;
+      }
+      try {
+        const chunks: Buffer[] = [];
+        let totalSize = 0;
+        for await (const chunk of req) {
+          totalSize += (chunk as Buffer).length;
+          if (totalSize > MAX_STAGING_BYTES) {
+            sendError(res, 413, 'Payload too large');
+            return;
+          }
+          chunks.push(chunk as Buffer);
+        }
+        const compressed = Buffer.concat(chunks);
+        const json = gunzipSync(compressed).toString('utf-8');
+        const payload = JSON.parse(json) as { changes: Array<{ scope: string; path: string; type: string; content_base64?: string; size: number }> };
+        const changes = (payload.changes ?? []).map((c) => ({
+          scope: c.scope as 'agent' | 'user' | 'session',
+          path: c.path,
+          type: c.type as 'added' | 'modified' | 'deleted',
+          content: c.content_base64 ? Buffer.from(c.content_base64, 'base64') : undefined,
+          size: c.size,
+        }));
+
+        if (providers.workspace?.setRemoteChanges) {
+          providers.workspace.setRemoteChanges(entry.ctx.sessionId, changes);
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true, changeCount: changes.length }));
+      } catch (err) {
+        logger.error('workspace_release_failed', { error: (err as Error).message });
+        if (!res.headersSent) sendError(res, 500, 'Workspace release failed');
+      }
+      return;
+    }
+
+    // Workspace staging upload from sandbox pods (k8s, legacy)
     if (url === '/internal/workspace-staging' && req.method === 'POST') {
       try {
         await handleWorkspaceStaging(req, res);
