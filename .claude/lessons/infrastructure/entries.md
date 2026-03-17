@@ -1,3 +1,15 @@
+### NATS work delivery needs retry — agent subprocess takes seconds to subscribe
+**Date:** 2026-03-17
+**Context:** Testing HTTP IPC harness: host spawned agent subprocess and immediately published work via NATS. Message was lost because agent hadn't connected to NATS yet (tsx import + NATS connect takes ~1-2 seconds). Using `nc.publish()` is fire-and-forget — no subscriber = lost message.
+**Lesson:** Use `nc.request()` with a retry loop when publishing NATS work to cold-started processes. The agent's `waitForNATSWork()` responds to requests (`msg.respond()`), so `nc.request()` will succeed once the agent has subscribed. Retry every 1s up to 30 times. This handles the startup timing gap without requiring a readiness signal.
+**Tags:** nats, race-condition, work-delivery, timing, cold-start
+
+### server.ts createServer() lacks k8s HTTP IPC infrastructure
+**Date:** 2026-03-17
+**Context:** Tried to test HttpIPCClient using `createServer()` from server.ts with providerOverrides. Failed because server.ts doesn't have: `/internal/ipc` route, `activeTokens` registry, NATS `publishWork`, or `agentResponsePromise`. These are only in `host-process.ts`.
+**Lesson:** To test HTTP IPC end-to-end locally, you must build a minimal host process (like `run-http-local.ts`) that sets up the HTTP IPC route, token registry, and NATS publishing. Can't use `createServer()` for this — it only supports socket IPC. The `processCompletion()` function from server-completions.ts is generic enough to accept these deps via `CompletionDeps`.
+**Tags:** http-ipc, server, harness, testing, architecture
+
 ### encode() is for objects, not pre-serialized strings — watch for double-encoding
 **Date:** 2026-03-16
 **Context:** NATS 503 bug. `publishWork` called `encode(payload)` where `encode = (obj) => JSON.stringify(obj)` and payload was already a JSON string from `JSON.stringify()` in server-completions.ts. Double-encoding destroyed the entire payload — sandbox received a JSON string literal, not a JSON object. ALL fields (sessionId, requestId, ipcToken) were lost.

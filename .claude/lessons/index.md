@@ -17,6 +17,8 @@
 
 ### infrastructure
 
+- NATS work delivery needs retry — agent subprocess takes seconds to subscribe [infrastructure/entries.md](infrastructure/entries.md)
+- server.ts createServer() lacks k8s HTTP IPC infrastructure [infrastructure/entries.md](infrastructure/entries.md)
 - Custom PG username requires BOTH AX-level and Bitnami subchart-level auth settings [infrastructure/entries.md](infrastructure/entries.md)
 - Helm subchart dependencies should be gitignored [infrastructure/entries.md](infrastructure/entries.md)
 - ConfigMap-mounted config reuses loadConfig() via AX_CONFIG_PATH [infrastructure/entries.md](infrastructure/entries.md)

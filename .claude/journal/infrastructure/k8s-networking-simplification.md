@@ -1,3 +1,15 @@
+## [2026-03-17 08:35] — HTTP IPC end-to-end test harness
+
+**Task:** Test HttpIPCClient end-to-end using the ax-debug skill infrastructure
+**What I did:**
+1. Added `ipcTransport: 'http'` option to `nats-subprocess.ts` sandbox provider
+2. Created `run-http-local.ts` — minimal host process with `/internal/ipc` route, per-turn token auth, NATS work publishing with retry
+3. Fixed race condition: agent needs time to connect to NATS before host publishes work → use `nc.request()` with retry loop instead of fire-and-forget `nc.publish()`
+4. Updated `ax-debug` skill with HTTP IPC quick start, message flow, and key files
+**Files touched:** `tests/providers/sandbox/nats-subprocess.ts`, `tests/providers/sandbox/run-http-local.ts` (new), `.claude/skills/ax-debug/SKILL.md`
+**Outcome:** Success — full end-to-end flow works: curl → host → NATS work delivery → agent HttpIPCClient → HTTP IPC calls → agent_response → curl response
+**Notes:** Non-fatal `__dirname is not defined` in workspace-release when running via tsx (ESM mode). The harness can't use `createServer()` from server.ts because it lacks `/internal/ipc` route and NATS publishing; had to build a minimal host process.
+
 ## [2026-03-17 06:25] — K8s networking simplification: NATS queue groups + HTTP gateway
 
 **Task:** Consolidate k8s agent↔host networking from 5+ transport mechanisms into two clean layers — NATS for work dispatch, HTTP for all data exchange.
