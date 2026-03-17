@@ -544,6 +544,17 @@ describe('sandbox workspaceLocation capability', () => {
   });
 });
 
+// ── SandboxConfig Network Flag Removed ────────────────────────────────
+
+describe('SandboxConfig network flag removed', () => {
+  test('SandboxConfig no longer has network flag', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/types.ts'), 'utf-8');
+    expect(source).not.toContain('network?:');
+    expect(source).not.toContain('Three-phase orchestration');
+  });
+});
+
 // ── Lifecycle Dispatch Replaces Three-Phase Orchestration ─────────────
 
 describe('lifecycle dispatch replaces three-phase orchestration', () => {
