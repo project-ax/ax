@@ -1,5 +1,11 @@
 # Architecture
 
+### K8s filesystem lifecycle must stay inside one pod or use explicit remote handoff
+**Date:** 2026-03-17
+**Context:** Comparing the original workspace-permissions plan to the current k8s implementation. `server-completions.ts` still runs provision, agent, and cleanup as separate sandbox spawns, while the k8s sandbox provider mounts `emptyDir` volumes that exist only for one pod.
+**Lesson:** Never design a k8s workflow that depends on filesystem continuity across separate pod spawns unless you use a real shared store (PVC/object store) and explicit handoff. Pod-local `emptyDir` state dies with that pod, so provision/run/cleanup must happen in the same pod, or the handoff must be pushed through an external system such as GCS/HTTP staging. Treat NATS as the control plane and keep bulk workspace state out of it.
+**Tags:** k8s, workspace, emptydir, orchestration, nats, http, architecture
+
 ### Prefer HTTP over NATS for large binary payloads in k8s
 **Date:** 2026-03-17
 **Context:** Redesigning k8s workspace file syncing from NATS base64+chunking to HTTP staging. The original approach sent file contents through NATS IPC (base64-encoded, chunked at ~800KB to fit NATS 1MB limit). When the HTTP forward proxy was introduced, this became unnecessary complexity.

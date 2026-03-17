@@ -1,9 +1,13 @@
 # Journal Index
 
-Category-based organization of all journal entries. Total: 115 entries across 10 categories.
+Category-based organization of all journal entries. Total: 119 entries across 10 categories.
 
 ## Entries
 
+- 2026-03-17 11:02 — Outline safe unified lifecycle for container sandboxes [docs/plans.md](docs/plans.md)
+- 2026-03-17 10:59 — Explain multi-sandbox redesign scope for phase removal [docs/plans.md](docs/plans.md)
+- 2026-03-17 10:53 — Review NATS-centric workspace provisioning plan [docs/plans.md](docs/plans.md)
+- 2026-03-17 10:48 — Compare original workspace plan to current k8s implementation [docs/plans.md](docs/plans.md)
 - 2026-03-17 08:42 — E2E test of k8s networking simplification (HTTP IPC) via ax-debug harness [testing/acceptance.md](testing/acceptance.md)
 - 2026-03-16 16:38 — Create one-page PDF app summary [docs/artifacts.md](docs/artifacts.md)
 - 2026-03-16 13:00 — Add NATS static user authentication to Helm chart [infrastructure/nats-auth.md](infrastructure/nats-auth.md)

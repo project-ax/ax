@@ -4,6 +4,10 @@ Documentation, plans, architecture docs, website updates, GitHub Pages.
 
 ## Entries
 
+- 2026-03-17 11:02 — Outline safe unified lifecycle for container sandboxes [plans.md](plans.md)
+- 2026-03-17 10:59 — Explain multi-sandbox redesign scope for phase removal [plans.md](plans.md)
+- 2026-03-17 10:53 — Review NATS-centric workspace provisioning plan [plans.md](plans.md)
+- 2026-03-17 10:48 — Compare original workspace plan to current k8s implementation [plans.md](plans.md)
 - 2026-03-16 18:00 — Rewrite ax-provider-sandbox skill for unified container model [website.md](website.md)
 - 2026-03-16 16:38 — Create one-page PDF app summary [artifacts.md](artifacts.md)
 - 2026-03-16 12:00 — Update architecture plans with k8s NATS IPC supersession notes [plans.md](plans.md)

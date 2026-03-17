@@ -17,6 +17,7 @@
 
 ### infrastructure
 
+- Queue-group work delivery only happens when the host does not preselect a pod [infrastructure/entries.md](infrastructure/entries.md)
 - NATS work delivery needs retry — agent subprocess takes seconds to subscribe [infrastructure/entries.md](infrastructure/entries.md)
 - server.ts createServer() lacks k8s HTTP IPC infrastructure [infrastructure/entries.md](infrastructure/entries.md)
 - Custom PG username requires BOTH AX-level and Bitnami subchart-level auth settings [infrastructure/entries.md](infrastructure/entries.md)
@@ -66,6 +67,7 @@
 
 ### architecture
 
+- K8s filesystem lifecycle must stay inside one pod or use explicit remote handoff [architecture/entries.md](architecture/entries.md)
 - marked v17 renderer uses token objects, not positional args [architecture/entries.md](architecture/entries.md)
 - pi-agent-core AuthStorage now uses factory methods [architecture/entries.md](architecture/entries.md)
 - Prefer structural layout fixes over runtime workarounds [architecture/entries.md](architecture/entries.md)

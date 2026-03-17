@@ -2,6 +2,38 @@
 
 Architecture analysis, gap analysis, design documents, implementation plans.
 
+## [2026-03-17 11:02] — Outline safe unified lifecycle for container sandboxes
+
+**Task:** Describe a safe unified workspace lifecycle that could cover k8s, Docker, and Apple without weakening Docker/Apple network isolation.
+**What I did:** Reviewed the current web proxy bridge, HTTP IPC client, workspace release path, and Docker/Apple network flags. Synthesized a provider-aware design where all sandboxes share one logical lifecycle but not one identical transport surface.
+**Files touched:** .claude/journal/docs/plans.md, .claude/journal/docs/index.md, .claude/journal/index.md
+**Outcome:** Success — identified a safe model: shared pre-run/post-run hooks, network brokered through proxy/host endpoints, and provider capabilities that keep Docker/Apple on `--network=none` during the main run.
+**Notes:** Key distinction: unify lifecycle orchestration, not raw network access.
+
+## [2026-03-17 10:59] — Explain multi-sandbox redesign scope for phase removal
+
+**Task:** Explain what a broader multi-sandbox redesign would require if AX wants to remove host-driven three-phase orchestration for Docker and Apple too, not just k8s.
+**What I did:** Reviewed the current Docker/Apple providers' `config.network` handling, the shared sandbox contract, and the host completion path to outline the real architectural work needed for a global lifecycle change.
+**Files touched:** .claude/journal/docs/plans.md, .claude/journal/docs/index.md, .claude/journal/index.md
+**Outcome:** Success — clarified that global phase removal requires a new provider-scoped workspace lifecycle contract, not just moving k8s provisioning into the runner.
+**Notes:** Smallest safe change is still k8s-only; a true multi-sandbox redesign should centralize lifecycle selection by provider capability.
+
+## [2026-03-17 10:53] — Review NATS-centric workspace provisioning plan
+
+**Task:** Evaluate `docs/plans/2026-03-17-nats-centric-workspace-provisioning.md` against the current k8s host/runner/workspace implementation and identify concrete blockers before implementation.
+**What I did:** Read the plan, the current host/runner/workspace files (`server-completions.ts`, `host-process.ts`, `runner.ts`, `workspace.ts`, `workspace-cli.ts`, `k8s.ts`), and the relevant AX skills/lessons. Cross-checked the proposed queue-group provisioning flow, cleanup wiring, cache-key handling, and container-phase removal against the live code paths.
+**Files touched:** .claude/journal/docs/plans.md, .claude/journal/docs/index.md, .claude/journal/index.md, .claude/lessons/infrastructure/entries.md, .claude/lessons/infrastructure/index.md, .claude/lessons/index.md
+**Outcome:** Success — found several blockers: the host still publishes cold-start work to `agent.work.{podName}` while the runner waits on `sandbox.work`, the plan removes Docker/Apple three-phase behavior globally, and the cleanup/cache-key path is internally inconsistent.
+**Notes:** The overall direction still looks right for k8s, but the plan needs a k8s-only migration path and a host dispatch fix before implementation.
+
+## [2026-03-17 10:48] — Compare original workspace plan to current k8s implementation
+
+**Task:** Evaluate `docs/plans/2026-03-14-sandbox-workspace-permissions.md` against the current sandbox/workspace implementation and recommend the better architecture direction.
+**What I did:** Read the original March 14 plan, the current k8s transport/workspace code (`server-completions.ts`, `host-process.ts`, `runner.ts`, `workspace-cli.ts`, `workspace.ts`, `k8s.ts`), related AX skills, and the follow-up March 17 design notes. Compared the original NATS-centric claim/release flow with the implemented hybrid of NATS queue-group work dispatch plus HTTP IPC/workspace release.
+**Files touched:** .claude/journal/docs/plans.md, .claude/journal/docs/index.md, .claude/journal/index.md, .claude/lessons/architecture/entries.md, .claude/lessons/architecture/index.md, .claude/lessons/index.md
+**Outcome:** Success — concluded the best direction is the newer hybrid split (NATS for work claiming, HTTP for IPC/file transfer) with k8s-specific in-pod provisioning/cleanup, not the host-driven three-phase pod orchestration.
+**Notes:** Main gap: `server-completions.ts` still runs provision/run/cleanup as separate sandbox spawns, but k8s pods use pod-local `emptyDir` volumes, so that choreography cannot preserve workspace state across phases.
+
 ## [2026-03-16 12:00] — Update architecture plans with k8s NATS IPC supersession notes
 
 **Task:** Add supersession notes to two architecture docs pointing to the new k8s NATS IPC sandbox plan.

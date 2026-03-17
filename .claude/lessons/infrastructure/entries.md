@@ -1,3 +1,9 @@
+### Queue-group work delivery only happens when the host does not preselect a pod
+**Date:** 2026-03-17
+**Context:** Reviewing the NATS-centric workspace provisioning plan against the current k8s execution path.
+**Lesson:** When the runner subscribes only to `sandbox.work` queue groups, the host must use the queue-group request path before it has a `podName`. If `server-completions.ts` always spawns a k8s pod first and then calls `publishWork(proc.podName, payload)`, `host-process.ts` falls back to `agent.work.{podName}` and bypasses the queue-group flow entirely. Any design that depends on warm-pod queue-group delivery must either change the host dispatch order or keep runner compatibility with the per-pod fallback subject.
+**Tags:** nats, queue-group, host-process, runner, k8s, work-delivery
+
 ### NATS work delivery needs retry — agent subprocess takes seconds to subscribe
 **Date:** 2026-03-17
 **Context:** Testing HTTP IPC harness: host spawned agent subprocess and immediately published work via NATS. Message was lost because agent hadn't connected to NATS yet (tsx import + NATS connect takes ~1-2 seconds). Using `nc.publish()` is fire-and-forget — no subscriber = lost message.
