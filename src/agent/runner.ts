@@ -234,8 +234,8 @@ function parseArgs(): AgentConfig {
     logger.error('missing_args', { message: 'Usage: agent-runner --agent <type> --ipc-socket <path> (AX_WORKSPACE env var required)' });
     process.exit(1);
   }
-  if (ipcTransport === 'nats' && !workspace) {
-    logger.error('missing_args', { message: 'AX_IPC_TRANSPORT=nats requires AX_WORKSPACE env var' });
+  if ((ipcTransport === 'nats' || ipcTransport === 'http') && !workspace) {
+    logger.error('missing_args', { message: `AX_IPC_TRANSPORT=${ipcTransport} requires AX_WORKSPACE env var` });
     process.exit(1);
   }
 
@@ -419,29 +419,33 @@ function applyPayload(config: AgentConfig, payload: StdinPayload): void {
 }
 
 /**
- * NATS work subscription: subscribe to agent.work.{POD_NAME}, wait for one
- * message containing the work payload. The runner IS the standby — it starts,
- * connects to NATS, and blocks until work arrives.
+ * NATS work subscription: subscribe to sandbox.work with a queue group so NATS
+ * delivers work to exactly one warm pod per tier. Replaces the old per-pod
+ * subject (agent.work.{podName}) — no k8s API label-patch claiming needed.
  */
-async function waitForNATSWork(): Promise<string> {
-  const podName = process.env.POD_NAME;
-  if (!podName) {
-    throw new Error('NATS work mode requires POD_NAME env var');
-  }
+export async function waitForNATSWork(): Promise<string> {
+  const podName = process.env.POD_NAME ?? 'unknown';
+  const tier = process.env.SANDBOX_TIER ?? 'light';
 
   const natsModule = await import('nats');
   const { natsConnectOptions } = await import('../utils/nats.js');
   const nc = await natsModule.connect(natsConnectOptions('runner', podName));
 
-  const subject = `agent.work.${podName}`;
-  const sub = nc.subscribe(subject, { max: 1 });
-  logger.info('nats_work_waiting', { subject, podName });
-  process.stderr.write(`[diag] waiting for work on ${subject}\n`);
+  // Queue group subscription: NATS delivers to exactly one subscriber per tier
+  const sub = nc.subscribe('sandbox.work', { max: 1, queue: tier });
+  logger.info('nats_work_waiting', { subject: 'sandbox.work', queue: tier, podName });
+  process.stderr.write(`[diag] waiting for work on sandbox.work (queue: ${tier})\n`);
 
   for await (const msg of sub) {
     const data = new TextDecoder().decode(msg.data);
-    logger.info('nats_work_received', { subject, bytes: data.length });
+    logger.info('nats_work_received', { queue: tier, bytes: data.length });
     process.stderr.write(`[diag] work received: ${data.length} bytes\n`);
+
+    // Reply with podName so host can track which pod is processing
+    if (msg.reply) {
+      msg.respond(new TextEncoder().encode(JSON.stringify({ podName })));
+    }
+
     await nc.drain();
     return data;
   }
