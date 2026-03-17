@@ -111,7 +111,7 @@ Note: `pi-agent-core` was removed as a user-facing agent type.
 
 **NATS Bridge** (`nats-bridge.ts`): HTTP-to-NATS bridge for K8s sandbox pods. Instead of TCP bridge -> Unix socket, publishes to NATS for both LLM calls (`ipc.llm.{requestId}.{token}`) and tool calls (`ipc.request.{requestId}.{token}`). Used when `--nats-url` is provided or in NATS transport mode. This bridge is specifically for claude-code's LLM proxy traffic -- general IPC goes through `nats-ipc-client.ts` -> `nats-ipc-handler.ts`.
 
-**MCP Server** (`mcp-server.ts`): Agent SDK MCP server exposing IPC tools as Zod-based tool definitions. Includes: memory_*, web_*, audit_query, identity_write, user_write, scheduler_*, skill_*, skill_import, skill_search, skill_install, agent_delegate, image_generate, workspace_write, workspace_write_file, sandbox_bash, sandbox_read_file, sandbox_write_file, sandbox_edit_file.
+**MCP Server** (`mcp-server.ts`): Agent SDK MCP server exposing IPC tools as Zod-based tool definitions. Includes: memory_*, web_*, audit_query, identity_write, user_write, scheduler_*, skill_*, skill_import, skill_search, skill_install, agent_delegate, image_generate, sandbox_bash, sandbox_read_file, sandbox_write_file, sandbox_edit_file.
 
 ## Local Sandbox (Container Mode)
 
@@ -161,3 +161,4 @@ This avoids the round-trip of sending file contents/command output over IPC for 
 - **Concurrent IPC fix**: Misrouted responses on shared Unix sockets have been fixed. Each `call()` is now correctly matched to its response.
 - **Web proxy bridge cleanup**: Both runners stop the web proxy bridge in their cleanup path (after agent loop completes). Failure to start the bridge is non-fatal (logged as warning, agent continues without outbound HTTP).
 - **Web proxy env var priority**: `AX_WEB_PROXY_SOCKET` (container, Unix socket bridge) > `AX_WEB_PROXY_URL` (k8s, direct URL) > `AX_WEB_PROXY_PORT` (subprocess, TCP). Only one is used.
+- **K8s workspace release**: Both runners call `releaseWorkspaceScopes()` from `workspace-release.ts` before sending `agent_response` in NATS mode. Triggered when `AX_HOST_URL` env var is set. Non-fatal — failures are logged as warnings but don't lose the agent response. The release spawns `workspace-cli.ts release` as a subprocess to diff, gzip, and HTTP-upload workspace changes to the host staging endpoint.

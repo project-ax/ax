@@ -37,7 +37,7 @@ The host subsystem is the trusted half of AX. It runs the HTTP server (OpenAI-co
 | `src/host/agent-registry.ts` | Enterprise agent registry (registry.json), lifecycle management |
 | `src/host/agent-registry-db.ts` | Database-backed agent registry for PostgreSQL (Kysely, runs own migration) |
 | `src/host/server-admin.ts` | Admin API endpoints (agent management, config, diagnostics) |
-| `src/host/host-process.ts` | Unified host pod process for k8s deployment — HTTP, SSE, webhooks, admin, and processCompletion() in one process. Per-turn NATS IPC handler + LLM proxy. Starts web proxy on TCP port (default 3128) when `config.web_proxy` enabled; passes `AX_WEB_PROXY_URL` to sandbox pods via k8s Service. Use server.ts for local dev |
+| `src/host/host-process.ts` | Unified host pod process for k8s deployment — HTTP, SSE, webhooks, admin, and processCompletion() in one process. Per-turn NATS IPC handler + LLM proxy. Starts web proxy on TCP port (default 3128) when `config.web_proxy` enabled; passes `AX_WEB_PROXY_URL` to sandbox pods via k8s Service. Hosts `/internal/workspace-staging` endpoint for HTTP workspace file staging. Passes `AX_HOST_URL` to sandbox pods. Use server.ts for local dev |
 | `src/host/nats-ipc-handler.ts` | NATS-based IPC handler for k8s sandbox pods. Subscribes to `ipc.request.{requestId}.{token}`, routes through existing `handleIPC` pipeline (same as Unix socket path). Per-turn capability token prevents rogue sandboxes. One instance per turn |
 | `src/host/nats-llm-proxy.ts` | NATS-based LLM proxy for claude-code in k8s — proxies requests to Anthropic API with credential injection |
 | `src/host/nats-session-protocol.ts` | NATS session protocol for k8s sandbox coordination |
@@ -195,6 +195,16 @@ For Kubernetes deployments, NATS-based components handle communication between t
 - **`nats-llm-proxy.ts`** — Subscribes to `ipc.llm.{sessionId}`, proxies LLM requests to Anthropic API with credential injection. Allows claude-code pods to make LLM calls without API keys.
 - **`nats-session-protocol.ts`** — Session coordination protocol for k8s sandbox.
 
+### Workspace Release (K8s)
+
+In k8s mode, `host-process.ts` handles workspace file syncing back to GCS via HTTP staging:
+
+1. **Staging endpoint** (`/internal/workspace-staging`): Accepts gzipped JSON POST from sandbox pods (via workspace-cli.ts). Stores in in-memory `stagingStore` (Map with 5-min TTL, 50MB max). Returns `{ staging_key: UUID }`.
+2. **workspace_release IPC interception**: When `wrappedHandleIPC` receives a `workspace_release` action (containing just a `staging_key`), it looks up staged data, decompresses with `gunzipSync`, decodes base64 content, and calls `providers.workspace.setRemoteChanges(sessionId, changes)`.
+3. **Commit**: `workspace.commit(sessionId)` picks up stored changes via `RemoteTransport.diff()` and persists approved changes to GCS.
+
+The `AX_HOST_URL` env var (`http://ax-host.{namespace}.svc`) is passed to sandbox pods via `extraSandboxEnv` so they can reach the staging endpoint. NetworkPolicy allows sandbox pods egress to host on port 8080.
+
 ### Warm Pool (K8s)
 
 The k8s sandbox provider integrates with `src/providers/sandbox/warm-pool-client.ts` to claim pre-warmed pods. Atomic pod claiming with auto-cleanup after exec.
@@ -253,3 +263,5 @@ Admin endpoints for agent management and diagnostics. Protected by admin token (
 - **Error redaction in streams**: Streaming responses must redact internal errors before sending to client.
 - **Web proxy per completion**: When `config.web_proxy` is enabled, a web proxy instance starts per completion (Unix socket for container sandboxes, TCP for subprocess). Cleanup happens in the completion finally block.
 - **K8s web proxy**: In k8s mode, web proxy runs as a TCP server (port 3128) in the host process. Sandbox pods connect via k8s Service (`ax-web-proxy.{namespace}.svc:3128`), passed as `AX_WEB_PROXY_URL`.
+- **K8s workspace staging store**: In-memory Map with 5-min TTL and 50MB max per entry. Periodic cleanup runs every 60s. Staging key is consumed (deleted) on workspace_release IPC lookup.
+- **AX_HOST_URL env var**: Passed to sandbox pods for HTTP workspace staging. Points to `http://ax-host.{namespace}.svc`. NetworkPolicy must allow sandbox→host on port 8080.

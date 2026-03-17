@@ -66,8 +66,7 @@ This interface enables transport-agnostic IPC usage in runners and tools (e.g. `
 | Skills      | `skill_propose`        | `skill`, `content`, `reason?`                             | (proposal result)             |
 | Skills      | `skill_import`         | `source`, `autoApprove?`                                  | (import result)               |
 | Skills      | `skill_search`         | `query`, `limit?`                                         | (search results)              |
-| Workspace   | `workspace_write`      | `tier` (agent/user), `path`, `content`                    | `ok`                          |
-| Workspace   | `workspace_write_file` | `tier` (agent/user), `path`, `data` (base64), `mimeType`  | `ok`                          |
+| Workspace   | `workspace_release`    | `staging_key`                                             | `ok`                          |
 | Audit       | `audit_query`          | `filter?` (action, sessionId, since, until, limit)        | `entries`                     |
 | Delegation  | `agent_delegate`       | `task`, `context?`, `runner?`, `model?`, `maxTokens?`, `timeoutSec?` | `response`             |
 | Delegation  | `agent_collect`        | `delegationId`                                            | `response`                    |
@@ -140,7 +139,7 @@ Messages support multiple block types:
 
 ### Workspace operations
 
-Two IPC workspace tiers for writes: `agent` (persistent), `user` (cross-agent). Reading/listing is done via local sandbox tools since tiers are mounted in the sandbox. Use `workspace_write_file` for binary (base64), `workspace_write` for text.
+Workspace file syncing in k8s uses a two-phase approach: (1) the agent-side sidecar (`workspace-cli.ts release`) POSTs gzipped file data to the host's `/internal/workspace-staging` HTTP endpoint, (2) the agent sends a lightweight `workspace_release` IPC action with just the `staging_key` UUID. The host looks up the staged data, decompresses, and feeds it to the workspace provider's `setRemoteChanges()`. The old `workspace_write`/`workspace_write_file` IPC actions have been removed — the workspace provider's mount/diff/commit pipeline is now the only write path.
 
 ### Sandbox tool operations
 

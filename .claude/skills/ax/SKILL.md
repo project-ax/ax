@@ -41,9 +41,11 @@ In k8s mode, NATS is the backbone for all cross-pod communication:
 
 All NATS callers use `natsConnectOptions()` from `src/utils/nats.ts` for consistent server URL, authentication (NATS_USER/NATS_PASS), and reconnect configuration.
 
-### Workspace Provider (Recent Addition)
+**HTTP staging for large payloads**: File data (workspace changes) flows via HTTP POST to the host's `/internal/workspace-staging` endpoint, not NATS, to avoid the 1MB payload limit. Only a small staging key reference travels over NATS IPC. NetworkPolicy allows sandbox pods egress to host on port 8080.
 
-The workspace provider (`src/providers/workspace/`) manages persistent file workspaces for agent sessions across three scopes: agent, user, and session. Backends: `none` (no-op), `local` (filesystem), `gcs` (Google Cloud Storage). Loaded as part of the standard registry chain in `src/host/registry.ts`.
+### Workspace Provider
+
+The workspace provider (`src/providers/workspace/`) manages persistent file workspaces for agent sessions across three scopes: agent, user, and session. Backends: `none` (no-op), `local` (filesystem), `gcs` (Google Cloud Storage). In k8s mode, workspace changes are synced back to GCS via the HTTP staging + workspace_release IPC flow (see ax-provider-sandbox skill for details). Loaded as part of the standard registry chain in `src/host/registry.ts`.
 
 ### Provider Categories
 

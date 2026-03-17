@@ -146,6 +146,7 @@ Kubernetes pod-based sandbox with pure NATS communication (no k8s Exec/Attach):
 | K8S_IMAGE_PULL_SECRETS    | (none)              | Comma-separated secret names            |
 | WARM_POOL_ENABLED         | `true`              | Enable warm pool claiming               |
 | WARM_POOL_TIER            | `light`             | Tier to claim from                      |
+| AX_HOST_URL               | (set by host)       | Host service URL for HTTP staging (`http://ax-host.{namespace}.svc`) |
 
 ## Warm Pod Pool
 
@@ -176,15 +177,29 @@ All file operations use `safePath()` for path traversal prevention. Bash command
 
 ## Workspace CLI (`src/agent/workspace-cli.ts`)
 
-CLI for container provision/cleanup phases, invoked inside containers:
+CLI for container provision/cleanup/release phases, invoked inside containers:
 
 ```
 node dist/agent/workspace-cli.js provision --workspace /workspace --session default [options]
 node dist/agent/workspace-cli.js cleanup --workspace /workspace --session default [options]
+node dist/agent/workspace-cli.js release --host-url http://ax-host.ax.svc
 ```
 
 - **Provision**: GCS restore, git clone, scope provisioning (agent/user/session), hash snapshot
 - **Cleanup**: Diff scopes against hash snapshot, upload changes, git push, release workspace
+- **Release** (k8s only): Diffs all workspace scopes (`/workspace/scratch`, `/workspace/agent`, `/workspace/user`) against empty baseline, gzips the change set as JSON with base64-encoded file contents, POSTs to `${hostUrl}/internal/workspace-staging`, and outputs the staging key to stdout. Called by `workspace-release.ts` as a subprocess before the `agent_response` IPC call
+
+### K8s Workspace Release Flow
+
+In k8s mode, workspace file changes flow back to GCS via HTTP staging:
+
+1. Agent runner calls `releaseWorkspaceScopes()` from `workspace-release.ts`
+2. `workspace-release.ts` spawns `workspace-cli.js release --host-url <url>` as subprocess
+3. workspace-cli diffs scopes, gzips JSON, POSTs to host `/internal/workspace-staging`
+4. Host returns a `staging_key` UUID
+5. `workspace-release.ts` sends `workspace_release` IPC via NATS with just the `staging_key`
+6. Host looks up staged data, decompresses, decodes base64 content, calls `provider.setRemoteChanges()`
+7. `workspace.commit()` picks up stored changes via `RemoteTransport.diff()` and persists to GCS
 
 ## Dev/Prod Mode Support
 
@@ -220,6 +235,7 @@ node dist/agent/workspace-cli.js cleanup --workspace /workspace --session defaul
 - **Identity/skills NOT mounted**: They come via stdin payload from DocumentStore. Don't add filesystem mounts for identity or skills.
 - **Web proxy socket location**: `web-proxy.sock` lives in the same directory as the IPC socket (already mounted into containers). `canonicalEnv()` computes the path from `dirname(config.ipcSocket)`. No extra mount needed.
 - **K8s web proxy uses k8s Service**: K8s pods don't use a Unix socket for the web proxy. Instead, `host-process.ts` passes `AX_WEB_PROXY_URL` pointing to a k8s Service (`ax-web-proxy.{namespace}.svc:3128`). Network policy allows pods to reach the proxy service.
+- **K8s workspace release uses HTTP staging**: File data flows via HTTP POST to host `/internal/workspace-staging`, not via NATS (avoids NATS 1MB payload limit). Only the staging_key reference travels over NATS.
 - **child.killed is true after ANY kill() call**, not just after the process is dead. Use a separate `exited` flag.
 - **Use direct binary paths** (`node_modules/.bin/tsx`) not `npx` inside sandboxes.
 - **Always have an integration test with the real sandbox**, not just subprocess fallback.
@@ -236,6 +252,7 @@ node dist/agent/workspace-cli.js cleanup --workspace /workspace --session defaul
 - `src/providers/sandbox/utils.ts` -- Shared sandbox helpers (exitCodePromise, enforceTimeout, etc.)
 - `src/pool-controller/` -- Warm pod pool management (controller, k8s-client, metrics, main)
 - `src/agent/local-sandbox.ts` -- Agent-side local tool execution with host audit gate
-- `src/agent/workspace-cli.ts` -- Container provision/cleanup phase CLI
+- `src/agent/workspace-cli.ts` -- Container provision/cleanup/release phase CLI
+- `src/agent/workspace-release.ts` -- Thin wrapper that spawns workspace-cli.ts release as subprocess, sends staging_key via IPC
 - `src/host/provider-map.ts` -- Static allowlist (sandbox: subprocess, docker, apple, k8s)
 - `tests/providers/sandbox/` -- Tests: k8s, docker, apple, subprocess, warm-pool-client, canonical-paths, utils
