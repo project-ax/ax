@@ -35,7 +35,7 @@ export interface SkillPayload {
   scope: 'agent' | 'user';
 }
 
-/** Minimal IPC client interface satisfied by both IPCClient and NATSIPCClient. */
+/** Minimal IPC client interface satisfied by both IPCClient and HttpIPCClient. */
 export interface IIPCClient {
   call(request: Record<string, unknown>, timeoutMs?: number): Promise<Record<string, unknown>>;
   connect(): Promise<void>;

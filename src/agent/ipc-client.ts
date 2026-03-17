@@ -80,7 +80,7 @@ export class IPCClient {
     if (ctx.requestId !== undefined) this.requestId = ctx.requestId;
     if (ctx.userId !== undefined) this.userId = ctx.userId;
     if (ctx.sessionScope !== undefined) this.sessionScope = ctx.sessionScope;
-    // token is used by NATSIPCClient only — ignored for socket transport
+    // token is used by HttpIPCClient only — ignored for socket transport
   }
 
   async connect(): Promise<void> {
