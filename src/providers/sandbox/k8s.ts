@@ -122,8 +122,8 @@ function buildPodSpec(
               { name: 'NATS_USER', value: 'sandbox' },
               { name: 'NATS_PASS', value: process.env.NATS_SANDBOX_PASS },
             ] : []),
-            // Use NATS for IPC instead of Unix sockets (pods can't share host filesystem)
-            { name: 'AX_IPC_TRANSPORT', value: 'nats' },
+            // Use HTTP for IPC instead of Unix sockets (pods can't share host filesystem)
+            { name: 'AX_IPC_TRANSPORT', value: 'http' },
             // Suppress agent debug/info logs — pod logs are piped into the
             // SandboxProcess.stdout stream which becomes the HTTP response.
             // Without this, pino JSON lines pollute the response content.

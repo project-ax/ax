@@ -461,15 +461,34 @@ if (isMain) {
   const config = parseArgs();
   logger.debug('main_start', { agent: config.agent, workspace: config.workspace });
 
-  // Choose IPC transport based on env var. Three modes:
-  // 1. NATS (k8s): use NATS request/reply instead of Unix socket
-  // 2. Listen (Apple Container): listen for incoming connection before stdin
-  // 3. Default (socket connect): runners create their own IPCClient later
+  // Choose IPC transport based on env var. Four modes:
+  // 1. HTTP (k8s, new): use HttpIPCClient + NATS queue group for work dispatch
+  // 2. NATS (k8s, legacy): use NATS request/reply for IPC
+  // 3. Listen (Apple Container): listen for incoming connection before stdin
+  // 4. Default (socket connect): runners create their own IPCClient later
   const ipcTransport = process.env.AX_IPC_TRANSPORT ?? 'socket';
 
-  if (ipcTransport === 'nats') {
-    // K8s mode: use NATS for IPC instead of Unix socket.
-    // Connect IPC client first, then wait for work via NATS subscription.
+  if (ipcTransport === 'http') {
+    // K8s HTTP mode: use HttpIPCClient for IPC, NATS only for work dispatch.
+    const { HttpIPCClient } = await import('./http-ipc-client.js');
+    const client = new HttpIPCClient({
+      hostUrl: process.env.AX_HOST_URL!,
+    });
+    await client.connect();
+    config.ipcClient = client;
+
+    // Wait for work payload via NATS queue group
+    waitForNATSWork().then((data) => {
+      const payload = parseStdinPayload(data);
+      applyPayload(config, payload);
+      return run(config);
+    }).catch((err) => {
+      logger.error('main_error', { error: (err as Error).message, stack: (err as Error).stack });
+      process.exitCode = 1;
+      process.stderr.write(`Agent runner error: ${(err as Error).message ?? err}\n`);
+    });
+  } else if (ipcTransport === 'nats') {
+    // Legacy k8s mode: use NATS for IPC (kept during migration).
     const { NATSIPCClient } = await import('./nats-ipc-client.js');
     const client = new NATSIPCClient({
       sessionId: '', // set after work payload arrives via setContext()
@@ -477,7 +496,7 @@ if (isMain) {
     await client.connect();
     config.ipcClient = client;
 
-    // Wait for work payload via NATS (replaces readStdin())
+    // Wait for work payload via NATS queue group
     waitForNATSWork().then((data) => {
       const payload = parseStdinPayload(data);
       applyPayload(config, payload);
