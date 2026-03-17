@@ -319,6 +319,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
   }
 
   return {
+    workspaceLocation: 'sandbox' as const,
     async spawn(config: SandboxConfig): Promise<SandboxProcess> {
       // Always cold start — warm pool claiming is now handled by NATS queue groups
       // (the host's publishWork uses nc.request('sandbox.work') before calling spawn).

@@ -500,6 +500,40 @@ describe('per-tier writable workspace flags', () => {
   });
 });
 
+// ── Sandbox workspaceLocation Capability ──────────────────────────────
+
+describe('sandbox workspaceLocation capability', () => {
+  test('SandboxProvider has workspaceLocation field', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/types.ts'), 'utf-8');
+    expect(source).toContain('workspaceLocation');
+  });
+
+  test('docker provider sets workspaceLocation to host', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/docker.ts'), 'utf-8');
+    expect(source).toContain("workspaceLocation: 'host'");
+  });
+
+  test('apple provider sets workspaceLocation to host', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/apple.ts'), 'utf-8');
+    expect(source).toContain("workspaceLocation: 'host'");
+  });
+
+  test('subprocess provider sets workspaceLocation to host', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/subprocess.ts'), 'utf-8');
+    expect(source).toContain("workspaceLocation: 'host'");
+  });
+
+  test('k8s provider sets workspaceLocation to sandbox', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(resolve('src/providers/sandbox/k8s.ts'), 'utf-8');
+    expect(source).toContain("workspaceLocation: 'sandbox'");
+  });
+});
+
 // ── IPC Tools ────────────────────────────────────────────────────────
 
 describe('IPC tools do not expose paths', () => {

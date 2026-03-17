@@ -38,6 +38,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
   const image = process.env.AX_CONTAINER_IMAGE ?? DEFAULT_IMAGE;
 
   return {
+    workspaceLocation: 'host' as const,
     async spawn(config: SandboxConfig): Promise<SandboxProcess> {
       const [cmd, ...args] = config.command;
       const containerName = `ax-agent-${randomUUID().slice(0, 8)}`;

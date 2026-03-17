@@ -9,6 +9,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
   let warned = false;
 
   return {
+    workspaceLocation: 'host' as const,
     async spawn(config: SandboxConfig): Promise<SandboxProcess> {
       if (!warned) {
         getLogger().warn('no_isolation', { message: 'dev-only fallback — no sandbox isolation' });
