@@ -141,7 +141,7 @@ providers:
   audit: database
   sandbox: subprocess
   scheduler: plainjob
-  storage: sqlite
+  storage: database
   eventbus: inprocess
   workspace: local
   screener: static
