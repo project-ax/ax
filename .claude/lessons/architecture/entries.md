@@ -1,5 +1,11 @@
 # Architecture
 
+### Prefer HTTP over NATS for large binary payloads in k8s
+**Date:** 2026-03-17
+**Context:** Redesigning k8s workspace file syncing from NATS base64+chunking to HTTP staging. The original approach sent file contents through NATS IPC (base64-encoded, chunked at ~800KB to fit NATS 1MB limit). When the HTTP forward proxy was introduced, this became unnecessary complexity.
+**Lesson:** When k8s pods need to transfer large binary data to the host, use HTTP (via the host's service endpoint) instead of NATS. NATS is great for small control messages (IPC calls, references) but has a 1MB default payload limit that forces chunking for file transfers. HTTP has no such limit and is the natural transport for file uploads. The pattern: upload data via HTTP POST → get back a reference key → send the reference via NATS IPC. Delegate filesystem-heavy work to workspace-cli.ts (the sidecar) instead of doing it in the agent runner.
+**Tags:** k8s, nats, http, workspace, architecture, file-transfer, sidecar
+
 ### NATS nc.request() is incompatible with JetStream-captured subjects
 **Date:** 2026-03-16
 **Context:** Debugging `ipc_llm_error: undefined` in k8s sandbox pods. NATSIPCClient used `nc.request()` for IPC calls, but the agent received `{stream, seq}` (JetStream PubAck) instead of the IPC response.

@@ -387,6 +387,10 @@ export const AgentResponseSchema = ipcAction('agent_response', {
   content: safeString(2_000_000),
 });
 
+export const WorkspaceReleaseSchema = ipcAction('workspace_release', {
+  staging_key: safeString(128),
+});
+
 // ── Sandbox Tools ────────────────────────────────────
 
 export const SandboxBashSchema = ipcAction('sandbox_bash', {

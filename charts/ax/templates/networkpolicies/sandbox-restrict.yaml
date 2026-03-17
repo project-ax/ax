@@ -22,6 +22,14 @@ spec:
       ports:
         - port: 4222
           protocol: TCP
+    # Allow workspace staging uploads to host (k8s workspace release)
+    - to:
+        - podSelector:
+            matchLabels:
+              app: ax-host
+      ports:
+        - port: {{ .Values.host.ports.http | default 8080 }}
+          protocol: TCP
     # Allow DNS resolution (kube-dns)
     - ports:
         - port: 53

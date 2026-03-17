@@ -21,6 +21,7 @@ import type {
   WorkspaceScope,
   WorkspaceProvider,
   FileChange,
+  RemoteFileChange,
 } from './types.js';
 
 // ═══════════════════════════════════════════════════════
@@ -231,48 +232,42 @@ function createLocalTransport(bucket: GcsBucketLike, basePath: string, prefix: s
 // Remote Transport (k8s NATS staging flow)
 // ═══════════════════════════════════════════════════════
 
-function createRemoteTransport(bucket: GcsBucketLike, prefix: string): WorkspaceTransport {
+/** Extended transport interface with setRemoteChanges for k8s NATS mode. */
+export interface RemoteWorkspaceTransport extends WorkspaceTransport {
+  /** Store file changes received from agent pod via NATS IPC. */
+  setRemoteChanges(sessionId: string, changes: RemoteFileChange[]): void;
+}
+
+function createRemoteTransport(bucket: GcsBucketLike, prefix: string): RemoteWorkspaceTransport {
+  // Pending changes keyed by scope name, accumulated from workspace_release IPC calls.
+  const pendingChanges = new Map<string, FileChange[]>();
+
+  /** Build the GCS key prefix for a scope/id pair. */
+  function buildGcsPrefix(scope: WorkspaceScope, id: string): string {
+    const base = prefix.endsWith('/') ? prefix : prefix ? `${prefix}/` : '';
+    // 'session' scope backs the scratch workspace — use 'scratch' as the GCS folder name
+    const folder = scope === 'session' ? 'scratch' : scope;
+    return `${base}${folder}/${id}/`;
+  }
+
   return {
     async provision(): Promise<string> {
-      // No-op — sandbox worker handles provisioning via claim request.
-      // The worker downloads from GCS and enforces read-only chmod.
+      // No-op — k8s sandbox pod handles provisioning via emptyDir volumes.
       return '';
     },
 
-    async diff(scope: WorkspaceScope, id: string): Promise<FileChange[]> {
-      // Read staging metadata from the release_ack response.
-      // The NATSSandboxDispatcher stores staging info after release_ack.
-      // Download changed files from gs://<bucket>/_staging/<requestId>/<scope>/
-      const base = prefix.endsWith('/') ? prefix : prefix ? `${prefix}/` : '';
-      const stagingPrefix = `${base}_staging/`;
-      const [files] = await bucket.getFiles({ prefix: stagingPrefix });
-
-      const changes: FileChange[] = [];
-      for (const file of files) {
-        const relPath = file.name.slice(stagingPrefix.length);
-        if (!relPath) continue;
-
-        // Parse scope from path: <requestId>/<scope>/<path>
-        const parts = relPath.split('/');
-        if (parts.length < 3) continue;
-        const fileScope = parts[1];
-        if (fileScope !== scope) continue;
-
-        const filePath = parts.slice(2).join('/');
-        const [content] = await file.download();
-        changes.push({ path: filePath, type: 'added', content, size: content.length });
-      }
-
+    async diff(scope: WorkspaceScope): Promise<FileChange[]> {
+      // Return and consume stored changes for this scope.
+      const changes = pendingChanges.get(scope) ?? [];
+      pendingChanges.delete(scope);
       return changes;
     },
 
     async commit(scope: WorkspaceScope, id: string, changes: FileChange[]): Promise<void> {
-      // Copy approved files from staging to final prefix
-      const base = prefix.endsWith('/') ? prefix : prefix ? `${prefix}/` : '';
-      const finalPrefix = `${base}${scope}/${id}/`;
+      const keyPrefix = buildGcsPrefix(scope, id);
 
       for (const change of changes) {
-        const gcsKey = finalPrefix + change.path;
+        const gcsKey = keyPrefix + change.path;
 
         if (change.type === 'deleted') {
           try {
@@ -283,6 +278,21 @@ function createRemoteTransport(bucket: GcsBucketLike, prefix: string): Workspace
         } else if (change.content) {
           await bucket.file(gcsKey).save(change.content);
         }
+      }
+    },
+
+    setRemoteChanges(_sessionId: string, changes: RemoteFileChange[]): void {
+      // Group changes by scope and accumulate (supports chunked IPC calls).
+      for (const change of changes) {
+        const fileChange: FileChange = {
+          path: change.path,
+          type: change.type,
+          content: change.content,
+          size: change.size,
+        };
+        const existing = pendingChanges.get(change.scope) ?? [];
+        existing.push(fileChange);
+        pendingChanges.set(change.scope, existing);
       }
     },
   };
@@ -366,7 +376,7 @@ export async function create(config: Config): Promise<WorkspaceProvider> {
     checkCanary() { return false; },
   };
 
-  return createOrchestrator({
+  const provider = createOrchestrator({
     backend,
     scanner,
     config: {
@@ -378,4 +388,15 @@ export async function create(config: Config): Promise<WorkspaceProvider> {
     },
     agentId,
   });
+
+  // In k8s mode, expose setRemoteChanges so the host can store file changes
+  // received from agent pods via NATS IPC before workspace.commit() runs.
+  if (isK8s && 'setRemoteChanges' in transport) {
+    const remoteTransport = transport as RemoteWorkspaceTransport;
+    provider.setRemoteChanges = (sessionId, changes) => {
+      remoteTransport.setRemoteChanges(sessionId, changes);
+    };
+  }
+
+  return provider;
 }

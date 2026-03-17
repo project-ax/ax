@@ -15,6 +15,7 @@ import { existsSync, readFileSync, mkdirSync, mkdtempSync, copyFileSync, cpSync,
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import { getLogger } from '../logger.js';
 import { loadConfig } from '../config.js';
 import { loadProviders } from './registry.js';
@@ -46,12 +47,44 @@ const logger = getLogger().child({ component: 'host-process' });
 /** SSE keepalive interval. */
 const SSE_KEEPALIVE_MS = 15_000;
 
+/** Max staging upload size (50MB uncompressed). */
+const MAX_STAGING_BYTES = 50 * 1024 * 1024;
+
+/** Staging data TTL — entries expire after 5 minutes. */
+const STAGING_TTL_MS = 5 * 60 * 1000;
+
+interface StagingEntry {
+  data: Buffer;
+  createdAt: number;
+}
+
+/**
+ * In-memory store for workspace staging uploads from agent pods.
+ * Agent uploads gzipped changes via HTTP, gets back a staging_key,
+ * then references that key in a small NATS IPC workspace_release message.
+ */
+const stagingStore = new Map<string, StagingEntry>();
+
+/** Periodically clean up expired staging entries. */
+function cleanupStaging(): void {
+  const now = Date.now();
+  for (const [key, entry] of stagingStore) {
+    if (now - entry.createdAt > STAGING_TTL_MS) {
+      stagingStore.delete(key);
+    }
+  }
+}
+
 async function main(): Promise<void> {
   await initTracing();
 
   const config = loadConfig();
   const providers = await loadProviders(config);
   const eventBus: EventBus = providers.eventbus;
+
+  // ── Staging store cleanup (workspace release from k8s pods) ──
+  const stagingCleanupInterval = setInterval(cleanupStaging, 60_000);
+  stagingCleanupInterval.unref();
 
   // ── Initialize storage, routing, IPC (merged from agent-runtime) ──
 
@@ -364,11 +397,42 @@ async function main(): Promise<void> {
       agentResponsePromise.catch(() => {});
     }
 
-    // Wrap handleIPC to intercept agent_response action
+    // Wrap handleIPC to intercept workspace_release and agent_response actions
     const wrappedHandleIPC = isK8s
       ? async (raw: string, ctx: import('./ipc-server.js').IPCContext): Promise<string> => {
           try {
             const parsed = JSON.parse(raw);
+
+            // Intercept workspace_release: look up staged changes by key and store for commit()
+            if (parsed.action === 'workspace_release') {
+              const stagingKey = parsed.staging_key as string;
+              const entry = stagingStore.get(stagingKey);
+              if (!entry) {
+                logger.warn('workspace_release_missing_staging', { requestId, stagingKey });
+                return JSON.stringify({ ok: false, error: 'staging_key not found' });
+              }
+              stagingStore.delete(stagingKey);
+
+              // Decompress and parse the staged changes
+              const json = gunzipSync(entry.data).toString('utf-8');
+              const payload = JSON.parse(json) as { changes: Array<{ scope: string; path: string; type: string; content_base64?: string; size: number }> };
+
+              const changes = (payload.changes ?? []).map((c) => ({
+                scope: c.scope as 'agent' | 'user' | 'session',
+                path: c.path,
+                type: c.type as 'added' | 'modified' | 'deleted',
+                content: c.content_base64 ? Buffer.from(c.content_base64, 'base64') : undefined,
+                size: c.size,
+              }));
+
+              if (providers.workspace?.setRemoteChanges) {
+                providers.workspace.setRemoteChanges(sessionId, changes);
+              }
+
+              logger.info('workspace_release_stored', { requestId, stagingKey, changeCount: changes.length });
+              return JSON.stringify({ ok: true });
+            }
+
             if (parsed.action === 'agent_response') {
               logger.info('agent_response_received', {
                 requestId,
@@ -423,6 +487,8 @@ async function main(): Promise<void> {
       extraSandboxEnv: {
         AX_IPC_TOKEN: turnToken,
         AX_IPC_REQUEST_ID: requestId,
+        // Host URL — sandbox pods use this for workspace staging uploads
+        AX_HOST_URL: `http://ax-host.${config.namespace ?? 'ax'}.svc`,
         // Web proxy — sandbox pods connect directly via k8s Service
         ...(config.web_proxy ? { AX_WEB_PROXY_URL: `http://ax-web-proxy.${config.namespace ?? 'ax'}.svc:3128` } : {}),
       },
@@ -548,7 +614,49 @@ async function main(): Promise<void> {
       return;
     }
 
+    // Workspace staging upload from sandbox pods (k8s)
+    if (url === '/internal/workspace-staging' && req.method === 'POST') {
+      try {
+        await handleWorkspaceStaging(req, res);
+      } catch (err) {
+        logger.error('workspace_staging_failed', { error: (err as Error).message });
+        if (!res.headersSent) sendError(res, 500, 'Staging upload failed');
+      }
+      return;
+    }
+
     sendError(res, 404, 'Not found');
+  }
+
+  // ── Workspace staging endpoint (k8s pod file upload) ──
+
+  async function handleWorkspaceStaging(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    // Read the gzipped request body
+    const chunks: Buffer[] = [];
+    let totalSize = 0;
+
+    for await (const chunk of req) {
+      totalSize += chunk.length;
+      if (totalSize > MAX_STAGING_BYTES) {
+        sendError(res, 413, 'Staging payload too large');
+        return;
+      }
+      chunks.push(chunk as Buffer);
+    }
+
+    const body = Buffer.concat(chunks);
+    if (body.length === 0) {
+      sendError(res, 400, 'Empty staging payload');
+      return;
+    }
+
+    const key = randomUUID();
+    stagingStore.set(key, { data: body, createdAt: Date.now() });
+
+    logger.info('workspace_staging_stored', { key, bytes: body.length });
+
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ staging_key: key }));
   }
 
   // ── Completions: direct processCompletion ──

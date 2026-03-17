@@ -1,12 +1,20 @@
 # Workspace Provider Journal
 
-## [2026-03-16 21:10] — Fix k8s workspace file syncing to GCS via NATS IPC
+## [2026-03-17 05:30] — Redesign k8s workspace release: HTTP staging + sidecar pattern
+
+**Task:** Redesign the workspace file syncing from NATS base64+chunking to HTTP staging endpoint. The HTTP forward proxy (commit 54a2ae0) enables pods to reach the host directly. File data should flow via HTTP, not NATS.
+**What I did:** Added `release` command to workspace-cli.ts (the sidecar) that handles diff, gzip creation, and HTTP upload. Rewrote workspace-release.ts to delegate to workspace-cli.ts subprocess. Simplified WorkspaceReleaseSchema to just `staging_key` (no inline file data). Added `/internal/workspace-staging` POST endpoint to host-process.ts with in-memory staging store. Updated workspace_release IPC interception to look up staging data by key, decompress gzipped JSON, decode base64 content. Added `AX_HOST_URL` env var for sandbox pods. Updated NetworkPolicy to allow sandbox→host on port 8080.
+**Files touched:** src/ipc-schemas.ts, src/agent/workspace-cli.ts, src/agent/workspace-release.ts, src/host/host-process.ts, src/agent/runners/claude-code.ts, src/agent/runners/pi-session.ts, charts/ax/templates/networkpolicies/sandbox-restrict.yaml, tests/agent/workspace-release.test.ts, tests/providers/workspace/gcs-remote-transport.test.ts
+**Outcome:** Success — 215 test files, 2522 tests pass
+**Notes:** Flow: agent runner → workspace-cli.ts release (subprocess) → diffs scopes, gzips JSON, POSTs to host:8080/internal/workspace-staging → returns staging_key → agent sends small workspace_release IPC via NATS with just staging_key → host decompresses, decodes, calls setRemoteChanges → workspace.commit() processes through pipeline. Staging store has 5-min TTL with periodic cleanup. This avoids NATS 1MB payload limit entirely.
+
+## [2026-03-16 21:10] — Fix k8s workspace file syncing to GCS via NATS IPC (superseded)
 
 **Task:** Files written to /workspace/scratch, /workspace/user, and /workspace/agent inside k8s sandbox pods never got synced back to the GCS bucket. RemoteTransport.diff() read from an empty _staging/ prefix, and pods have no network.
 **What I did:** Rewrote RemoteTransport to store changes from setRemoteChanges() and return them from diff(). Added workspace_release IPC schema for agent→host file transfer. Created agent-side workspace-release.ts that diffs scope dirs, base64-encodes files, and sends via chunked IPC. Integrated into both claude-code and pi-session runners before agent_response. Added host-process interception of workspace_release in wrappedHandleIPC. Added RemoteFileChange type and optional setRemoteChanges to WorkspaceProvider interface.
 **Files touched:** src/ipc-schemas.ts, src/providers/workspace/types.ts, src/providers/workspace/gcs.ts, src/agent/workspace-release.ts (new), src/agent/runners/claude-code.ts, src/agent/runners/pi-session.ts, src/host/host-process.ts, tests/providers/workspace/gcs-remote-transport.test.ts (new), tests/agent/workspace-release.test.ts (new), tests/agent/tool-catalog-sync.test.ts
-**Outcome:** Success — 213 test files, 2492 tests pass (all new tests included)
-**Notes:** Changes flow: agent pod diffs workspace dirs → base64-encodes → sends workspace_release IPC → host decodes + stores via setRemoteChanges → workspace.commit() picks up via RemoteTransport.diff() → structural filter + scanner → GCS upload. Chunking at ~800KB keeps within NATS 1MB limit. Pod starts with empty emptyDir volumes so baseHashes is empty Map (every file is "new").
+**Outcome:** Superseded by HTTP staging approach above
+**Notes:** Original NATS approach worked but was replaced because HTTP proxy now enables direct pod→host communication, avoiding NATS 1MB payload limit and chunking complexity.
 
 ## [2026-03-13 14:50] — Wire workspace provider directories into sandbox as writable mounts
 

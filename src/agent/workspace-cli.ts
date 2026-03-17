@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-// src/agent/workspace-cli.ts — CLI for container provision/cleanup phases.
+// src/agent/workspace-cli.ts — CLI for container provision/cleanup/release phases.
 //
-// Invoked as: node dist/agent/workspace-cli.js provision|cleanup [options]
+// Invoked as: node dist/agent/workspace-cli.js provision|cleanup|release [options]
 //
 // provision: GCS restore / git clone / scope provisioning / hash snapshot
 // cleanup:   diff scopes / upload changes to GCS / git push / delete workspace
+// release:   diff scopes / gzip / upload to host staging endpoint (k8s NATS mode)
 
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import { provisionWorkspace, provisionScope, diffScope, releaseWorkspace } from './workspace.js';
 import type { FileHashMap } from './workspace.js';
 
@@ -132,6 +134,122 @@ async function cleanup(args: Record<string, string>): Promise<void> {
   console.log('[cleanup] workspace released');
 }
 
+// ═══════════════════════════════════════════════════════
+// Release: diff workspace scopes, gzip, upload to host
+// ═══════════════════════════════════════════════════════
+
+interface ChangeEntry {
+  scope: 'agent' | 'user' | 'session';
+  path: string;
+  type: 'added' | 'modified' | 'deleted';
+  content_base64?: string;
+  size: number;
+}
+
+/**
+ * Release workspace changes to the host via HTTP staging endpoint.
+ *
+ * For k8s NATS mode: diffs workspace scope directories, creates a gzipped
+ * JSON payload, and uploads it to the host's /internal/workspace-staging
+ * endpoint. Prints the staging_key to stdout so the calling agent can
+ * reference it in a NATS IPC workspace_release message.
+ *
+ * Usage: workspace-cli.js release --host-url <url> [--scopes session,agent,user]
+ *
+ * Canonical workspace paths:
+ *   /workspace/scratch → session scope
+ *   /workspace/agent   → agent scope
+ *   /workspace/user    → user scope
+ */
+async function release(args: Record<string, string>): Promise<void> {
+  const hostUrl = args['host-url'];
+  if (!hostUrl) {
+    console.error('[release] --host-url is required');
+    process.exit(1);
+  }
+
+  const scopeNames = (args.scopes ?? 'session,agent,user').split(',') as Array<'session' | 'agent' | 'user'>;
+
+  const scopePaths: Record<string, string> = {
+    session: '/workspace/scratch',
+    agent: '/workspace/agent',
+    user: '/workspace/user',
+  };
+
+  const allChanges: ChangeEntry[] = [];
+
+  for (const scope of scopeNames) {
+    const mountPath = scopePaths[scope];
+    if (!mountPath || !existsSync(mountPath)) {
+      console.error(`[release] skipping ${scope}: ${mountPath} does not exist`);
+      continue;
+    }
+
+    // Empty baseline — pod starts with empty emptyDir volumes, so every file is new
+    const baseHashes: FileHashMap = new Map();
+    const diffs = diffScope(mountPath, baseHashes);
+    if (diffs.length === 0) continue;
+
+    console.error(`[release] ${scope}: ${diffs.length} changes`);
+
+    for (const diff of diffs) {
+      const entry: ChangeEntry = {
+        scope,
+        path: diff.path,
+        type: diff.type,
+        size: diff.size,
+      };
+
+      if (diff.type !== 'deleted') {
+        const fullPath = join(mountPath, diff.path);
+        const content = readFileSync(fullPath);
+        entry.content_base64 = content.toString('base64');
+        entry.size = content.length;
+      }
+
+      allChanges.push(entry);
+    }
+  }
+
+  if (allChanges.length === 0) {
+    console.error('[release] no changes detected');
+    // Output empty string — caller checks for empty staging_key
+    process.stdout.write('');
+    return;
+  }
+
+  // Create gzipped JSON payload
+  const json = JSON.stringify({ changes: allChanges });
+  const gzipped = gzipSync(Buffer.from(json));
+  console.error(`[release] payload: ${allChanges.length} changes, ${json.length} bytes raw, ${gzipped.length} bytes gzipped`);
+
+  // Upload to host staging endpoint
+  const url = `${hostUrl}/internal/workspace-staging`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/gzip',
+      'Content-Length': String(gzipped.length),
+    },
+    body: gzipped,
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`staging upload failed: ${response.status} ${text}`);
+  }
+
+  const result = await response.json() as { staging_key: string };
+  if (!result.staging_key) {
+    throw new Error('staging upload response missing staging_key');
+  }
+
+  console.error(`[release] staged: ${result.staging_key}`);
+
+  // Output staging_key to stdout for the calling agent
+  process.stdout.write(result.staging_key);
+}
+
 // ── CLI entry point ──
 
 const [,, command, ...rawArgs] = process.argv;
@@ -146,9 +264,15 @@ if (command === 'provision') {
     console.error(`[cleanup] fatal: ${(err as Error).message}`);
     process.exit(1);
   });
+} else if (command === 'release') {
+  release(parseArgs(rawArgs)).catch(err => {
+    console.error(`[release] fatal: ${(err as Error).message}`);
+    process.exit(1);
+  });
 } else {
-  console.error(`Usage: workspace-cli.js <provision|cleanup> [options]`);
+  console.error(`Usage: workspace-cli.js <provision|cleanup|release> [options]`);
   console.error(`  provision: --workspace --session --git-url --ref --cache-key --agent-gcs-prefix --user-gcs-prefix --session-gcs-prefix`);
   console.error(`  cleanup:   --workspace --session --push-changes --update-cache --cache-key`);
+  console.error(`  release:   --host-url <url> [--scopes session,agent,user]`);
   process.exit(1);
 }

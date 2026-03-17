@@ -198,6 +198,8 @@ describe('tool-catalog <-> IPC schemas sync', () => {
       'sandbox_approve', 'sandbox_result',
       // Agent response (NATS mode — agent sends response via IPC instead of stdout)
       'agent_response',
+      // Workspace release (NATS mode — agent sends workspace file changes via IPC)
+      'workspace_release',
     ]);
 
     for (const action of schemaActions) {

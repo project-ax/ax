@@ -81,6 +81,18 @@ export interface WorkspaceBackend {
 }
 
 // ═══════════════════════════════════════════════════════
+// Remote File Changes (k8s NATS mode)
+// ═══════════════════════════════════════════════════════
+
+export interface RemoteFileChange {
+  scope: WorkspaceScope;
+  path: string;
+  type: 'added' | 'modified' | 'deleted';
+  content?: Buffer;
+  size: number;
+}
+
+// ═══════════════════════════════════════════════════════
 // Provider Interface
 // ═══════════════════════════════════════════════════════
 
@@ -96,4 +108,7 @@ export interface WorkspaceProvider {
 
   /** Returns which scopes are currently active for a session. */
   activeMounts(sessionId: string): WorkspaceScope[];
+
+  /** Store file changes received from remote agent (k8s NATS mode). */
+  setRemoteChanges?(sessionId: string, changes: RemoteFileChange[]): void;
 }
