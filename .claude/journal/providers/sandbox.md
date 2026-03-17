@@ -2,6 +2,14 @@
 
 Sandbox providers, canonical paths, workspace tiers.
 
+## [2026-03-17 14:00] — Implement unified workspace lifecycle (10 tasks)
+
+**Task:** Replace broken three-phase pod orchestration with unified workspace lifecycle
+**What I did:** Added workspaceLocation capability to SandboxProvider, created lifecycle.ts module, added provisioning fields to NATS payload, added in-pod provisioning/cleanup to runner and both agent runners, replaced three-phase orchestration with lifecycle dispatch, removed SandboxConfig.network flag, updated skill docs
+**Files touched:** src/providers/sandbox/{types,docker,apple,subprocess,k8s}.ts, src/providers/workspace/lifecycle.ts, src/host/server-completions.ts, src/agent/{runner,workspace-cli}.ts, src/agent/runners/{claude-code,pi-session}.ts, src/providers/sandbox/canonical-paths.ts, .claude/skills/ax-provider-sandbox/SKILL.md, 5 new test files
+**Outcome:** Success — 209 test files, 2443 tests all pass
+**Notes:** 10 commits on feature/nats-centric-workspace-provisioning branch. Host-side providers now use prepareGitWorkspace/finalizeGitWorkspace. K8s uses provisionWorkspaceFromPayload in-pod. Three-phase orchestration fully removed.
+
 ## [2026-03-16 16:30] — Fix: NATS 503 actual root cause — double-encoded work payload
 
 **Task:** Debug persistent NATS 503 after three prior fix attempts (ipcToken, Helm, permissions)

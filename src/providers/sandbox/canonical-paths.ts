@@ -28,7 +28,10 @@ import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { SandboxConfig } from './types.js';
 
-/** Canonical paths inside the sandbox — what the LLM sees. */
+/** Canonical paths inside the sandbox — what the LLM sees.
+ * /workspace root is read-only in Docker and k8s (readOnlyRootFilesystem).
+ * Apple Container root is currently writable (TODO: re-enable --read-only
+ * once --publish-socket works with a non-tmpfs bridge socket path). */
 export const CANONICAL = {
   root:     '/workspace',
   scratch:  '/workspace/scratch',
