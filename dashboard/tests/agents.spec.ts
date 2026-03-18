@@ -62,8 +62,9 @@ test.describe('Agents Page', () => {
     // Click the first agent row
     await page.getByRole('row', { name: /research-bot/ }).click();
 
-    await expect(page.getByText('Agent Details')).toBeVisible();
+    // Detail panel shows agent name as heading and tab buttons
     await expect(page.getByRole('heading', { name: 'research-bot' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Info' })).toBeVisible();
   });
 
   test('detail panel shows agent metadata', async ({ page }) => {
@@ -104,13 +105,14 @@ test.describe('Agents Page', () => {
   test('detail panel does not show kill for stopped agents', async ({ page }) => {
     await page.getByRole('row', { name: /old-agent/ }).click();
 
-    await expect(page.getByText('Agent Details')).toBeVisible();
+    // Detail panel shows agent name
+    await expect(page.getByRole('heading', { name: 'old-agent' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Kill Agent' })).not.toBeVisible();
   });
 
   test('close button hides detail panel', async ({ page }) => {
     await page.getByRole('row', { name: /research-bot/ }).click();
-    await expect(page.getByText('Agent Details')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'research-bot' })).toBeVisible();
 
     // Click close (XCircle button)
     await page.locator('.card-header button').click();

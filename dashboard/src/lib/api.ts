@@ -61,7 +61,15 @@ export async function apiFetch<T>(
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`API ${res.status}: ${body || res.statusText}`);
+    // Try to extract a human-readable message from the error JSON
+    let message = res.statusText;
+    try {
+      const parsed = JSON.parse(body);
+      message = parsed?.error?.message ?? parsed?.error ?? message;
+    } catch {
+      if (body) message = body;
+    }
+    throw new Error(message);
   }
 
   return res.json() as Promise<T>;

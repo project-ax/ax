@@ -77,6 +77,26 @@ async function mockDeps(configOverrides: Partial<Config['admin']> = {}): Promise
           },
         ]),
       },
+      storage: {
+        documents: {
+          list: vi.fn().mockResolvedValue(['main/persona.md']),
+          get: vi.fn().mockResolvedValue('You are a helpful assistant.'),
+        },
+      },
+      skills: {
+        list: vi.fn().mockResolvedValue([
+          { name: 'test-skill', description: 'A test skill', path: '/skills/test.md' },
+        ]),
+        read: vi.fn().mockResolvedValue('skill content here'),
+      },
+      workspace: {
+        listFiles: vi.fn().mockResolvedValue([
+          { path: 'notes.txt', size: 42 },
+        ]),
+      },
+      memory: {
+        recall: vi.fn().mockResolvedValue([]),
+      },
     } as unknown as AdminDeps['providers'],
     eventBus: createEventBus(),
     agentRegistry: registry,
@@ -365,6 +385,173 @@ describe('GET /admin/api/events', () => {
     const allText = events.join('');
     expect(allText).toContain(':connected');
     expect(allText).toContain('test.event');
+  });
+});
+
+describe('GET /admin/api/agents/:id/identity', () => {
+  let server: Server;
+  let port: number;
+
+  beforeEach(async () => {
+    _rateLimits.clear();
+    const deps = await mockDeps();
+    const handler = createAdminHandler(deps);
+    const result = await startTestServer(handler);
+    server = result.server;
+    port = result.port;
+  });
+
+  afterEach(() => { server.close(); });
+
+  it('returns identity documents for the agent', async () => {
+    const res = await fetchAdmin(port, '/admin/api/agents/main/identity', { token: 'test-secret-token' });
+    expect(res.status).toBe(200);
+    const docs = res.body as Array<{ key: string; content: string }>;
+    expect(docs).toEqual([
+      { key: 'persona.md', content: 'You are a helpful assistant.' },
+    ]);
+  });
+
+  it('returns 404 for unknown agent', async () => {
+    const res = await fetchAdmin(port, '/admin/api/agents/nonexistent/identity', { token: 'test-secret-token' });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('GET /admin/api/agents/:id/skills', () => {
+  let server: Server;
+  let port: number;
+
+  beforeEach(async () => {
+    _rateLimits.clear();
+    const deps = await mockDeps();
+    const handler = createAdminHandler(deps);
+    const result = await startTestServer(handler);
+    server = result.server;
+    port = result.port;
+  });
+
+  afterEach(() => { server.close(); });
+
+  it('returns skills list', async () => {
+    const res = await fetchAdmin(port, '/admin/api/agents/main/skills', { token: 'test-secret-token' });
+    expect(res.status).toBe(200);
+    const skills = res.body as Array<{ name: string }>;
+    expect(Array.isArray(skills)).toBe(true);
+  });
+
+  it('returns 404 for unknown agent', async () => {
+    const res = await fetchAdmin(port, '/admin/api/agents/nonexistent/skills', { token: 'test-secret-token' });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('GET /admin/api/agents/:id/workspace', () => {
+  let server: Server;
+  let port: number;
+
+  beforeEach(async () => {
+    _rateLimits.clear();
+    const deps = await mockDeps();
+    const handler = createAdminHandler(deps);
+    const result = await startTestServer(handler);
+    server = result.server;
+    port = result.port;
+  });
+
+  afterEach(() => { server.close(); });
+
+  it('returns workspace files', async () => {
+    const res = await fetchAdmin(port, '/admin/api/agents/main/workspace', { token: 'test-secret-token' });
+    expect(res.status).toBe(200);
+    const files = res.body as Array<{ path: string; size: number }>;
+    expect(Array.isArray(files)).toBe(true);
+  });
+
+  it('returns 404 for unknown agent', async () => {
+    const res = await fetchAdmin(port, '/admin/api/agents/nonexistent/workspace', { token: 'test-secret-token' });
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('tab endpoints handle provider errors gracefully', () => {
+  let server: Server;
+  let port: number;
+
+  beforeEach(async () => {
+    _rateLimits.clear();
+    const tmpDir = mkdtempSync(join(tmpdir(), 'ax-admin-test-'));
+    const config = makeConfig();
+    const registry = new FileAgentRegistry(join(tmpDir, 'registry.json'));
+    await registry.ensureDefault();
+
+    const deps: AdminDeps = {
+      config,
+      providers: {
+        audit: {
+          log: vi.fn().mockResolvedValue(undefined),
+          query: vi.fn().mockResolvedValue([]),
+        },
+        storage: {
+          documents: {
+            list: vi.fn().mockRejectedValue(new Error('database connection lost')),
+            get: vi.fn().mockRejectedValue(new Error('database connection lost')),
+          },
+        },
+        skills: {
+          list: vi.fn().mockRejectedValue(new Error('skills table not found')),
+          read: vi.fn().mockRejectedValue(new Error('skills table not found')),
+        },
+        workspace: {
+          listFiles: vi.fn().mockRejectedValue(new Error('workspace unavailable')),
+        },
+        memory: {
+          list: vi.fn().mockRejectedValue(new Error('memory provider error')),
+        },
+      } as unknown as AdminDeps['providers'],
+      eventBus: createEventBus(),
+      agentRegistry: registry,
+      startTime: Date.now() - 60_000,
+    };
+
+    const handler = createAdminHandler(deps);
+    const result = await startTestServer(handler);
+    server = result.server;
+    port = result.port;
+  });
+
+  afterEach(() => { server.close(); });
+
+  it('identity endpoint returns 500 with specific error when provider fails', async () => {
+    const res = await fetchAdmin(port, '/admin/api/agents/main/identity', { token: 'test-secret-token' });
+    expect(res.status).toBe(500);
+    const body = res.body as { error: { message: string } };
+    expect(body.error.message).toContain('Failed to list identity documents');
+    expect(body.error.message).toContain('database connection lost');
+  });
+
+  it('skills endpoint returns 500 with specific error when provider fails', async () => {
+    const res = await fetchAdmin(port, '/admin/api/agents/main/skills', { token: 'test-secret-token' });
+    expect(res.status).toBe(500);
+    const body = res.body as { error: { message: string } };
+    expect(body.error.message).toContain('Failed to list skills');
+    expect(body.error.message).toContain('skills table not found');
+  });
+
+  it('workspace endpoint returns 500 with specific error when provider fails', async () => {
+    const res = await fetchAdmin(port, '/admin/api/agents/main/workspace', { token: 'test-secret-token' });
+    expect(res.status).toBe(500);
+    const body = res.body as { error: { message: string } };
+    expect(body.error.message).toContain('Failed to list workspace files');
+    expect(body.error.message).toContain('workspace unavailable');
+  });
+
+  it('memory endpoint returns 500 with specific error when provider fails', async () => {
+    const res = await fetchAdmin(port, '/admin/api/agents/main/memory', { token: 'test-secret-token' });
+    expect(res.status).toBe(500);
+    const body = res.body as { error: { message: string } };
+    expect(body.error.message).toContain('Failed to list memory entries');
+    expect(body.error.message).toContain('memory provider error');
   });
 });
 

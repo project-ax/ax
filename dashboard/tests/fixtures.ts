@@ -192,11 +192,31 @@ export const MOCK_CONFIG = {
 
 // ── Route helpers ──
 
+export const MOCK_IDENTITY = [
+  { key: 'persona.md', content: 'You are a helpful research assistant.' },
+  { key: 'rules.md', content: 'Always cite sources.' },
+];
+
+export const MOCK_SKILLS = [
+  { name: 'web-search', description: 'Search the web for information', path: '/skills/web-search.md' },
+  { name: 'summarize', description: 'Summarize long documents', path: '/skills/summarize.md' },
+];
+
+export const MOCK_WORKSPACE_FILES = [
+  { path: 'notes.txt', size: 1024 },
+  { path: 'output/report.md', size: 4096 },
+];
+
+export const MOCK_MEMORY = [
+  { id: 'mem-1', scope: 'general', content: 'User prefers concise answers', tags: ['preference'], createdAt: '2026-03-06T10:00:00Z' },
+];
+
 /** Set up all standard API mocks for an authenticated dashboard session. */
 export async function mockAllAPIs(page: Page) {
   await mockSetupStatus(page, true);
   await mockStatus(page);
   await mockAgents(page);
+  await mockAgentTabs(page);
   await mockAudit(page);
   await mockConfig(page);
   await mockSessions(page);
@@ -252,6 +272,62 @@ export async function mockAgentKill(page: Page, id: string) {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({ ok: true, agentId: id }),
+    }),
+  );
+}
+
+export async function mockAgentTabs(page: Page) {
+  // Mock identity endpoint
+  await page.route('**/admin/api/agents/*/identity', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(MOCK_IDENTITY),
+    }),
+  );
+
+  // Mock skills list endpoint
+  await page.route('**/admin/api/agents/*/skills', (route) => {
+    const url = new URL(route.request().url());
+    // Only match the skills list, not skills/:name
+    const parts = url.pathname.split('/');
+    const lastPart = parts[parts.length - 1];
+    if (lastPart !== 'skills') return route.fallback();
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(MOCK_SKILLS),
+    });
+  });
+
+  // Mock individual skill content
+  await page.route('**/admin/api/agents/*/skills/*', (route) => {
+    const url = new URL(route.request().url());
+    const parts = url.pathname.split('/');
+    const skillName = parts[parts.length - 1];
+    if (skillName === 'skills') return route.fallback();
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ name: decodeURIComponent(skillName), content: `# ${decodeURIComponent(skillName)} skill content` }),
+    });
+  });
+
+  // Mock workspace endpoint
+  await page.route('**/admin/api/agents/*/workspace**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(MOCK_WORKSPACE_FILES),
+    }),
+  );
+
+  // Mock memory endpoint
+  await page.route('**/admin/api/agents/*/memory**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(MOCK_MEMORY),
     }),
   );
 }

@@ -243,16 +243,21 @@ async function handleAdminAPI(
     const id = decodeURIComponent(identityMatch[1]);
     const agent = await agentRegistry.get(id);
     if (!agent) { sendError(res, 404, 'Agent not found'); return; }
-    const agentName = agent.name;
-    const allKeys = await providers.storage.documents.list('identity');
-    const prefix = `${agentName}/`;
-    const files = [];
-    for (const key of allKeys) {
-      if (!key.startsWith(prefix)) continue;
-      const content = await providers.storage.documents.get('identity', key);
-      files.push({ key: key.slice(prefix.length), content: content ?? '' });
+    try {
+      // Documents are keyed by agent ID (e.g. "main/AGENTS.md"), not display name
+      const allKeys = await providers.storage.documents.list('identity');
+      const prefix = `${id}/`;
+      const files = [];
+      for (const key of allKeys) {
+        if (!key.startsWith(prefix)) continue;
+        const content = await providers.storage.documents.get('identity', key);
+        files.push({ key: key.slice(prefix.length), content: content ?? '' });
+      }
+      sendJSON(res, files);
+    } catch (err) {
+      logger.error('admin_identity_failed', { agentId: id, error: (err as Error).message });
+      sendError(res, 500, `Failed to list identity documents: ${(err as Error).message}`);
     }
-    sendJSON(res, files);
     return;
   }
 
@@ -262,8 +267,13 @@ async function handleAdminAPI(
     const id = decodeURIComponent(skillsListMatch[1]);
     const agent = await agentRegistry.get(id);
     if (!agent) { sendError(res, 404, 'Agent not found'); return; }
-    const skills = await providers.skills.list();
-    sendJSON(res, skills);
+    try {
+      const skills = await providers.skills.list();
+      sendJSON(res, skills);
+    } catch (err) {
+      logger.error('admin_skills_failed', { agentId: id, error: (err as Error).message });
+      sendError(res, 500, `Failed to list skills: ${(err as Error).message}`);
+    }
     return;
   }
 
@@ -289,14 +299,20 @@ async function handleAdminAPI(
     const id = decodeURIComponent(workspaceMatch[1]);
     const agent = await agentRegistry.get(id);
     if (!agent) { sendError(res, 404, 'Agent not found'); return; }
-    if (!providers.workspace.listFiles) {
-      sendJSON(res, []);
-      return;
+    try {
+      if (!providers.workspace.listFiles) {
+        sendJSON(res, []);
+        return;
+      }
+      const url = new URL(req.url ?? '/', 'http://localhost');
+      const scope = (url.searchParams.get('scope') ?? 'agent') as 'agent' | 'user' | 'session';
+      // Workspace dirs are keyed by agent ID (e.g. "main"), not display name
+      const files = await providers.workspace.listFiles(scope, id);
+      sendJSON(res, files);
+    } catch (err) {
+      logger.error('admin_workspace_failed', { agentId: id, error: (err as Error).message });
+      sendError(res, 500, `Failed to list workspace files: ${(err as Error).message}`);
     }
-    const url = new URL(req.url ?? '/', 'http://localhost');
-    const scope = (url.searchParams.get('scope') ?? 'agent') as 'agent' | 'user' | 'session';
-    const files = await providers.workspace.listFiles(scope, agent.name);
-    sendJSON(res, files);
     return;
   }
 
@@ -306,11 +322,16 @@ async function handleAdminAPI(
     const id = decodeURIComponent(memoryMatch[1]);
     const agent = await agentRegistry.get(id);
     if (!agent) { sendError(res, 404, 'Agent not found'); return; }
-    const url = new URL(req.url ?? '/', 'http://localhost');
-    const scope = url.searchParams.get('scope') ?? 'general';
-    const limit = parseInt(url.searchParams.get('limit') ?? '50');
-    const entries = await providers.memory.list(scope, limit);
-    sendJSON(res, entries);
+    try {
+      const url = new URL(req.url ?? '/', 'http://localhost');
+      const scope = url.searchParams.get('scope') ?? 'general';
+      const limit = parseInt(url.searchParams.get('limit') ?? '50');
+      const entries = await providers.memory.list(scope, limit);
+      sendJSON(res, entries);
+    } catch (err) {
+      logger.error('admin_memory_failed', { agentId: id, error: (err as Error).message });
+      sendError(res, 500, `Failed to list memory entries: ${(err as Error).message}`);
+    }
     return;
   }
 
