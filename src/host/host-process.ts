@@ -379,6 +379,7 @@ async function main(): Promise<void> {
     sessionId: string,
     userId?: string,
     _agentType?: string,
+    preProcessed?: { sessionId: string; messageId: string; canaryToken: string },
   ): Promise<{ responseContent: string; finishReason: 'stop' | 'content_filter'; contentBlocks?: import('../types.js').ContentBlock[] }> {
     // Per-turn capability token for NATS subject isolation
     const turnToken = randomUUID();
@@ -534,7 +535,7 @@ async function main(): Promise<void> {
         requestId,
         messages,
         sessionId,
-        undefined,
+        preProcessed,
         userId,
       );
 
@@ -1064,6 +1065,9 @@ async function main(): Promise<void> {
         msg.content, schedRequestId,
         [{ role: 'user', content: msg.content }],
         result.sessionId,
+        undefined,
+        undefined,
+        { sessionId: result.sessionId, messageId: result.messageId!, canaryToken: result.canaryToken },
       );
 
       // Resolve delivery target and send if applicable
