@@ -2,6 +2,14 @@
 
 Local and NATS-based sandbox dispatching, lazy sandbox spawning, NATS IPC handler.
 
+## [2026-03-18 22:15] — Enable web proxy for k8s sandboxes (npm install E2E fix)
+
+**Task:** After the deadlock fix, npm install still hung in k8s. Debug and fix the web proxy pipeline for warm pool pods.
+**What I did:** Found 6 issues in the k8s web proxy pipeline: (1) `web_proxy` missing from Zod config schema → host crash. (2) K8s auto-injects `AX_WEB_PROXY_PORT=tcp://IP:PORT` from the service name, colliding with our env var → NaN port → crash. Renamed to `AX_PROXY_LISTEN_PORT`. (3) Web proxy bound to 127.0.0.1 → unreachable from other pods. Added `bindHost` option, k8s uses 0.0.0.0. (4) Helm chart service/networkpolicy selectors used wrong label keys → no endpoints. (5) Host network policy missing ingress rule for port 3128. (6) Warm pool pods don't get `AX_WEB_PROXY_URL` — added `webProxyUrl` to NATS work payload and `parseStdinPayload`.
+**Files touched:** `src/config.ts`, `src/host/web-proxy.ts`, `src/host/host-process.ts`, `src/host/server-completions.ts`, `src/agent/runner.ts`, `src/agent/runners/{pi-session,claude-code}.ts`, `charts/ax/templates/{host/deployment,web-proxy-service,network-policy,networkpolicies/host-network}.yaml`
+**Outcome:** Success — npm i debug completes via proxy in kind cluster (CONNECT registry.npmjs.org:443 → 200, 298KB).
+**Notes:** Debugged using systematic approach: pod logs → env var inspection → connectivity tests → incremental fix. The K8s service discovery env var collision was especially subtle — `parseInt("tcp://10.96.104.65:3128", 10)` silently returns NaN.
+
 ## [2026-03-18 17:30] — Fix agent hang on network bash commands (npm install deadlock)
 
 **Task:** Debug and fix deadlock where asking the agent to run `npm install -g @googleworkspace/cli` causes it to hang indefinitely.

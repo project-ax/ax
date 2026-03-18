@@ -1,5 +1,17 @@
 # Architecture
 
+### K8s service names generate env vars that collide with application env vars
+**Date:** 2026-03-18
+**Context:** Created a k8s Service named `ax-web-proxy`. Kubernetes auto-generates `AX_WEB_PROXY_PORT=tcp://10.96.104.65:3128` in all pods in the namespace. Our code read `process.env.AX_WEB_PROXY_PORT` expecting a number, got `tcp://...`, parsed to NaN, and crashed.
+**Lesson:** Never name a k8s Service such that its auto-generated env vars (`<SERVICE>_PORT`, `<SERVICE>_HOST`, `<SERVICE>_PORT_<PORT>_TCP`) collide with your application's env vars. The transform is: service name uppercased, hyphens→underscores, suffixed with `_PORT`, `_HOST`, etc. Either rename the service or use a distinct env var name (we renamed to `AX_PROXY_LISTEN_PORT`).
+**Tags:** k8s, service-discovery, env-vars, naming-collision, debugging
+
+### Warm pool pods don't get per-request env vars from sandbox.spawn()
+**Date:** 2026-03-18
+**Context:** `host-process.ts` passes `AX_WEB_PROXY_URL` via `extraSandboxEnv` into `sandboxConfig.extraEnv`. The k8s provider puts these into the pod spec on `spawn()`. But warm pool pods are pre-created without per-request env vars — they receive work via NATS payload. Any per-request env var must be explicitly added to both the NATS stdin payload AND `parseStdinPayload()` in `runner.ts`.
+**Lesson:** When adding a new per-request env var for k8s sandboxes: (1) Add it to `extraSandboxEnv` in `host-process.ts` (cold spawn path). (2) Add it to `stdinPayload` in `server-completions.ts` (NATS payload). (3) Add parsing in `parseStdinPayload()` in `runner.ts`. (4) Apply it in `applyPayload()`. Missing any step means warm pool pods silently lack the value.
+**Tags:** k8s, warm-pool, nats, env-vars, payload, runner
+
 ### Synchronous child process execution + web proxy governance = deadlock
 **Date:** 2026-03-18
 **Context:** Debugging agent hang on `npm install -g` in container mode. `execFileSync` blocks the event loop, but npm routes through the web proxy which calls `requestApproval()` — a 120s blocking wait for the agent to send `web_proxy_approve` IPC. Since the agent is blocked on execFileSync, the IPC can never arrive.
