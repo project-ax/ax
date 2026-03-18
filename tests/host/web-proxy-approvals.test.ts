@@ -5,6 +5,7 @@ import {
   isDomainApproved,
   isDomainDenied,
   cleanupSession,
+  preApproveDomain,
 } from '../../src/host/web-proxy-approvals.js';
 
 describe('web-proxy-approvals', () => {
@@ -82,5 +83,35 @@ describe('web-proxy-approvals', () => {
 
     expect(await p1).toBe(true);
     expect(await p2).toBe(true);
+  });
+
+  test('preApproveDomain makes requestApproval resolve immediately', async () => {
+    preApproveDomain('test-session', 'registry.npmjs.org');
+
+    expect(isDomainApproved('test-session', 'registry.npmjs.org')).toBe(true);
+    const result = await requestApproval('test-session', 'registry.npmjs.org');
+    expect(result).toBe(true);
+  });
+
+  test('preApproveDomain clears stale denial', async () => {
+    // Deny first
+    const p = requestApproval('test-session', 'evil.com');
+    resolveApproval('test-session', 'evil.com', false);
+    await p;
+    expect(isDomainDenied('test-session', 'evil.com')).toBe(true);
+
+    // Pre-approve overrides the denial
+    preApproveDomain('test-session', 'evil.com');
+    expect(isDomainApproved('test-session', 'evil.com')).toBe(true);
+    expect(isDomainDenied('test-session', 'evil.com')).toBe(false);
+  });
+
+  test('resolveApproval with host-process key matches k8s shared proxy', async () => {
+    // Simulate k8s: proxy blocks under 'host-process', agent resolves under 'host-process'
+    const p = requestApproval('host-process', 'pypi.org');
+    const found = resolveApproval('host-process', 'pypi.org', true);
+    expect(found).toBe(true);
+    expect(await p).toBe(true);
+    cleanupSession('host-process');
   });
 });

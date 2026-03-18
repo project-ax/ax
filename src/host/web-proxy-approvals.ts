@@ -122,6 +122,20 @@ export function resolveApproval(sessionId: string, domain: string, approved: boo
 }
 
 /**
+ * Pre-approve a domain so future proxy requests skip the onApprove callback.
+ * Called from the web_proxy_approve IPC handler when the agent grants access
+ * before running a command that needs it (e.g. npm install).
+ */
+export function preApproveDomain(sessionId: string, domain: string): void {
+  let set = approvedCache.get(sessionId);
+  if (!set) { set = new Set(); approvedCache.set(sessionId, set); }
+  set.add(domain);
+  // Clear any stale denial
+  deniedCache.get(sessionId)?.delete(domain);
+  logger.debug('domain_preapproved', { sessionId, domain });
+}
+
+/**
  * Clean up all approval state for a session. Call when the session ends.
  */
 export function cleanupSession(sessionId: string): void {
