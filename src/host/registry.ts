@@ -64,15 +64,10 @@ export async function loadProviders(config: Config, opts?: LoadProvidersOptions)
   const storageMod = await import(storageModPath);
   const storage = await storageMod.create(config, config.providers.storage, { database });
 
-  // Load screener first so it can be injected into the skills provider
+  // Load screener for workspace release screening
   const screener = config.providers.screener
     ? await loadProvider('screener', config.providers.screener, config)
     : undefined;
-
-  // Load skills provider, passing screener and storage as options
-  const skillsModulePath = resolveProviderPath('skills', config.providers.skills);
-  const skillsMod = await import(skillsModulePath);
-  const skills = await skillsMod.create(config, config.providers.skills, { screener, storage });
 
   // Load eventbus provider BEFORE memory and scheduler — both consume it.
   const eventbus = await loadProvider('eventbus', config.providers.eventbus, config);
@@ -87,8 +82,13 @@ export async function loadProviders(config: Config, opts?: LoadProvidersOptions)
   const auditMod = await import(auditModPath);
   const audit = await auditMod.create(config, config.providers.audit, { database });
 
-  // Load workspace provider (default: none = no-op stub)
-  const workspace = await loadProvider('workspace', config.providers.workspace, config);
+  // Load workspace provider with skill screening hook (default: none = no-op stub)
+  const { createCommitScreener } = await import('./workspace-release-screener.js');
+  const wsModPath = resolveProviderPath('workspace', config.providers.workspace);
+  const wsMod = await import(wsModPath);
+  const workspace = await wsMod.create(config, config.providers.workspace, {
+    screenCommit: createCommitScreener(screener, audit),
+  });
 
   const registry: ProviderRegistry = {
     llm:         tracedLlm,
@@ -99,7 +99,6 @@ export async function loadProviders(config: Config, opts?: LoadProvidersOptions)
     web:         await loadProvider('web', config.providers.web, config),
     browser:     await loadProvider('browser', config.providers.browser, config),
     credentials,
-    skills,
     audit,
     sandbox:     await loadProvider('sandbox', config.providers.sandbox, config),
     scheduler:   await loadScheduler(config, database, eventbus),

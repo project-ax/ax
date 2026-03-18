@@ -330,7 +330,7 @@ export function createGcsBackend(bucket: GcsBucketLike, basePath: string, prefix
  * The @google-cloud/storage SDK handles authentication via Application Default
  * Credentials (GKE workload identity, GOOGLE_APPLICATION_CREDENTIALS, etc.).
  */
-export async function create(config: Config): Promise<WorkspaceProvider> {
+export async function create(config: Config, _name?: string, deps?: { screenCommit?: import('./shared.js').CommitScreener }): Promise<WorkspaceProvider> {
   // Validate GCS credentials are available before attempting to connect.
   // In k8s, the credentials file is mounted from a Secret volume — if the
   // Secret is missing (optional: true), the file won't exist and the GCS SDK
@@ -402,6 +402,7 @@ export async function create(config: Config): Promise<WorkspaceProvider> {
       ignorePatterns: wsConfig?.ignorePatterns,
     },
     agentId,
+    screenCommit: deps?.screenCommit,
   });
 
   // In k8s mode, expose setRemoteChanges so the host can store file changes

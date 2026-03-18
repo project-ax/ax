@@ -14,6 +14,7 @@ import type {
   CommitResult,
   ScopeCommitResult,
   FileChange,
+  FileRejection,
 } from './types.js';
 
 // ═══════════════════════════════════════════════════════
@@ -39,11 +40,20 @@ function scopeId(scope: WorkspaceScope, ctx: ScopeContext): string {
 // Orchestrator
 // ═══════════════════════════════════════════════════════
 
+/** Callback for screening changes before commit. Returns accepted/rejected split. */
+export type CommitScreener = (
+  sessionId: string,
+  scope: WorkspaceScope,
+  changes: FileChange[],
+) => Promise<{ accepted: FileChange[]; rejections: FileRejection[] }>;
+
 export interface OrchestratorOptions {
   backend: WorkspaceBackend;
   scanner: ScannerProvider;
   config: Partial<WorkspaceConfig>;
   agentId: string;
+  /** Optional pre-commit screener for skill files and binaries. */
+  screenCommit?: CommitScreener;
 }
 
 /**
@@ -124,15 +134,35 @@ export function createOrchestrator(opts: OrchestratorOptions): WorkspaceProvider
           continue;
         }
 
-        // Persist all changes directly — no filtering or scanning.
-        await backend.commit(scope, id, changes);
+        // Screen changes if a screener is configured (skill files + binary size limits).
+        let changesToCommit = changes;
+        let rejections: FileRejection[] | undefined;
 
-        const bytesChanged = changes.reduce((sum, c) => sum + c.size, 0);
+        if (opts.screenCommit) {
+          const result = await opts.screenCommit(sessionId, scope, changes);
+          changesToCommit = result.accepted;
+          rejections = result.rejections.length > 0 ? result.rejections : undefined;
+        }
+
+        if (changesToCommit.length === 0) {
+          scopes[scope] = {
+            status: rejections?.length ? 'rejected' : 'empty',
+            filesChanged: 0,
+            bytesChanged: 0,
+            rejections,
+          };
+          continue;
+        }
+
+        await backend.commit(scope, id, changesToCommit);
+
+        const bytesChanged = changesToCommit.reduce((sum, c) => sum + c.size, 0);
 
         scopes[scope] = {
           status: 'committed',
-          filesChanged: changes.length,
+          filesChanged: changesToCommit.length,
           bytesChanged,
+          ...(rejections ? { rejections } : {}),
         };
       }
 

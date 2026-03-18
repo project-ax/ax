@@ -359,6 +359,99 @@ describe('workspace/shared orchestrator', () => {
     });
   });
 
+  // ── Commit screening ──
+
+  describe('commit screening (screenCommit hook)', () => {
+    test('screenCommit filters changes before backend.commit', async () => {
+      const skillChange = textChange('skills/evil.md', '# Evil skill');
+      const safeChange = textChange('notes.txt', 'hello');
+      const changes = [skillChange, safeChange];
+
+      backend = createMockBackend({ diff: vi.fn(async () => changes) });
+
+      const screenCommit = vi.fn(async (_sid: string, _scope: string, ch: FileChange[]) => ({
+        accepted: ch.filter(c => !c.path.includes('evil')),
+        rejections: ch.filter(c => c.path.includes('evil')).map(c => ({ path: c.path, reason: 'Skill screening failed' })),
+      }));
+
+      const provider = createOrchestrator({
+        backend, scanner, config: {}, agentId: AGENT_ID, screenCommit,
+      });
+
+      await provider.mount('s1', ['agent']);
+      const result = await provider.commit('s1');
+
+      const scope = result.scopes.agent!;
+      expect(scope.status).toBe('committed');
+      expect(scope.filesChanged).toBe(1);
+      expect(scope.rejections).toHaveLength(1);
+      expect(scope.rejections![0].path).toBe('skills/evil.md');
+      // Backend should only receive the safe change
+      expect(backend.commit).toHaveBeenCalledWith('agent', AGENT_ID, [safeChange]);
+    });
+
+    test('all changes rejected results in status rejected', async () => {
+      const changes = [textChange('skills/evil.md', 'bad content')];
+
+      backend = createMockBackend({ diff: vi.fn(async () => changes) });
+
+      const screenCommit = vi.fn(async () => ({
+        accepted: [] as FileChange[],
+        rejections: [{ path: 'skills/evil.md', reason: 'rejected' }],
+      }));
+
+      const provider = createOrchestrator({
+        backend, scanner, config: {}, agentId: AGENT_ID, screenCommit,
+      });
+
+      await provider.mount('s1', ['agent']);
+      const result = await provider.commit('s1');
+
+      const scope = result.scopes.agent!;
+      expect(scope.status).toBe('rejected');
+      expect(scope.filesChanged).toBe(0);
+      expect(scope.rejections).toHaveLength(1);
+      // Backend.commit should NOT be called when all changes are rejected
+      expect(backend.commit).not.toHaveBeenCalled();
+    });
+
+    test('screenCommit receives correct sessionId and scope', async () => {
+      const changes = [textChange('file.ts', 'code')];
+      backend = createMockBackend({ diff: vi.fn(async () => changes) });
+
+      const screenCommit = vi.fn(async (_sid: string, _scope: string, ch: FileChange[]) => ({
+        accepted: ch,
+        rejections: [],
+      }));
+
+      const provider = createOrchestrator({
+        backend, scanner, config: {}, agentId: AGENT_ID, screenCommit,
+      });
+
+      await provider.mount('s1', ['user'], { userId: 'alice' });
+      await provider.commit('s1');
+
+      expect(screenCommit).toHaveBeenCalledWith('s1', 'user', changes);
+    });
+
+    test('no screenCommit means all changes pass through (backward compat)', async () => {
+      const changes = [textChange('skills/anything.md', 'some content')];
+      backend = createMockBackend({ diff: vi.fn(async () => changes) });
+
+      const provider = createOrchestrator({
+        backend, scanner, config: {}, agentId: AGENT_ID,
+        // No screenCommit
+      });
+
+      await provider.mount('s1', ['agent']);
+      const result = await provider.commit('s1');
+
+      expect(result.scopes.agent!.status).toBe('committed');
+      expect(result.scopes.agent!.filesChanged).toBe(1);
+      expect(backend.commit).toHaveBeenCalledWith('agent', AGENT_ID, changes);
+    });
+  });
+
   // ── Cleanup ──
 
   describe('cleanup', () => {
