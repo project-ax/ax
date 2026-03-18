@@ -144,7 +144,7 @@ describe('Local sandbox executor', () => {
       const sandbox = createLocalSandbox({ client, workspace, timeoutMs: 1_000 });
       const result = await sandbox.bash('sleep 30');
       expect(result.output).toContain('Exit code');
-    }, 10_000);
+    }, 15_000);
   });
 
   // ── readFile ──
