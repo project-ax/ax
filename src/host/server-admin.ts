@@ -16,6 +16,8 @@ import { sendError, readBody } from './server-http.js';
 import type { Config, ProviderRegistry } from '../types.js';
 import type { EventBus, StreamEvent } from './event-bus.js';
 import type { AgentRegistry } from './agent-registry.js';
+import { resolveApproval, preApproveDomain } from './web-proxy-approvals.js';
+import { parseAgentSkill } from '../utils/skill-format-parser.js';
 import { getLogger } from '../logger.js';
 import { configPath as getConfigPath } from '../paths.js';
 
@@ -261,12 +263,37 @@ async function handleAdminAPI(
     return;
   }
 
-  // GET /admin/api/agents/:id/skills — list skills
-  // Skills are now filesystem-based (in agent/skills/ and user/skills/ workspace directories).
-  // The admin API no longer provides centralized skill listing.
-  const skillsListMatch = pathname.match(/^\/admin\/api\/agents\/([^/]+)\/skills/);
+  // GET /admin/api/agents/:id/skills/:name — read a single skill's content
+  const skillContentMatch = pathname.match(/^\/admin\/api\/agents\/([^/]+)\/skills\/([^/]+)$/);
+  if (skillContentMatch && method === 'GET') {
+    const id = decodeURIComponent(skillContentMatch[1]);
+    const skillName = decodeURIComponent(skillContentMatch[2]);
+    const agent = await agentRegistry.get(id);
+    if (!agent) { sendError(res, 404, 'Agent not found'); return; }
+    try {
+      const content = await findSkillContent(providers, id, skillName);
+      if (!content) { sendError(res, 404, 'Skill not found'); return; }
+      sendJSON(res, content);
+    } catch (err) {
+      logger.error('admin_skill_content_failed', { agentId: id, skill: skillName, error: (err as Error).message });
+      sendError(res, 500, `Failed to read skill: ${(err as Error).message}`);
+    }
+    return;
+  }
+
+  // GET /admin/api/agents/:id/skills — list skills from workspace directories
+  const skillsListMatch = pathname.match(/^\/admin\/api\/agents\/([^/]+)\/skills$/);
   if (skillsListMatch && method === 'GET') {
-    sendJSON(res, { message: 'Skills are now filesystem-based in workspace directories' });
+    const id = decodeURIComponent(skillsListMatch[1]);
+    const agent = await agentRegistry.get(id);
+    if (!agent) { sendError(res, 404, 'Agent not found'); return; }
+    try {
+      const skills = await listWorkspaceSkills(providers, id);
+      sendJSON(res, skills);
+    } catch (err) {
+      logger.error('admin_skills_list_failed', { agentId: id, error: (err as Error).message });
+      sendError(res, 500, `Failed to list skills: ${(err as Error).message}`);
+    }
     return;
   }
 
@@ -339,6 +366,26 @@ async function handleAdminAPI(
     return;
   }
 
+  // POST /admin/api/proxy/approve — approve or deny a pending web proxy domain
+  if (pathname === '/admin/api/proxy/approve' && method === 'POST') {
+    try {
+      const body = JSON.parse(await readBody(req));
+      const { sessionId, domain, approved } = body;
+      if (!sessionId || !domain || typeof approved !== 'boolean') {
+        sendError(res, 400, 'Missing required fields: sessionId, domain, approved');
+        return;
+      }
+      const found = resolveApproval(sessionId, domain, approved);
+      if (approved) {
+        preApproveDomain(sessionId, domain);
+      }
+      sendJSON(res, { ok: true, found });
+    } catch (err) {
+      sendError(res, 400, `Invalid request: ${(err as Error).message}`);
+    }
+    return;
+  }
+
   // GET /admin/api/events — SSE stream
   if (pathname.startsWith('/admin/api/events') && method === 'GET') {
     handleAdminSSE(req, res, deps);
@@ -346,6 +393,65 @@ async function handleAdminAPI(
   }
 
   sendError(res, 404, 'Not found');
+}
+
+// ── Workspace Skills Helpers ──
+
+/** List skills from workspace directories (agent + user scopes). */
+async function listWorkspaceSkills(
+  providers: ProviderRegistry,
+  agentId: string,
+): Promise<Array<{ name: string; description?: string; path: string }>> {
+  const skills: Array<{ name: string; description?: string; path: string }> = [];
+
+  for (const scope of ['agent', 'user'] as const) {
+    if (!providers.workspace.downloadScope) continue;
+    try {
+      const files = await providers.workspace.downloadScope(scope, agentId);
+      for (const f of files) {
+        if (!/^skills\/.*\.md$/i.test(f.path)) continue;
+        const content = f.content.toString('utf-8');
+        const parsed = parseAgentSkill(content);
+        const name = parsed.name || f.path.replace(/^skills\//, '').replace(/\.md$/i, '');
+        skills.push({
+          name,
+          description: parsed.description,
+          path: `${scope}/${f.path}`,
+        });
+      }
+    } catch {
+      // Scope not mounted or not available — skip silently
+    }
+  }
+
+  return skills;
+}
+
+/** Find and return a single skill's content by name. */
+async function findSkillContent(
+  providers: ProviderRegistry,
+  agentId: string,
+  skillName: string,
+): Promise<{ name: string; content: string } | undefined> {
+  // Search user scope first (user shadows agent)
+  for (const scope of ['user', 'agent'] as const) {
+    if (!providers.workspace.downloadScope) continue;
+    try {
+      const files = await providers.workspace.downloadScope(scope, agentId);
+      for (const f of files) {
+        if (!/^skills\/.*\.md$/i.test(f.path)) continue;
+        const content = f.content.toString('utf-8');
+        const parsed = parseAgentSkill(content);
+        const name = parsed.name || f.path.replace(/^skills\//, '').replace(/\.md$/i, '');
+        if (name === skillName) {
+          return { name, content };
+        }
+      }
+    } catch {
+      // Scope not mounted or not available — skip
+    }
+  }
+  return undefined;
 }
 
 // ── SSE Event Stream ──

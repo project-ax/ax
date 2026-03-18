@@ -58,23 +58,30 @@ describe('SkillsModule', () => {
     expect(mod.priority).toBe(70);
   });
 
-  test('includes filesystem-based skill creation instructions', () => {
+  test('includes filesystem-based skill creation instructions when writable', () => {
     const mod = new SkillsModule();
-    const ctx = makeContext({ skills: [makeSkill('Test Skill', 'Do stuff')] });
+    const ctx = makeContext({ skills: [makeSkill('Test Skill', 'Do stuff')], userWorkspaceWritable: true });
     const rendered = mod.render(ctx).join('\n');
     expect(rendered).toContain('./user/skills/');
   });
 
-  test('includes next-session hint', () => {
+  test('omits skill creation when user workspace is not writable', () => {
     const mod = new SkillsModule();
     const ctx = makeContext({ skills: [makeSkill('Test Skill', 'Do stuff')] });
+    const rendered = mod.render(ctx).join('\n');
+    expect(rendered).not.toContain('Creating Skills');
+  });
+
+  test('includes next-session hint when writable', () => {
+    const mod = new SkillsModule();
+    const ctx = makeContext({ skills: [makeSkill('Test Skill', 'Do stuff')], userWorkspaceWritable: true });
     const rendered = mod.render(ctx).join('\n');
     expect(rendered).toContain('next session');
   });
 
-  test('includes creating skills section', () => {
+  test('includes creating skills section when writable', () => {
     const mod = new SkillsModule();
-    const ctx = makeContext({ skills: [makeSkill('Test Skill', 'Do stuff')] });
+    const ctx = makeContext({ skills: [makeSkill('Test Skill', 'Do stuff')], userWorkspaceWritable: true });
     const rendered = mod.render(ctx).join('\n');
     expect(rendered).toContain('Creating Skills');
   });

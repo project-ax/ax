@@ -10,6 +10,8 @@
 import { parseAgentSkill } from '../utils/skill-format-parser.js';
 import type { AuditProvider } from '../providers/audit/types.js';
 import type { SkillScreenerProvider } from '../providers/screener/types.js';
+import type { FileChange, FileRejection, WorkspaceScope } from '../providers/workspace/types.js';
+import type { CommitScreener } from '../providers/workspace/shared.js';
 
 const DEFAULT_MAX_BINARY_SIZE = 100 * 1024 * 1024; // 100MB
 
@@ -82,4 +84,31 @@ export async function screenReleaseChanges(
   }
 
   return { accepted, rejected };
+}
+
+/**
+ * Create a CommitScreener callback for the workspace orchestrator.
+ * Returns undefined when no screener or audit provider is available
+ * (workspace commits proceed without screening in that case).
+ */
+export function createCommitScreener(
+  screener?: SkillScreenerProvider,
+  audit?: AuditProvider,
+): CommitScreener | undefined {
+  if (!screener || !audit) return undefined;
+
+  return async (
+    sessionId: string,
+    scope: WorkspaceScope,
+    changes: FileChange[],
+  ): Promise<{ accepted: FileChange[]; rejections: FileRejection[] }> => {
+    const wsChanges: WorkspaceChange[] = changes.map(c => ({ ...c, scope }));
+    const result = await screenReleaseChanges(wsChanges, { screener, audit, sessionId });
+    return {
+      accepted: result.accepted.map(a => ({
+        path: a.path, type: a.type, content: a.content, size: a.size,
+      })),
+      rejections: result.rejected.map(r => ({ path: r.path, reason: r.reason })),
+    };
+  };
 }

@@ -56,22 +56,24 @@ export class SkillsModule extends BasePromptModule {
       );
     }
 
-    lines.push(
-      '',
-      '### Creating Skills',
-      '',
-      'Create new skills by writing markdown files directly to `./user/skills/`.',
-      'File-based: `./user/skills/my-skill.md`',
-      'Directory-based: `./user/skills/my-skill/SKILL.md`',
-      '',
-      '**When to create a skill:**',
-      '- You notice a recurring multi-step pattern in your work',
-      '- The user asks you to remember a workflow for future sessions',
-      '- You need domain-specific knowledge packaged for reuse',
-      '',
-      '**After creating a skill:** Continue working on your current task.',
-      'The skill appears in your list on the next session.',
-    );
+    if (ctx.userWorkspaceWritable) {
+      lines.push(
+        '',
+        '### Creating Skills',
+        '',
+        'Create new skills by writing markdown files directly to `./user/skills/`.',
+        'File-based: `./user/skills/my-skill.md`',
+        'Directory-based: `./user/skills/my-skill/SKILL.md`',
+        '',
+        '**When to create a skill:**',
+        '- You notice a recurring multi-step pattern in your work',
+        '- The user asks you to remember a workflow for future sessions',
+        '- You need domain-specific knowledge packaged for reuse',
+        '',
+        '**After creating a skill:** Continue working on your current task.',
+        'The skill appears in your list on the next session.',
+      );
+    }
 
     return lines;
   }

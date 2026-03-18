@@ -426,18 +426,16 @@ describe('GET /admin/api/agents/:id/skills', () => {
 
   afterEach(() => { server.close(); });
 
-  it('returns filesystem-based skills message', async () => {
+  it('returns empty skill list when workspace has no downloadScope', async () => {
     const res = await fetchAdmin(port, '/admin/api/agents/main/skills', { token: 'test-secret-token' });
     expect(res.status).toBe(200);
-    const data = res.body as { message: string };
-    expect(data.message).toContain('filesystem-based');
+    const data = res.body as Array<{ name: string }>;
+    expect(data).toEqual([]);
   });
 
-  it('returns same message for any agent (filesystem-based)', async () => {
+  it('returns 404 for unknown agent', async () => {
     const res = await fetchAdmin(port, '/admin/api/agents/nonexistent/skills', { token: 'test-secret-token' });
-    expect(res.status).toBe(200);
-    const data = res.body as { message: string };
-    expect(data.message).toContain('filesystem-based');
+    expect(res.status).toBe(404);
   });
 });
 
@@ -521,11 +519,11 @@ describe('tab endpoints handle provider errors gracefully', () => {
     expect(body.error.message).toContain('database connection lost');
   });
 
-  it('skills endpoint returns 200 with filesystem message (no provider dependency)', async () => {
+  it('skills endpoint returns empty list when workspace has no downloadScope', async () => {
     const res = await fetchAdmin(port, '/admin/api/agents/main/skills', { token: 'test-secret-token' });
     expect(res.status).toBe(200);
-    const data = res.body as { message: string };
-    expect(data.message).toContain('filesystem-based');
+    const data = res.body as Array<{ name: string }>;
+    expect(data).toEqual([]);
   });
 
   it('workspace endpoint returns 500 with specific error when provider fails', async () => {

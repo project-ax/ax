@@ -82,8 +82,13 @@ export async function loadProviders(config: Config, opts?: LoadProvidersOptions)
   const auditMod = await import(auditModPath);
   const audit = await auditMod.create(config, config.providers.audit, { database });
 
-  // Load workspace provider (default: none = no-op stub)
-  const workspace = await loadProvider('workspace', config.providers.workspace, config);
+  // Load workspace provider with skill screening hook (default: none = no-op stub)
+  const { createCommitScreener } = await import('./workspace-release-screener.js');
+  const wsModPath = resolveProviderPath('workspace', config.providers.workspace);
+  const wsMod = await import(wsModPath);
+  const workspace = await wsMod.create(config, config.providers.workspace, {
+    screenCommit: createCommitScreener(screener, audit),
+  });
 
   const registry: ProviderRegistry = {
     llm:         tracedLlm,

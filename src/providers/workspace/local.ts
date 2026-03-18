@@ -175,7 +175,7 @@ function createLocalBackend(basePath: string): WorkspaceBackend {
  * The scanner is resolved lazily — it must be available by the time
  * commit() is called.
  */
-export async function create(config: Config): Promise<WorkspaceProvider> {
+export async function create(config: Config, _name?: string, deps?: { screenCommit?: import('./shared.js').CommitScreener }): Promise<WorkspaceProvider> {
   // Resolve workspace config with defaults
   const wsConfig = (config as unknown as Record<string, unknown>).workspace as
     | Partial<{ basePath: string; maxFileSize: number; maxFiles: number; maxCommitSize: number; ignorePatterns: string[] }>
@@ -210,6 +210,7 @@ export async function create(config: Config): Promise<WorkspaceProvider> {
       ignorePatterns: wsConfig?.ignorePatterns,
     },
     agentId,
+    screenCommit: deps?.screenCommit,
   });
 
   provider.listFiles = async (scope, id) => {
