@@ -4,6 +4,8 @@ Infrastructure, deployment, Helm, k8s, FluxCD entries.
 
 ## Entries
 
+- K8s dev loop: extraVolumes in PodTemplate, Helm chart updates, kind-dev-values.yaml, k8s-dev.sh script [k8s-dev-loop.md](k8s-dev-loop.md)
+
 - Runner IS the standby: remove sleep hack, runner.js subscribes to NATS for work [pool-controller-nats.md](pool-controller-nats.md)
 - Warm sandbox pool claiming: claim pre-warmed pods via label patching + k8s Exec API [warm-pool-claiming.md](warm-pool-claiming.md)
 - Merge agent-runtime into host + NATS auth: 2→3 pod architecture, capability tokens, static users [host-merge-nats-auth.md](host-merge-nats-auth.md)
