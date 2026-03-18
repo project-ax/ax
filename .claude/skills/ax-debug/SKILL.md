@@ -1,29 +1,129 @@
 ---
 name: ax-debug
-description: Use when debugging k8s-related issues, NATS IPC problems, HTTP IPC problems, workspace release failures, or any issue in the sandbox/host/agent communication pipeline — runs the full k8s code path locally with debuggable processes
+description: Use when debugging k8s-related issues, NATS IPC problems, HTTP IPC problems, workspace release failures, or any issue in the sandbox/host/agent communication pipeline — runs the full k8s code path in a local kind cluster with hot-reload via host volume mounts, or locally with debuggable processes
 ---
 
 ## Overview
 
-Debug the full k8s code path (NATS or HTTP IPC, workspace release via HTTP staging, work delivery) using local processes instead of real k8s pods. Uses the `nats-subprocess` sandbox provider to spawn debuggable child processes with NATS environment.
+Two debugging modes, depending on fidelity needed:
 
-Two transport modes are available:
-- **NATS IPC** (`run-nats-local.ts`): Agent uses `NATSIPCClient` — IPC calls go via NATS request/reply
-- **HTTP IPC** (`run-http-local.ts`): Agent uses `HttpIPCClient` — IPC calls go via HTTP POST to `/internal/ipc`, NATS only for work delivery
+1. **Kind cluster** (`scripts/k8s-dev.sh`) — Real k8s pods with host volume mounts for ~5s iteration. Use this for production-parity debugging.
+2. **Local processes** (`run-http-local.ts` / `run-nats-local.ts`) — Spawns child processes with NATS env. Use this when you don't need real k8s (simpler, faster startup).
 
-**HTTP IPC is the production path for k8s.** Use `run-http-local.ts` for debugging real k8s issues.
+## Kind Cluster Dev Loop (recommended)
 
-## Prerequisites
+Uses host volume mounts so `dist/`, `templates/`, and `skills/` are shared directly into kind pods. After `tsc`, changes are instantly visible — just restart node processes (not pods).
+
+```
+edit code → tsc (~2s) → flush (~3s) → test → read logs → fix → repeat
+```
+
+### Prerequisites
 
 ```bash
-# Install NATS server (one-time)
-brew install nats-server
+# One-time installs
+brew install kind helm kubectl
+brew install postgresql  # for db commands
+# Docker must be running
+# ANTHROPIC_API_KEY must be set
+```
 
-# Build AX
+### Setup (one-time, ~3-5min)
+
+```bash
+npm run k8s:dev setup
+```
+
+This generates a kind config with volume mounts from `$(pwd)`, creates the cluster, builds, loads the Docker image, creates secrets, and installs the Helm chart with dev values.
+
+### Iteration Commands
+
+| Command | What it does | Time |
+|---|---|---|
+| `npm run k8s:dev build` | `tsc` only | ~2s |
+| `npm run k8s:dev flush` | Delete sandbox pods (pool controller recreates from mount) | ~3-5s |
+| `npm run k8s:dev flush all` | Above + restart host/pool-controller node processes | ~3-5s |
+| `npm run k8s:dev cycle` | build + flush | ~5-7s |
+| `npm run k8s:dev cycle all` | build + flush all | ~5-7s |
+| `npm run k8s:dev test "<msg>"` | curl POST to chat completions endpoint | varies |
+| `npm run k8s:dev logs [component]` | Tail logs — all, host, sandbox, or pool-controller | streaming |
+| `npm run k8s:dev status` | Pod status + warm pool count | instant |
+| `npm run k8s:dev teardown` | Delete kind cluster | ~10s |
+
+### Autonomous Debug Loop
+
+Claude Code can drive this loop without human intervention:
+
+```
+1. npm run k8s:dev logs sandbox        # Read error logs
+2. Edit source file to fix the issue
+3. npm run k8s:dev cycle               # build + flush (~5-7s)
+4. npm run k8s:dev test "repro msg"    # Send test request
+5. npm run k8s:dev logs sandbox        # Check if fix worked
+6. If still broken, go to 2
+```
+
+For host-side issues, replace `cycle` with `cycle all` and `logs sandbox` with `logs host`.
+
+### Debugging in Kind
+
+#### Attach debugger to sandbox pod
+
+```bash
+npm run k8s:dev debug sandbox
+```
+
+Sets a debug flag on the sandbox template ConfigMap → next sandbox pod starts with `--inspect-brk=0.0.0.0:9230` → script watches for pod → port-forwards 9230 → prints "attach debugger now". Attach Chrome DevTools (`chrome://inspect`) or VS Code. Send a test request — that pod claims the work and pauses at startup.
+
+#### Attach debugger to host pod
+
+```bash
+npm run k8s:dev debug host
+```
+
+Port-forwards localhost:9229 to the host pod (already running `--inspect=0.0.0.0:9229`).
+
+#### Database access
+
+```bash
+npm run k8s:dev db                  # Interactive psql session
+npm run k8s:dev db "SELECT ..."     # Run single SQL query
+npm run k8s:dev db reset            # Drop and recreate database
+```
+
+### Volume Mount Chain
+
+```
+Host filesystem (dist/, templates/, skills/)
+  ↓ kind extraMounts
+Kind node (/ax-dev/dist, /ax-dev/templates, /ax-dev/skills)
+  ↓ hostPath volumes
+Pod containers (/opt/ax/dist, /opt/ax/templates, /opt/ax/skills)
+```
+
+The base Docker image still provides Node.js, `node_modules/`, and OS packages. You only rebuild Docker when `package.json` dependencies change.
+
+### Kind Dev Files
+
+- `scripts/k8s-dev.sh` — Main entry-point script with all subcommands
+- `charts/ax/kind-dev-values.yaml` — Dev Helm values overlay with hostPath mounts and `--inspect` flags
+
+## Local Process Debugging (alternative)
+
+For issues that don't require real k8s (IPC protocol, LLM proxy, workspace release logic), use the local harnesses. Simpler setup, faster startup.
+
+Two transport modes:
+- **HTTP IPC** (`run-http-local.ts`): Production k8s path — IPC via HTTP POST to `/internal/ipc`
+- **NATS IPC** (`run-nats-local.ts`): Legacy path — IPC via NATS request/reply
+
+### Prerequisites
+
+```bash
+brew install nats-server
 npm run build
 ```
 
-## Quick Start — HTTP IPC (recommended for k8s debugging)
+### Quick Start — HTTP IPC (recommended)
 
 ```bash
 # Terminal 1: Start NATS
@@ -47,7 +147,7 @@ The HTTP IPC harness replicates the full host-process.ts k8s route surface:
 - `workspace_release` IPC intercept (for legacy staging path)
 - `agent_response` IPC intercept to collect the agent reply
 
-## Quick Start — NATS IPC
+### Quick Start — NATS IPC
 
 ```bash
 # Terminal 1: Start NATS
@@ -62,11 +162,11 @@ curl -X POST http://localhost:8080/v1/chat/completions \
   -d '{"model":"default","messages":[{"role":"user","content":"hello"}]}'
 ```
 
-## Debugging Techniques
+### Local Debugging Techniques
 
-### Add console.log to agent or host
+#### Add console.log to agent or host
 
-Edit source files directly -- the harness runs via `tsx` so changes are picked up on restart. Agent stdout/stderr is piped to the parent terminal.
+Edit source files directly — the harness runs via `tsx` so changes are picked up on restart. Agent stdout/stderr is piped to the parent terminal.
 
 Key files to instrument:
 
@@ -86,7 +186,7 @@ Key files to instrument:
 | Workspace release (agent) | `src/agent/workspace-release.ts` | `releaseWorkspaceScopes()` |
 | Workspace CLI (agent) | `src/agent/workspace-cli.ts` | `provision`, `cleanup`, `release` commands |
 
-### Attach Node debugger to agent process
+#### Attach Node debugger to agent process
 
 ```bash
 AX_DEBUG_AGENT=1 npx tsx tests/providers/sandbox/run-http-local.ts
@@ -94,13 +194,13 @@ AX_DEBUG_AGENT=1 npx tsx tests/providers/sandbox/run-http-local.ts
 
 Agent spawns with `--inspect-brk`. Attach Chrome DevTools (`chrome://inspect`) or VS Code debugger. The agent pauses at startup so you can set breakpoints before it processes work.
 
-### Attach Node debugger to host process
+#### Attach Node debugger to host process
 
 ```bash
 node --inspect -e "import('./tests/providers/sandbox/run-http-local.ts')"
 ```
 
-### Monitor NATS traffic
+#### Monitor NATS traffic
 
 ```bash
 # Install NATS CLI (one-time)
@@ -113,7 +213,7 @@ nats sub ">"
 nats sub "sandbox.work"
 ```
 
-### Environment variables
+### Local Environment Variables
 
 | Env var | Default | Purpose |
 |---|---|---|
@@ -126,7 +226,7 @@ nats sub "sandbox.work"
 
 ## Message Flow
 
-### HTTP IPC mode (run-http-local.ts) — production k8s path
+### HTTP IPC mode (production k8s path)
 
 ```
 1. Host spawns local process with AX_IPC_TRANSPORT=http
@@ -145,7 +245,7 @@ nats sub "sandbox.work"
 11. Host resolves agentResponsePromise, returns to caller
 ```
 
-### NATS IPC mode (run-nats-local.ts) — legacy path
+### NATS IPC mode (legacy path)
 
 ```
 1. Host spawns local process with AX_IPC_TRANSPORT=nats
@@ -198,13 +298,13 @@ nats sub "sandbox.work"
 1. Check if agent process started: look for `[run-http-local] Work claimed by:` in host logs
 2. Check if agent received work: look for NATS subscribe/reply in agent stderr
 3. Check if runner crashes: look for stack traces in agent stderr
-4. Use `AX_DEBUG_AGENT=1` to attach debugger and see where agent hangs
+4. Use `AX_DEBUG_AGENT=1` (local) or `npm run k8s:dev debug sandbox` (kind) to attach debugger
 
 ## Common Issues
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `NATS connection refused` | nats-server not running | `nats-server` in separate terminal |
+| `NATS connection refused` | nats-server not running | `nats-server` (local) or check NATS pod (kind) |
 | Agent spawns but no work delivered | NATS subject mismatch | Check `POD_NAME` env matches `sandbox.work` queue |
 | LLM calls return 404 | Missing `/internal/llm-proxy` route | Use updated `run-http-local.ts` with LLM proxy route |
 | LLM calls return 401 | Token not in `activeTokens` | Check `AX_IPC_TOKEN` passed to agent matches host registry |
@@ -214,54 +314,21 @@ nats sub "sandbox.work"
 | Agent hangs after spawning | Waiting for NATS work | Check host actually published to `sandbox.work` |
 | `agent_response timeout` | Agent crashed or never responded | Check agent stderr for errors |
 | IPC calls timing out | Token mismatch | Check `AX_IPC_TOKEN` and `AX_IPC_REQUEST_ID` match between host and agent |
+| Kind pods not picking up changes | Volume mounts not working | Verify `npm run k8s:dev status`, check `kind get nodes` has mounts |
+| Pod restart loop after flush | Code error in dist/ | Check `npm run k8s:dev logs sandbox` for stack trace, fix, `cycle` again |
 
 ## Key Files
 
-- `tests/providers/sandbox/nats-subprocess.ts` -- The sandbox provider (spawns local processes with NATS env, supports `ipcTransport: 'http'` option)
-- `tests/providers/sandbox/run-http-local.ts` -- Test harness for HTTP IPC mode (full host route surface: IPC, LLM proxy, workspace release/staging)
-- `tests/providers/sandbox/run-nats-local.ts` -- Test harness for NATS IPC mode (starts AX host with nats-subprocess)
-- `src/host/host-process.ts` -- Host-side k8s orchestration (`processCompletionWithNATS`, `activeTokens`, all `/internal/*` routes)
-- `src/host/llm-proxy-core.ts` -- LLM credential injection and streaming proxy (shared by socket proxy and HTTP route)
-- `src/agent/runner.ts` -- Agent entry point, transport selection (`AX_IPC_TRANSPORT`), NATS work reception
-- `src/agent/http-ipc-client.ts` -- Agent-side HTTP IPC client (POST to `/internal/ipc`)
-- `src/agent/runners/claude-code.ts` -- claude-code runner (sets `ANTHROPIC_BASE_URL` to host LLM proxy)
-- `src/agent/workspace-release.ts` -- Agent-side workspace file upload
-- `src/host/ipc-handlers/identity.ts` -- Identity read/write handler (queuing logic, taint gates)
-- `tests/agent/http-ipc-client.test.ts` -- Unit tests for HttpIPCClient
-
-## Fast Kind Cluster Dev Loop
-
-For iterating on code running in a real kind cluster (vs the local harnesses above):
-
-### One-time setup
-```bash
-npm run k8s:dev setup   # ~3-5 min — creates cluster, builds, deploys
-```
-
-### The fast loop
-```bash
-# Edit code, then:
-npm run k8s:dev cycle         # tsc + flush sandbox pods (~5-7s)
-npm run k8s:dev test "hello"  # send test request
-npm run k8s:dev logs sandbox  # check output
-
-# For host code changes:
-npm run k8s:dev cycle all     # also restarts host + pool-controller
-```
-
-### All commands
-| Command | What |
-|---|---|
-| `setup` | Create kind cluster + deploy AX |
-| `build` | tsc only |
-| `flush [all]` | Flush sandbox pods (or all) |
-| `cycle [all]` | build + flush |
-| `test "msg"` | Send chat completion request |
-| `logs [component]` | Tail logs (host/sandbox/pool-controller/all) |
-| `status` | Pod + warm pool status |
-| `debug host` | Port-forward host debugger (9229) |
-| `debug sandbox` | Enable --inspect-brk on next sandbox pod |
-| `db` | Interactive psql |
-| `db "query"` | Run SQL query |
-| `db reset` | Drop + recreate database |
-| `teardown` | Delete kind cluster |
+- `scripts/k8s-dev.sh` — Kind cluster dev loop entry point (setup, build, flush, cycle, test, logs, debug, db, teardown)
+- `charts/ax/kind-dev-values.yaml` — Dev Helm values overlay with hostPath mounts and `--inspect` flags
+- `tests/providers/sandbox/nats-subprocess.ts` — The sandbox provider (spawns local processes with NATS env, supports `ipcTransport: 'http'` option)
+- `tests/providers/sandbox/run-http-local.ts` — Test harness for HTTP IPC mode (full host route surface: IPC, LLM proxy, workspace release/staging)
+- `tests/providers/sandbox/run-nats-local.ts` — Test harness for NATS IPC mode (starts AX host with nats-subprocess)
+- `src/host/host-process.ts` — Host-side k8s orchestration (`processCompletionWithNATS`, `activeTokens`, all `/internal/*` routes)
+- `src/host/llm-proxy-core.ts` — LLM credential injection and streaming proxy (shared by socket proxy and HTTP route)
+- `src/agent/runner.ts` — Agent entry point, transport selection (`AX_IPC_TRANSPORT`), NATS work reception
+- `src/agent/http-ipc-client.ts` — Agent-side HTTP IPC client (POST to `/internal/ipc`)
+- `src/agent/runners/claude-code.ts` — claude-code runner (sets `ANTHROPIC_BASE_URL` to host LLM proxy)
+- `src/agent/workspace-release.ts` — Agent-side workspace file upload
+- `src/host/ipc-handlers/identity.ts` — Identity read/write handler (queuing logic, taint gates)
+- `tests/agent/http-ipc-client.test.ts` — Unit tests for HttpIPCClient
