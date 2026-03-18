@@ -1,5 +1,13 @@
 # Scheduler Provider Journal
 
+## [2026-03-17 20:50] — Fix async mismatch in plainjob scheduler (k8s job scheduling broken)
+
+**Task:** Scheduler not scheduling jobs in k8s
+**What I did:** Root-caused to async mismatch in plainjob.ts — `addCron`, `removeCron`, `listJobs`, and `scheduleOnce` were not awaiting `KyselyJobStore` async operations. `listJobs()` always returned `[]` because it checked `Array.isArray(Promise)`. Made all four methods async with proper `await`. Updated 41 tests to match.
+**Files touched:** `src/providers/scheduler/plainjob.ts`, `tests/providers/scheduler/plainjob.test.ts`
+**Outcome:** Success — 2409/2409 tests pass. Build clean.
+**Notes:** The `MemoryJobStore` (sync) masked the bug in tests. Only `KyselyJobStore` (async, used with PostgreSQL in k8s) was affected. The internal `checkCronJobs` function already awaited correctly, so jobs that DID get persisted would fire — but `addCron` was fire-and-forget meaning DB write failures were silently swallowed.
+
 ## [2026-03-03 15:23] — Execute plainjob scheduler acceptance tests
 
 **Task:** Run all 12 acceptance tests from `tests/acceptance/plainjob-scheduler/test-plan.md`

@@ -212,14 +212,14 @@ describe('scheduler-plainjob', () => {
   test('addCron and listJobs', async () => {
     const scheduler = await create(mockConfig, { jobStore: new MemoryJobStore() });
 
-    scheduler.addCron!({
+    await scheduler.addCron!({
       id: 'job-1',
       schedule: '*/5 * * * *',
       agentId: AGENT,
       prompt: 'Check for updates',
     });
 
-    const jobs = scheduler.listJobs!();
+    const jobs = await scheduler.listJobs!();
     expect(jobs).toHaveLength(1);
     expect(jobs[0].id).toBe('job-1');
     expect(jobs[0].prompt).toBe('Check for updates');
@@ -228,15 +228,15 @@ describe('scheduler-plainjob', () => {
   test('removeCron removes a job', async () => {
     const scheduler = await create(mockConfig, { jobStore: new MemoryJobStore() });
 
-    scheduler.addCron!({
+    await scheduler.addCron!({
       id: 'job-1',
       schedule: '*/5 * * * *',
       agentId: AGENT,
       prompt: 'Check for updates',
     });
 
-    scheduler.removeCron!('job-1');
-    expect(scheduler.listJobs!()).toHaveLength(0);
+    await scheduler.removeCron!('job-1');
+    expect(await scheduler.listJobs!()).toHaveLength(0);
   });
 
   // ─── Agent filtering ───────────────────────────────
@@ -244,10 +244,10 @@ describe('scheduler-plainjob', () => {
   test('listJobs only returns jobs for this agent', async () => {
     const scheduler = await create(mockConfig, { jobStore: new MemoryJobStore() });
 
-    scheduler.addCron!({ id: 'my-job', schedule: '* * * * *', agentId: AGENT, prompt: 'mine' });
-    scheduler.addCron!({ id: 'other-job', schedule: '* * * * *', agentId: 'other-agent', prompt: 'theirs' });
+    await scheduler.addCron!({ id: 'my-job', schedule: '* * * * *', agentId: AGENT, prompt: 'mine' });
+    await scheduler.addCron!({ id: 'other-job', schedule: '* * * * *', agentId: 'other-agent', prompt: 'theirs' });
 
-    const jobs = scheduler.listJobs!();
+    const jobs = await scheduler.listJobs!();
     expect(jobs).toHaveLength(1);
     expect(jobs[0].id).toBe('my-job');
   });
@@ -256,8 +256,8 @@ describe('scheduler-plainjob', () => {
     const scheduler = await create(mockConfig, { jobStore: new MemoryJobStore() });
     const received: InboundMessage[] = [];
 
-    scheduler.addCron!({ id: 'my-job', schedule: '* * * * *', agentId: AGENT, prompt: 'mine' });
-    scheduler.addCron!({ id: 'other-job', schedule: '* * * * *', agentId: 'other-agent', prompt: 'theirs' });
+    await scheduler.addCron!({ id: 'my-job', schedule: '* * * * *', agentId: AGENT, prompt: 'mine' });
+    await scheduler.addCron!({ id: 'other-job', schedule: '* * * * *', agentId: 'other-agent', prompt: 'theirs' });
 
     await scheduler.start((msg) => received.push(msg));
     stopFn = () => scheduler.stop();
@@ -274,8 +274,8 @@ describe('scheduler-plainjob', () => {
     const scheduler = await create(customConfig, { jobStore: new MemoryJobStore() });
     const received: InboundMessage[] = [];
 
-    scheduler.addCron!({ id: 'j1', schedule: '* * * * *', agentId: 'custom-agent', prompt: 'match' });
-    scheduler.addCron!({ id: 'j2', schedule: '* * * * *', agentId: AGENT, prompt: 'no match' });
+    await scheduler.addCron!({ id: 'j1', schedule: '* * * * *', agentId: 'custom-agent', prompt: 'match' });
+    await scheduler.addCron!({ id: 'j2', schedule: '* * * * *', agentId: AGENT, prompt: 'no match' });
 
     await scheduler.start((msg) => received.push(msg));
     stopFn = () => scheduler.stop();
@@ -370,7 +370,7 @@ describe('scheduler-plainjob', () => {
     const scheduler = await create(mockConfig, { jobStore: new MemoryJobStore() });
     const received: InboundMessage[] = [];
 
-    scheduler.addCron!({
+    await scheduler.addCron!({
       id: 'test-job',
       schedule: '* * * * *',
       agentId: AGENT,
@@ -392,7 +392,7 @@ describe('scheduler-plainjob', () => {
     const scheduler = await create(mockConfig, { jobStore: new MemoryJobStore() });
     const received: InboundMessage[] = [];
 
-    scheduler.addCron!({
+    await scheduler.addCron!({
       id: 'dedup-job',
       schedule: '* * * * *',
       agentId: AGENT,
@@ -424,7 +424,7 @@ describe('scheduler-plainjob', () => {
     const scheduler = await create(mockConfig, { jobStore: new MemoryJobStore() });
     const received: InboundMessage[] = [];
 
-    scheduler.addCron!({
+    await scheduler.addCron!({
       id: 'once-job',
       schedule: '* * * * *',
       agentId: AGENT,
@@ -440,7 +440,7 @@ describe('scheduler-plainjob', () => {
     expect(received.filter(m => m.sender === 'cron:once-job')).toHaveLength(1);
 
     // Job should be deleted
-    expect(scheduler.listJobs!()).toHaveLength(0);
+    expect(await scheduler.listJobs!()).toHaveLength(0);
 
     // Next minute — should NOT fire
     scheduler.checkCronNow!(new Date('2026-03-01T12:06:00Z'));
@@ -458,7 +458,7 @@ describe('scheduler-plainjob', () => {
     stopFn = () => scheduler.stop();
 
     const fireAt = new Date(Date.now() + 50);
-    scheduler.scheduleOnce!({
+    await scheduler.scheduleOnce!({
       id: 'once-timer',
       schedule: '* * * * *',
       agentId: AGENT,
@@ -466,27 +466,27 @@ describe('scheduler-plainjob', () => {
       runOnce: true,
     }, fireAt);
 
-    expect(scheduler.listJobs!()).toHaveLength(1);
+    expect(await scheduler.listJobs!()).toHaveLength(1);
 
     await new Promise((r) => setTimeout(r, 150));
 
     expect(received.filter(m => m.sender === 'cron:once-timer')).toHaveLength(1);
     expect(received[0].content).toBe('Timed one-shot');
-    expect(scheduler.listJobs!()).toHaveLength(0);
+    expect(await scheduler.listJobs!()).toHaveLength(0);
   });
 
   test('scheduleOnce: job is still in store when async handler runs', async () => {
     const scheduler = await create(mockConfig, { jobStore: new MemoryJobStore() });
-    let jobListDuringHandler: ReturnType<NonNullable<typeof scheduler.listJobs>> = [];
+    let jobListDuringHandler: Awaited<ReturnType<NonNullable<typeof scheduler.listJobs>>> = [];
 
     await scheduler.start(async (_msg) => {
       await new Promise(r => setTimeout(r, 10));
-      jobListDuringHandler = scheduler.listJobs!();
+      jobListDuringHandler = await scheduler.listJobs!();
     });
     stopFn = () => scheduler.stop();
 
     const fireAt = new Date(Date.now() + 50);
-    scheduler.scheduleOnce!({
+    await scheduler.scheduleOnce!({
       id: 'race-test',
       schedule: '* * * * *',
       agentId: AGENT,
@@ -497,7 +497,7 @@ describe('scheduler-plainjob', () => {
     await new Promise(r => setTimeout(r, 200));
 
     expect(jobListDuringHandler.some(j => j.id === 'race-test')).toBe(true);
-    expect(scheduler.listJobs!()).toHaveLength(0);
+    expect(await scheduler.listJobs!()).toHaveLength(0);
   });
 
   test('scheduleOnce job can be cancelled via removeCron', async () => {
@@ -508,7 +508,7 @@ describe('scheduler-plainjob', () => {
     stopFn = () => scheduler.stop();
 
     const fireAt = new Date(Date.now() + 100);
-    scheduler.scheduleOnce!({
+    await scheduler.scheduleOnce!({
       id: 'cancel-me',
       schedule: '* * * * *',
       agentId: AGENT,
@@ -516,12 +516,12 @@ describe('scheduler-plainjob', () => {
       runOnce: true,
     }, fireAt);
 
-    scheduler.removeCron!('cancel-me');
+    await scheduler.removeCron!('cancel-me');
 
     await new Promise((r) => setTimeout(r, 200));
 
     expect(received.filter(m => m.sender === 'cron:cancel-me')).toHaveLength(0);
-    expect(scheduler.listJobs!()).toHaveLength(0);
+    expect(await scheduler.listJobs!()).toHaveLength(0);
   });
 
   // ─── stop() awaits async cleanup (P2 fix) ─────────
@@ -543,7 +543,7 @@ describe('scheduler-plainjob', () => {
     });
 
     const fireAt = new Date(Date.now() + 10);
-    scheduler.scheduleOnce!({
+    await scheduler.scheduleOnce!({
       id: 'async-stop-test',
       schedule: '* * * * *',
       agentId: AGENT,
@@ -577,7 +577,7 @@ describe('scheduler-plainjob', () => {
     await scheduler.start(() => {});
 
     const fireAt = new Date(Date.now() + 60_000);
-    scheduler.scheduleOnce!({
+    await scheduler.scheduleOnce!({
       id: 'persist-runat',
       schedule: '* * * * *',
       agentId: AGENT,
@@ -608,7 +608,7 @@ describe('scheduler-plainjob', () => {
     await scheduler1.start(() => {});
 
     const fireAt = new Date(Date.now() + 80); // 80ms from now
-    scheduler1.scheduleOnce!({
+    await scheduler1.scheduleOnce!({
       id: 'rehydrate-me',
       schedule: '* * * * *',
       agentId: AGENT,
@@ -722,14 +722,12 @@ describe('scheduler-plainjob', () => {
     const store1 = new KyselyJobStore(db1);
     const scheduler1 = await create(mockConfig, { jobStore: store1 });
 
-    scheduler1.addCron!({
+    await scheduler1.addCron!({
       id: 'persisted-job',
       schedule: '0 9 * * *',
       agentId: AGENT,
       prompt: 'Morning standup',
     });
-    // Wait for async store write to complete
-    await new Promise(r => setTimeout(r, 10));
 
     await scheduler1.stop();
 
@@ -887,13 +885,13 @@ describe('scheduler-plainjob', () => {
     const store1 = new KyselyJobStore(db1);
     const scheduler1 = await create(mockConfig, { jobStore: store1 });
 
-    scheduler1.addCron!({
+    await scheduler1.addCron!({
       id: 'temp-job',
       schedule: '* * * * *',
       agentId: AGENT,
       prompt: 'will be removed',
     });
-    scheduler1.removeCron!('temp-job');
+    await scheduler1.removeCron!('temp-job');
     await scheduler1.stop();
 
     // Reopen — should be empty
@@ -903,7 +901,7 @@ describe('scheduler-plainjob', () => {
     const store2 = new KyselyJobStore(db2);
     const scheduler2 = await create(mockConfig, { jobStore: store2 });
 
-    expect(scheduler2.listJobs!()).toHaveLength(0);
+    expect(await scheduler2.listJobs!()).toHaveLength(0);
     await scheduler2.stop();
     rmSync(tmpDir, { recursive: true, force: true });
   });

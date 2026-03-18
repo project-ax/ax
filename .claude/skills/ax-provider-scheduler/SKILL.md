@@ -36,32 +36,30 @@ The scheduler provider fires timed messages (heartbeats, cron jobs) into the hos
 
 | Provider   | File            | Timers | Cron | Active Hours | Notes                                         |
 |------------|-----------------|--------|------|--------------|-----------------------------------------------|
-| `cron`     | `cron.ts`       | yes    | yes  | yes          | Standard cron scheduler                       |
-| `full`     | `full.ts`       | yes    | yes  | yes          | Advanced scheduler variant                    |
-| `plainjob` | `plainjob.ts`   | yes    | yes  | yes          | SQLite-backed job queue with one-shot support |
+| `plainjob` | `plainjob.ts`   | yes    | yes  | yes          | Persistent job queue (Kysely DB) with one-shot support |
 | `none`     | `none.ts`       | no     | no   | no           | No-op; all stubs                              |
 
 ## PlainJob Provider
 
 - **Location:** `src/providers/scheduler/plainjob.ts`
-- **Storage:** SQLite-backed job queue (`job-store.db`) for persistence across restarts
+- **Storage:** Kysely-backed job queue (PostgreSQL in k8s, SQLite fallback) for persistence across restarts
 - **One-shot jobs:** `scheduleOnce(datetime, prompt)` for future-dated single-execution jobs
 - **Cron jobs:** Standard 5-field cron expressions, persisted to SQLite
 - **Heartbeat delivery:** Configurable via `config.scheduler.defaultDelivery`
 - **Agent filtering:** Jobs can target specific agents via `agentId`
 - **Async stop:** Graceful shutdown clears all timers and flushes pending jobs
 
-## Cron Provider Details
+## PlainJob Provider Details
 
 - **Heartbeat**: fires every `config.scheduler.heartbeat_interval_min` minutes. Reads optional `HEARTBEAT.md` from `config.scheduler.agent_dir`. Suppressed outside active hours.
 - **Cron check**: runs every 60 seconds. Uses `matchesCron()` from `utils.ts` (standard 5-field: min hour dom month dow). Suppressed outside active hours.
 - **Active hours**: parsed from `config.scheduler.active_hours.{start,end,timezone}`. Uses `toLocaleTimeString` with the configured timezone. Both heartbeats and cron jobs are gated.
 - **Session addressing**: each message uses `schedulerSession(sender)` which sets `provider: 'scheduler'`, `scope: 'dm'`.
+- **Async methods**: `addCron`, `removeCron`, `listJobs`, `scheduleOnce` are all async — they await the underlying `KyselyJobStore` operations. Mock schedulers in tests can return sync values (interface allows `void | Promise<void>`).
 
 ## Common Tasks
 
-- **Add a new scheduled event type**: create a new timer in `cron.ts`, gate it with `isWithinActiveHours()`, fire via `onMessageHandler()`.
-- **Add token budget tracking**: implement `recordTokenUsage()` and `listPendingHints()` on the cron provider. Hints come from `ProactiveHint` (memory provider type).
+- **Add a new scheduled event type**: create a new timer in `plainjob.ts`, gate it with `isWithinActiveHours()`, fire via `onMessageHandler()`.
 - **Test cron matching**: use `checkCronNow(at)` to inject a specific Date without waiting for the 60s interval.
 
 ## Gotchas

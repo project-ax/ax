@@ -1,5 +1,11 @@
 # Provider Lessons: Scheduler
 
+### Scheduler provider methods must await async JobStore operations
+**Date:** 2026-03-17
+**Context:** `addCron`, `removeCron`, `listJobs`, and `scheduleOnce` in plainjob.ts were sync wrappers around `KyselyJobStore` async methods. In-memory tests passed because `MemoryJobStore` is sync, but PostgreSQL (k8s) broke silently — `listJobs()` always returned `[]` since `Array.isArray(Promise)` is false, and `addCron` fire-and-forgot the DB write.
+**Lesson:** When a provider method wraps a `JobStore` (or any store with `T | Promise<T>` return types), always declare the method `async` and `await` the store call. The `SchedulerProvider` interface already allows `void | Promise<void>` returns. Sync-only test fixtures (MemoryJobStore) will NOT catch this — add at least one KyselyJobStore integration test per CRUD method.
+**Tags:** scheduler, async, kysely, k8s, postgresql, plainjob
+
 ### SQLiteJobStore belongs in types.ts alongside MemoryJobStore
 **Date:** 2026-03-03
 **Context:** Adding a SQLite-backed JobStore for the plainjob scheduler tier

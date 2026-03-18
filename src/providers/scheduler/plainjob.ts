@@ -247,31 +247,28 @@ export async function create(config: Config, deps: PlainJobSchedulerDeps = {}): 
       await jobs.close();
     },
 
-    addCron(job: CronJobDef): void {
-      jobs.set(job);
+    async addCron(job: CronJobDef): Promise<void> {
+      await jobs.set(job);
     },
 
-    removeCron(jobId: string): void {
+    async removeCron(jobId: string): Promise<void> {
       const timer = onceTimers.get(jobId);
       if (timer) {
         clearTimeout(timer);
         onceTimers.delete(jobId);
       }
-      jobs.delete(jobId);
+      await jobs.delete(jobId);
     },
 
-    listJobs(): CronJobDef[] {
-      // For sync callers, return empty during async list
-      const result = jobs.list(agentName);
-      if (Array.isArray(result)) return result;
-      return []; // Promise — caller should handle async
+    async listJobs(): Promise<CronJobDef[]> {
+      return jobs.list(agentName);
     },
 
-    scheduleOnce(job: CronJobDef, fireAt: Date): void {
-      jobs.set(job);
+    async scheduleOnce(job: CronJobDef, fireAt: Date): Promise<void> {
+      await jobs.set(job);
       // Persist fire time so one-shot jobs survive restarts
       if (jobs instanceof KyselyJobStore) {
-        jobs.setRunAt(job.id, fireAt);
+        await jobs.setRunAt(job.id, fireAt);
       }
       const delayMs = Math.max(0, fireAt.getTime() - Date.now());
       const timer = setTimeout(() => fireOnceJob(job), delayMs);
