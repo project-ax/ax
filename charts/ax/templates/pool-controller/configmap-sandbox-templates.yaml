@@ -27,6 +27,12 @@ data:
         {{- if $tier.template.nodeSelector }},
         "nodeSelector": {{ $tier.template.nodeSelector | toJson }}
         {{- end }}
+        {{- if $tier.template.extraVolumes }},
+        "extraVolumes": {{ $tier.template.extraVolumes | toJson }}
+        {{- end }}
+        {{- if $tier.template.extraVolumeMounts }},
+        "extraVolumeMounts": {{ $tier.template.extraVolumeMounts | toJson }}
+        {{- end }}
       }
     }
   {{- end }}

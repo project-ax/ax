@@ -75,6 +75,9 @@ spec:
             - name: sandbox-templates
               mountPath: /etc/ax/sandbox-templates
               readOnly: true
+            {{- with .Values.poolController.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
       volumes:
         - name: ax-config
           configMap:
@@ -82,4 +85,7 @@ spec:
         - name: sandbox-templates
           configMap:
             name: {{ include "ax.fullname" . }}-sandbox-templates
+        {{- with .Values.poolController.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
 {{- end }}

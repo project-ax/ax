@@ -127,6 +127,8 @@ poolController:
     initialDelaySeconds: 3
     periodSeconds: 10
   reconcileIntervalMs: 5000
+  extraVolumes: []
+  extraVolumeMounts: []
   env: []
 
 # ─── Sandbox Pods ─────────────────────────────────────────────────

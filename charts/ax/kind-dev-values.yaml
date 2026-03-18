@@ -1,0 +1,151 @@
+# Dev mode values for local kind cluster with host volume mounts.
+# Code changes are picked up after: npm run build → flush pods.
+# Usage: helm install ax charts/ax -f charts/ax/kind-dev-values.yaml
+preset: "small"
+
+namespace:
+  create: false
+  name: ax-dev
+
+imageDefaults:
+  tag: latest
+  pullPolicy: IfNotPresent
+
+host:
+  replicas: 1
+  command: ["node", "--inspect=0.0.0.0:9229", "/ax-dev/dist/host/host-process.js"]
+  extraVolumeMounts:
+    - name: ax-dev-dist
+      mountPath: /opt/ax/dist
+    - name: ax-dev-templates
+      mountPath: /opt/ax/templates
+    - name: ax-dev-skills
+      mountPath: /opt/ax/skills
+  extraVolumes:
+    - name: ax-dev-dist
+      hostPath:
+        path: /ax-dev/dist
+    - name: ax-dev-templates
+      hostPath:
+        path: /ax-dev/templates
+    - name: ax-dev-skills
+      hostPath:
+        path: /ax-dev/skills
+
+poolController:
+  replicas: 1
+  command: ["node", "/ax-dev/dist/pool-controller/main.js"]
+  reconcileIntervalMs: 3000
+  extraVolumeMounts:
+    - name: ax-dev-dist
+      mountPath: /opt/ax/dist
+    - name: ax-dev-templates
+      mountPath: /opt/ax/templates
+  extraVolumes:
+    - name: ax-dev-dist
+      hostPath:
+        path: /ax-dev/dist
+    - name: ax-dev-templates
+      hostPath:
+        path: /ax-dev/templates
+
+sandbox:
+  runtimeClass: ""
+  tiers:
+    light:
+      minReady: 2
+      maxReady: 5
+      template:
+        command: ["node", "/ax-dev/dist/agent/runner.js"]
+        cpu: "500m"
+        memory: "512Mi"
+        workspaceRoot: "/workspace"
+        extraVolumeMounts:
+          - name: ax-dev-dist
+            mountPath: /opt/ax/dist
+          - name: ax-dev-templates
+            mountPath: /opt/ax/templates
+          - name: ax-dev-skills
+            mountPath: /opt/ax/skills
+        extraVolumes:
+          - name: ax-dev-dist
+            hostPath:
+              path: /ax-dev/dist
+          - name: ax-dev-templates
+            hostPath:
+              path: /ax-dev/templates
+          - name: ax-dev-skills
+            hostPath:
+              path: /ax-dev/skills
+    heavy:
+      minReady: 0
+      maxReady: 1
+      template:
+        command: ["node", "/ax-dev/dist/agent/runner.js"]
+        cpu: "1"
+        memory: "2Gi"
+        workspaceRoot: "/workspace"
+        nodeSelector: {}
+        extraVolumeMounts:
+          - name: ax-dev-dist
+            mountPath: /opt/ax/dist
+          - name: ax-dev-templates
+            mountPath: /opt/ax/templates
+          - name: ax-dev-skills
+            mountPath: /opt/ax/skills
+        extraVolumes:
+          - name: ax-dev-dist
+            hostPath:
+              path: /ax-dev/dist
+          - name: ax-dev-templates
+            hostPath:
+              path: /ax-dev/templates
+          - name: ax-dev-skills
+            hostPath:
+              path: /ax-dev/skills
+
+nats:
+  enabled: true
+  config:
+    cluster:
+      enabled: false
+      replicas: 1
+    jetstream:
+      enabled: true
+      memoryStore:
+        maxSize: 256Mi
+      fileStore:
+        maxSize: 1Gi
+        pvc:
+          size: 2Gi
+
+postgresql:
+  external:
+    enabled: true
+    existingSecret: ax-db-credentials
+    secretKey: url
+  internal:
+    enabled: true
+  auth:
+    database: ax
+    username: ax
+    password: "ax-dev-password"
+    existingSecret: ""
+  image:
+    tag: "17"
+
+networkPolicies:
+  enabled: false
+
+apiCredentials:
+  existingSecret: "ax-api-credentials"
+  envVars:
+    ANTHROPIC_API_KEY: "anthropic-api-key"
+
+config:
+  profile: balanced
+  providers:
+    storage: database
+    database: postgresql
+    eventbus: nats
+    sandbox: k8s

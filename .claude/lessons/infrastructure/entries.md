@@ -1,3 +1,9 @@
+### PodTemplate extra fields need specific index-signature types, not Record<string, unknown>
+**Date:** 2026-03-17
+**Context:** Adding extraVolumes/extraVolumeMounts to PodTemplate. Used `Array<Record<string, unknown>>` initially but tsc rejected it because the spread into volumes/volumeMounts arrays expects V1Volume/V1VolumeMount which require `name` and `mountPath`.
+**Lesson:** When adding pass-through fields to PodTemplate that get spread into K8s API manifests, use index-signature types with required fields (e.g., `Array<{ name: string; [key: string]: unknown }>`) instead of plain `Record<string, unknown>`. The K8s client types are structural and require specific properties.
+**Tags:** k8s, typescript, pod-template, types
+
 ### run-http-local.ts debug harness must mirror host-process.ts route surface
 **Date:** 2026-03-17
 **Context:** Debugging why LLM responses hang and identity isn't saved in real k8s clusters. The e2e tests passed but production failed.
