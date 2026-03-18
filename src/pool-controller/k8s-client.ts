@@ -36,8 +36,8 @@ export interface PodTemplate {
   runtimeClassName?: string;
   nodeSelector?: Record<string, string>;
   activeDeadlineSeconds?: number;
-  extraVolumes?: Array<Record<string, unknown>>;
-  extraVolumeMounts?: Array<Record<string, unknown>>;
+  extraVolumes?: Array<{ name: string; [key: string]: unknown }>;
+  extraVolumeMounts?: Array<{ name: string; mountPath: string; [key: string]: unknown }>;
 }
 
 /**
