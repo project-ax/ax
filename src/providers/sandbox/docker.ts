@@ -90,8 +90,9 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         // Working directory — canonical mount root
         '-w', CANONICAL.root,
 
-        // Environment — canonical paths
+        // Environment — canonical paths + per-turn extra env (credential placeholders, CA trust, etc.)
         ...Object.entries(canonicalEnv(config)).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
+        ...Object.entries(config.extraEnv ?? {}).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
       ];
 
       // Optional gVisor runtime for stronger isolation

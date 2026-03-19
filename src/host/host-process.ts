@@ -35,6 +35,7 @@ import { createOrchestrator } from './orchestration/orchestrator.js';
 import { FileStore } from '../file-store.js';
 import { templatesDir as resolveTemplatesDir, seedSkillsDir as resolveSeedSkillsDir } from '../utils/assets.js';
 import { startWebProxy, type WebProxy } from './web-proxy.js';
+import { SharedCredentialRegistry } from './credential-placeholders.js';
 import { decode, eventSubject } from './nats-session-protocol.js';
 import type { StreamEvent } from './event-bus.js';
 import type { EventBus } from './event-bus.js';
@@ -206,6 +207,7 @@ async function main(): Promise<void> {
 
   const agentSandbox = providers.sandbox;
 
+  const sharedCredentialRegistry = new SharedCredentialRegistry();
   const completionDeps: CompletionDeps = {
     config,
     providers: { ...providers, sandbox: agentSandbox },
@@ -221,6 +223,7 @@ async function main(): Promise<void> {
     fileStore,
     eventBus,
     workspaceMap,
+    sharedCredentialRegistry,
   };
 
   // Delegation handler
@@ -294,6 +297,13 @@ async function main(): Promise<void> {
     // proxy request itself (it's a transparent forward proxy), so the k8s
     // shared proxy uses a global approval scope ('host-process').
     const { requestApproval } = await import('./web-proxy-approvals.js');
+
+    // MITM config for credential injection — shared across all sessions.
+    // Per-session credential maps are registered/deregistered by processCompletion.
+    const { getOrCreateCA } = await import('./proxy-ca.js');
+    const caDir = join(agentDirPath(agentName), 'ca');
+    const ca = await getOrCreateCA(caDir);
+
     webProxy = await startWebProxy({
       listen: webProxyPort,
       bindHost: '0.0.0.0',
@@ -312,8 +322,13 @@ async function main(): Promise<void> {
         const approved = await requestApproval('host-process', domain);
         return { approved, reason: approved ? undefined : `Network access to ${domain} requires user approval` };
       },
+      mitm: {
+        ca,
+        credentials: sharedCredentialRegistry,
+        bypassDomains: new Set(config.mitm_bypass_domains ?? []),
+      },
     });
-    logger.info('web_proxy_started', { port: webProxyPort });
+    logger.info('web_proxy_started', { port: webProxyPort, mitm: true });
   }
 
   const port = parseInt(process.env.PORT ?? '8080', 10);

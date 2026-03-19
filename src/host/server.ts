@@ -30,7 +30,7 @@ import { attachEventConsole, attachJsonEventConsole } from './event-console.js';
 import { createOrchestrator, type Orchestrator } from './orchestration/orchestrator.js';
 
 // Extracted modules
-import { sendError, sendSSEChunk, readBody } from './server-http.js';
+import { sendError, sendSSEChunk, sendSSENamedEvent, readBody } from './server-http.js';
 import type { OpenAIChatRequest, OpenAIChatResponse, OpenAIStreamChunk } from './server-http.js';
 import { processCompletion, type CompletionDeps } from './server-completions.js';
 import { cleanStaleWorkspaces } from './server-lifecycle.js';
@@ -651,6 +651,26 @@ export async function createServer(
       return;
     }
 
+    // POST /v1/credentials/provide — resolve a pending credential prompt
+    if (url === '/v1/credentials/provide' && req.method === 'POST') {
+      try {
+        const body = JSON.parse(await readBody(req));
+        const { sessionId, envName, value } = body;
+        if (typeof sessionId !== 'string' || !sessionId || typeof envName !== 'string' || !envName || typeof value !== 'string') {
+          sendError(res, 400, 'Missing required fields: sessionId, envName, value');
+          return;
+        }
+        const { resolveCredential } = await import('./credential-prompts.js');
+        const found = resolveCredential(sessionId, envName, value);
+        const responseBody = JSON.stringify({ ok: true, found });
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(responseBody) });
+        res.end(responseBody);
+      } catch (err) {
+        sendError(res, 400, `Invalid request: ${(err as Error).message}`);
+      }
+      return;
+    }
+
     // Admin dashboard: /admin/*
     if (adminHandler && url.startsWith('/admin')) {
       try {
@@ -857,6 +877,15 @@ export async function createServer(
                 },
               }],
             }, finish_reason: null }],
+          });
+        } else if (event.type === 'credential.required' && event.data.envName) {
+          // Emit as a named SSE event — web chat UIs show a credential input modal.
+          // This is NOT an OpenAI-format chunk; clients that don't understand named
+          // events will safely ignore it.
+          sendSSENamedEvent(res, 'credential_required', {
+            envName: event.data.envName as string,
+            sessionId: event.data.sessionId as string,
+            requestId,
           });
         }
       });

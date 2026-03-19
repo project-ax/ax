@@ -150,6 +150,8 @@ export interface Config {
   };
   /** Enable HTTP forward proxy for agent outbound HTTP/HTTPS requests. */
   web_proxy?: boolean;
+  /** Domains that bypass MITM TLS inspection (cert-pinning CLIs). */
+  mitm_bypass_domains?: string[];
   /** K8s namespace for web proxy service discovery. */
   namespace?: string;
 }
