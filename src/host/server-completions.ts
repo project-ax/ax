@@ -1393,7 +1393,8 @@ export function isTransientAgentFailure(exitCode: number, stderr: string): boole
   return false;
 }
 
-/** Scan skill files in agent and user skill directories for requires.env declarations. */
+/** Scan skill files in agent and user skill directories for requires.env declarations.
+ *  Handles both file-based skills (greeting.md) and directory-based skills (deploy/SKILL.md). */
 function collectSkillEnvRequirements(
   agentSkillsDir?: string,
   userSkillsDir?: string,
@@ -1402,13 +1403,25 @@ function collectSkillEnvRequirements(
   for (const dir of [agentSkillsDir, userSkillsDir]) {
     if (!dir || !existsSync(dir)) continue;
     try {
-      const files = readdirSync(dir).filter(f => f.endsWith('.md'));
-      for (const file of files) {
+      const entries = readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
         try {
-          const raw = readFileSync(join(dir, file), 'utf-8');
-          const parsed = parseAgentSkill(raw);
-          for (const env of parsed.requires.env) {
-            envVars.add(env);
+          let raw: string | undefined;
+          if (entry.isFile() && entry.name.endsWith('.md')) {
+            // File-based skill: greeting.md
+            raw = readFileSync(join(dir, entry.name), 'utf-8');
+          } else if (entry.isDirectory()) {
+            // Directory-based skill: deploy/SKILL.md
+            const skillMdPath = join(dir, entry.name, 'SKILL.md');
+            if (existsSync(skillMdPath)) {
+              raw = readFileSync(skillMdPath, 'utf-8');
+            }
+          }
+          if (raw) {
+            const parsed = parseAgentSkill(raw);
+            for (const env of parsed.requires.env) {
+              envVars.add(env);
+            }
           }
         } catch { /* skip unparseable skills */ }
       }
