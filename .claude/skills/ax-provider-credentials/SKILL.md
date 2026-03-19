@@ -50,9 +50,30 @@ During sandbox launch (`server-completions.ts`), the host builds a `CredentialPl
 - `src/host/credential-placeholders.ts` — `CredentialPlaceholderMap` class
 - `src/host/server-completions.ts` — `collectSkillEnvRequirements()` + credential registration loop
 
+## Interactive Credential Prompting
+
+When a skill requires a credential that isn't in the store, the host prompts the user interactively instead of silently skipping it:
+
+1. `server-completions.ts` detects missing credential during sandbox launch
+2. Host emits `credential.required` event via event bus (contains `envName`, `sessionId`)
+3. `requestCredential(sessionId, envName)` in `src/host/credential-prompts.ts` blocks until resolved or timeout (120s)
+4. Resolution paths:
+   - **Chat completions SSE**: Named event `event: credential_required` → client shows modal → `POST /v1/credentials/provide` with `{sessionId, envName, value}`
+   - **Admin dashboard SSE**: Same event → `POST /admin/api/credentials/provide`
+5. `resolveCredential(sessionId, envName, value)` unblocks the pending request
+6. Provided credential is stored via `providers.credentials.set()` for future sessions
+7. Credential is registered in `CredentialPlaceholderMap` for MITM injection
+
+**Key files:**
+- `src/host/credential-prompts.ts` — Pending prompt registry (request/resolve/cleanup)
+- `src/host/server.ts` — SSE event emission + `POST /v1/credentials/provide` endpoint
+- `src/host/server-admin.ts` — `POST /admin/api/credentials/provide` endpoint
+
 ## Gotchas
 
 - **Credentials never enter agent containers:** The host holds credentials and injects them into outbound API requests via the MITM proxy. Agents receive opaque `ax-cred:<hex>` placeholder tokens as env vars, not real credentials.
 - **Plaintext provider is read-only:** `set()` and `delete()` throw errors. Use keychain for writes.
 - **Credential map is populated by reference:** The `CredentialPlaceholderMap` is created before the web proxy starts and populated later (after workspace paths are set). Since it's passed by reference, the proxy sees updates.
-- **Missing credentials are silently skipped:** If `providers.credentials.get()` returns null, the env var is not injected. The agent won't have that env var at all.
+- **Missing credentials trigger interactive prompts:** If `providers.credentials.get()` returns null and `web_proxy` is enabled, the host emits a `credential.required` event and blocks. If the user doesn't provide within 120s, the credential is skipped.
+- **Duplicate requests piggyback:** Multiple concurrent requests for the same credential (same session + envName) share a single pending entry.
+- **Session cleanup:** `cleanupSession()` is called when the completion ends, resolving any remaining pending prompts with null.

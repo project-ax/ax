@@ -69,6 +69,7 @@ When skills declare `requires.env` in their frontmatter (e.g., `LINEAR_API_KEY`)
 - `src/host/credential-placeholders.ts` — Placeholder token management
 - `src/host/web-proxy.ts` — MITM TLS inspection in `handleMITMConnect()`
 - `src/host/server-completions.ts` — Wiring: skill env collection, credential map build, CA trust injection
+- `src/host/credential-prompts.ts` — Interactive credential prompting registry (request/resolve/cleanup)
 
 **MITM TLS flow:**
 - Proxy generates self-signed root CA (persisted to `<agentDir>/ca/`)
@@ -77,6 +78,7 @@ When skills declare `requires.env` in their frontmatter (e.g., `LINEAR_API_KEY`)
 - Audit entries include `credentialInjected: true` when replacement occurs
 - Domains in `config.mitm_bypass_domains` skip MITM (raw TCP tunnel for cert-pinning CLIs)
 - CA trust: `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE` env vars set in sandbox
+- **Interactive credential prompting**: When a required credential is missing from the store, the host emits a `credential.required` event and blocks until the user provides it (via SSE + HTTP POST). See `src/host/credential-prompts.ts`.
 
 ## Gotchas
 
