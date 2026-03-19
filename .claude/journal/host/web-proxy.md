@@ -2,6 +2,14 @@
 
 HTTP forward proxy for sandboxed agent outbound HTTP/HTTPS access.
 
+## [2026-03-19 08:15] — Host-Side Credential Prompting During Skill Install
+
+**Task:** Implement interactive credential prompting when skills require API keys not in the credential store
+**What I did:** Created credential prompt registry (modeled on web-proxy-approvals.ts), wired it into server-completions.ts credential collection loop, added SSE named event emission in chat completions stream, added HTTP endpoints (POST /v1/credentials/provide and POST /admin/api/credentials/provide), wired session cleanup, updated skills documentation
+**Files touched:** src/host/credential-prompts.ts (new), src/host/server-completions.ts, src/host/server-http.ts, src/host/server.ts, src/host/server-admin.ts, tests/host/credential-prompts.test.ts (new), tests/host/server-credentials-sse.test.ts (new), tests/host/credential-provide-endpoint.test.ts (new), .claude/skills/ax-security/SKILL.md, .claude/skills/ax-provider-credentials/SKILL.md, .claude/skills/ax-provider-web/SKILL.md
+**Outcome:** Success — 6 commits, all 2424 tests pass
+**Notes:** Clean TDD execution following plan. credential-prompts.ts mirrors web-proxy-approvals.ts pattern exactly (pending map, piggyback, timeout, cleanup). Three resolution paths: SSE + HTTP POST for web chat, admin SSE + admin HTTP POST for dashboard.
+
 ## [2026-03-19 06:52] — MITM Credential Injection for Skill API Keys
 
 **Task:** Implement MITM TLS inspection in the web proxy to enable sandboxed skills to use third-party API keys without real credentials entering the container.
