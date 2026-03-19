@@ -28,6 +28,8 @@ import { createIPCMcpServer } from '../mcp-server.js';
 import type { AgentConfig, IIPCClient } from '../runner.js';
 import type { ContentBlock } from '../../types.js';
 import { buildSystemPrompt } from '../agent-setup.js';
+import { installSkillDeps } from '../skill-installer.js';
+import { join } from 'node:path';
 import { getLogger } from '../../logger.js';
 
 const logger = getLogger().child({ component: 'claude-code' });
@@ -120,6 +122,28 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
       logger.warn('web_proxy_bridge_failed', { error: (err as Error).message });
     }
   }
+
+  // Set proxy env vars so child processes (including skill installs) can reach the network.
+  // pi-session does this before the installer; claude-code must do the same.
+  const webProxyEnvUrl = webProxyBridge
+    ? `http://127.0.0.1:${webProxyBridge.port}`
+    : webProxyUrl
+      ? webProxyUrl
+      : webProxyPort
+        ? `http://127.0.0.1:${webProxyPort}`
+        : undefined;
+  if (webProxyEnvUrl) {
+    process.env.HTTP_PROXY = webProxyEnvUrl;
+    process.env.HTTPS_PROXY = webProxyEnvUrl;
+    process.env.http_proxy = webProxyEnvUrl;
+    process.env.https_proxy = webProxyEnvUrl;
+  }
+
+  // Install missing skill dependencies — each workspace installs to its own prefix
+  const skillSources: { skillDir: string; prefix: string }[] = [];
+  if (config.agentWorkspace) skillSources.push({ skillDir: join(config.agentWorkspace, 'skills'), prefix: config.agentWorkspace });
+  if (config.userWorkspace) skillSources.push({ skillDir: join(config.userWorkspace, 'skills'), prefix: config.userWorkspace });
+  if (skillSources.length > 0) await installSkillDeps(skillSources);
 
   // 2. Connect IPC client for MCP tools
   // Use pre-connected client if available (listen mode starts before stdin read).
