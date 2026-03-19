@@ -1,9 +1,10 @@
 /**
  * Skill dependency installer.
  *
- * Reads SKILL.md files from workspace skill directories, parses install
- * specs, and runs missing installs with package-manager prefix env vars
- * redirecting binaries to the target workspace path.
+ * Reads SKILL.md files from agentWorkspace skill directories (store-screened
+ * only — userWorkspace skills are agent-created and unscreened), parses
+ * install specs, and runs missing installs with package-manager prefix env
+ * vars redirecting binaries to the target workspace path.
  *
  * Called by runners after the web proxy bridge is up (so HTTP_PROXY is set)
  * and before the agent loop starts.

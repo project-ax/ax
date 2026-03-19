@@ -123,13 +123,27 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
     }
   }
 
-  // Install missing skill dependencies (proxy is already set for network access)
-  const installPrefix = config.userWorkspace ?? config.agentWorkspace;
-  if (installPrefix) {
-    const skillDirs: string[] = [];
-    if (config.agentWorkspace) skillDirs.push(join(config.agentWorkspace, 'skills'));
-    if (config.userWorkspace) skillDirs.push(join(config.userWorkspace, 'skills'));
-    await installSkillDeps(skillDirs, installPrefix);
+  // Set proxy env vars so child processes (including skill installs) can reach the network.
+  // pi-session does this before the installer; claude-code must do the same.
+  const webProxyEnvUrl = webProxyBridge
+    ? `http://127.0.0.1:${webProxyBridge.port}`
+    : webProxyUrl
+      ? webProxyUrl
+      : webProxyPort
+        ? `http://127.0.0.1:${webProxyPort}`
+        : undefined;
+  if (webProxyEnvUrl) {
+    process.env.HTTP_PROXY = webProxyEnvUrl;
+    process.env.HTTPS_PROXY = webProxyEnvUrl;
+    process.env.http_proxy = webProxyEnvUrl;
+    process.env.https_proxy = webProxyEnvUrl;
+  }
+
+  // Install missing skill dependencies from store-screened skills only.
+  // Only agentWorkspace/skills is used — userWorkspace/skills may contain
+  // agent-created files that haven't been through the screening pipeline.
+  if (config.agentWorkspace) {
+    await installSkillDeps([join(config.agentWorkspace, 'skills')], config.agentWorkspace);
   }
 
   // 2. Connect IPC client for MCP tools

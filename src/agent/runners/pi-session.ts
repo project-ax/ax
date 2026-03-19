@@ -381,13 +381,11 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
     process.env.https_proxy = webProxyEnvUrl;
   }
 
-  // Install missing skill dependencies (proxy is already set for network access)
-  const installPrefix = config.userWorkspace ?? config.agentWorkspace;
-  if (installPrefix) {
-    const skillDirs: string[] = [];
-    if (config.agentWorkspace) skillDirs.push(join(config.agentWorkspace, 'skills'));
-    if (config.userWorkspace) skillDirs.push(join(config.userWorkspace, 'skills'));
-    await installSkillDeps(skillDirs, installPrefix);
+  // Install missing skill dependencies from store-screened skills only.
+  // Only agentWorkspace/skills is used — userWorkspace/skills may contain
+  // agent-created files that haven't been through the screening pipeline.
+  if (config.agentWorkspace) {
+    await installSkillDeps([join(config.agentWorkspace, 'skills')], config.agentWorkspace);
   }
 
   // Decide LLM transport: proxy (direct Anthropic SDK) or IPC fallback
