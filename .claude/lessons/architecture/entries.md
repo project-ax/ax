@@ -1,5 +1,11 @@
 # Architecture
 
+### Shared outbound proxies need per-turn auth to preserve session identity
+**Date:** 2026-03-19
+**Context:** Designing a generalized HTTPS proxy that could support MITM credential injection for sandboxed CLI tools in Docker and k8s.
+**Lesson:** Never treat a shared outbound proxy as transparent infrastructure when policy or credential injection depends on request identity. If the proxy cannot bind each request to a concrete AX turn/session, approvals, auditing, and credential decisions collapse to a coarse global scope. Add explicit short-lived proxy auth first, then layer MITM or service-specific policy on top.
+**Tags:** proxy, identity, session, k8s, mitm, architecture, auditing
+
 ### K8s service names generate env vars that collide with application env vars
 **Date:** 2026-03-18
 **Context:** Created a k8s Service named `ax-web-proxy`. Kubernetes auto-generates `AX_WEB_PROXY_PORT=tcp://10.96.104.65:3128` in all pods in the namespace. Our code read `process.env.AX_WEB_PROXY_PORT` expecting a number, got `tcp://...`, parsed to NaN, and crashed.

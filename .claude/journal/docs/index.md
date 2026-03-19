@@ -4,6 +4,7 @@ Documentation, plans, architecture docs, website updates, GitHub Pages.
 
 ## Entries
 
+- 2026-03-19 05:46 — Plan authenticated MITM HTTPS proxy for long-tail CLI tools [plans.md](plans.md)
 - 2026-03-17 11:02 — Outline safe unified lifecycle for container sandboxes [plans.md](plans.md)
 - 2026-03-17 10:59 — Explain multi-sandbox redesign scope for phase removal [plans.md](plans.md)
 - 2026-03-17 10:53 — Review NATS-centric workspace provisioning plan [plans.md](plans.md)

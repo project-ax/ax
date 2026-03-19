@@ -4,6 +4,8 @@ Provider implementations: image, channel, skills, sandbox, memory, LLM.
 
 ## Entries
 
+- 2026-03-19 05:11 — Explain scalable service-proxy model for skill auth [skills.md](skills.md)
+- 2026-03-19 04:58 — Analyze sandbox-safe auth for env-based skill CLIs [skills.md](skills.md)
 - 2026-03-17 05:30 — Redesign k8s workspace release: HTTP staging + sidecar pattern [workspace.md](workspace.md)
 - 2026-03-16 21:10 — Fix k8s workspace file syncing to GCS via NATS IPC (superseded) [workspace.md](workspace.md)
 - 2026-03-18 08:25 — Fix terminal sandbox pod accumulation in k8s [sandbox.md](sandbox.md)

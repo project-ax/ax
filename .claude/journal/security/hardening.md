@@ -2,6 +2,14 @@
 
 Security hardening: provider path resolution, cross-provider dependencies, vulnerability fixes.
 
+## [2026-03-19 05:04] — Evaluate MITM TLS proxy for sandbox skill auth
+
+**Task:** Assess whether a MITM TLS proxy could let env-auth skill CLIs run in k8s without placing raw credentials in the sandbox
+**What I did:** Compared the idea against AX's current forward-proxy and LLM-proxy architecture, focusing on trust boundaries, CA injection, request scoping, auditability, and compatibility with unmodified Node SDK-based CLIs.
+**Files touched:** `.claude/journal/security/hardening.md`, `.claude/journal/security/index.md`, `.claude/lessons/security/entries.md`, `.claude/lessons/security/index.md`
+**Outcome:** Success — concluded MITM is technically possible for some clients but is a broader and riskier trust expansion than AX's explicit host-side application proxies
+**Notes:** The safer default is an explicit per-service proxy/RPC with short-lived turn auth; MITM should be a last resort for unmodifiable binaries
+
 ## [2026-03-05 13:50] — Bump hono and @hono/node-server for security fixes
 
 **Task:** Fix vulnerabilities identified by Dependabot PRs #68 and #69

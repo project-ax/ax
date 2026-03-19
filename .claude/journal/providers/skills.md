@@ -2,6 +2,22 @@
 
 Skills import pipeline, screener, manifest generator, ClawHub client, architecture comparison, install orchestration.
 
+## [2026-03-19 05:11] — Explain scalable service-proxy model for skill auth
+
+**Task:** Clarify whether an explicit `/internal/linear-proxy`-style route scales as more users install credentialed skill binaries
+**What I did:** Reviewed the host proxy/plugin patterns and the current skill schema (`requires.env`) to separate the one-off Linear example from the more scalable service-capability model AX should use.
+**Files touched:** `.claude/journal/providers/skills.md`, `.claude/journal/providers/index.md`, `.claude/lessons/providers/skills.md`, `.claude/lessons/providers/index.md`
+**Outcome:** Success — concluded that per-skill bespoke routes do not scale, but shared host-side service adapters referenced by skills do
+**Notes:** Skills should converge on declaring service dependencies rather than raw env var names when they need host-mediated auth
+
+## [2026-03-19 04:58] — Analyze sandbox-safe auth for env-based skill CLIs
+
+**Task:** Figure out how skills like Linear can use API-key-based CLIs in k8s without putting credentials in the sandbox
+**What I did:** Reviewed AX's sandbox/security guidance, the k8s pod env injection path, host per-turn token routes, plugin credential injection, and the published Linear skill requirements to map safe runtime options.
+**Files touched:** `.claude/journal/providers/skills.md`, `.claude/journal/providers/index.md`, `.claude/lessons/providers/skills.md`, `.claude/lessons/providers/index.md`
+**Outcome:** Success — documented that raw env-var auth cannot stay outside the untrusted sandbox boundary; AX needs a host-side proxy or a trusted helper boundary for this class of skill
+**Notes:** `extraEnv`, Secret mounts, and stdin payloads are acceptable for scoped turn tokens, but not for long-lived upstream API keys that the sandboxed process can read directly
+
 ## [2026-03-18 10:25] — Fix ClawHub registry client to use real API
 
 **Task:** Debug network errors when agents use skills.search — registry client pointed at nonexistent domain

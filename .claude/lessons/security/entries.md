@@ -18,6 +18,12 @@
 **Lesson:** When caching generated domain certs, key the cache by domain + CA hash (e.g., SHA-256 of CA cert), not just domain. Otherwise, a cert signed by CA1 gets returned for a request using CA2, causing "certificate signature failure". Use `createHash('sha256').update(ca.cert).digest('hex').slice(0, 16)` for the CA portion of the cache key.
 **Tags:** tls, certificates, caching, testing, mitm
 
+### MITM TLS proxies expand trust much more than explicit service proxies
+**Date:** 2026-03-19
+**Context:** Evaluating whether AX could support env-auth skill CLIs in k8s by terminating TLS on the host and injecting upstream credentials there.
+**Lesson:** A MITM proxy can keep the raw API key out of the sandbox, but only by teaching the sandbox to trust a host-controlled root CA. That turns the host into a universal impersonator for any intercepted domain and is a materially broader trust expansion than AX's explicit `/internal/*` proxies. Prefer explicit per-service proxy routes or narrow RPC helpers first; use MITM only as a last resort for unmodifiable binaries, with strict domain/path allowlists and short-lived turn authentication.
+**Tags:** security, mitm, proxy, tls, k8s, sandbox, credentials
+
 ### import.meta.resolve() is the secure way to resolve package names
 **Date:** 2026-02-28
 **Context:** Analyzing security of monorepo split — switching provider-map from relative paths to @ax/provider-* package names

@@ -13,6 +13,8 @@ Provider-specific lessons covering LLM, skills, sandbox, channel (Slack), and me
 - Popular OpenClaw skills use clawdbot alias, not openclaw [skills.md](skills.md)
 - Many skills have no metadata block — static analysis is essential [skills.md](skills.md)
 - OpenClaw's security failures validate AX's zero-trust architecture [skills.md](skills.md)
+- Shared service adapters scale better than per-skill credential routes [skills.md](skills.md)
+- Env-auth CLIs cannot stay sandbox-safe without a proxy or helper [skills.md](skills.md)
 - Tool filtering must align with prompt module shouldInclude() [skills.md](skills.md)
 - child.killed is true after ANY kill() call, not just after the process is dead [sandbox.md](sandbox.md)
 - Never use tsx binary as a process wrapper — use node --import tsx/esm instead [sandbox.md](sandbox.md)

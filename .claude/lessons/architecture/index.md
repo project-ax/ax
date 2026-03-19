@@ -4,6 +4,7 @@ Design patterns, provider contracts, import hygiene, event bus design, and works
 
 ## Entries
 
+- Shared outbound proxies need per-turn auth to preserve session identity [entries.md](entries.md)
 - K8s filesystem lifecycle must stay inside one pod or use explicit remote handoff [entries.md](entries.md)
 - Prefer HTTP over NATS for large binary payloads in k8s [entries.md](entries.md)
 - Filesystem-based state doesn't survive pod filesystem boundaries in k8s [entries.md](entries.md)

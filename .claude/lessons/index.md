@@ -67,6 +67,7 @@
 
 ### architecture
 
+- Shared outbound proxies need per-turn auth to preserve session identity [architecture/entries.md](architecture/entries.md)
 - K8s filesystem lifecycle must stay inside one pod or use explicit remote handoff [architecture/entries.md](architecture/entries.md)
 - marked v17 renderer uses token objects, not positional args [architecture/entries.md](architecture/entries.md)
 - pi-agent-core AuthStorage now uses factory methods [architecture/entries.md](architecture/entries.md)

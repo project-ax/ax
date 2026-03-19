@@ -2,6 +2,14 @@
 
 Architecture analysis, gap analysis, design documents, implementation plans.
 
+## [2026-03-19 05:46] — Plan authenticated MITM HTTPS proxy for long-tail CLI tools
+
+**Task:** Create an implementation plan for HTTPS proxying that keeps credentials out of sandboxes while supporting the long tail of CLI tools
+**What I did:** Reviewed the existing forward-proxy, credential-injecting proxy, plugin framework, and recent proxy/security lessons. Wrote a phased plan for an authenticated host proxy with session-aware tunnel mode, explicit MITM service bindings, local sandbox bridges, CA distribution, rollout stages, and test strategy.
+**Files touched:** `docs/plans/2026-03-19-authenticated-mitm-https-proxy-plan.md`, `.claude/journal/docs/plans.md`, `.claude/journal/docs/index.md`, `.claude/lessons/architecture/entries.md`, `.claude/lessons/architecture/index.md`, `.claude/lessons/index.md`
+**Outcome:** Success — plan captured with concrete phases, file touch points, security invariants, and rollout guidance
+**Notes:** The key recommendation is "authenticated tunnel by default, MITM only for explicit service bindings" rather than a transparent global MITM proxy
+
 ## [2026-03-17 11:02] — Outline safe unified lifecycle for container sandboxes
 
 **Task:** Describe a safe unified workspace lifecycle that could cover k8s, Docker, and Apple without weakening Docker/Apple network isolation.

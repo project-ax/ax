@@ -1,5 +1,17 @@
 # Provider Lessons: Skills
 
+### Shared service adapters scale better than per-skill credential routes
+**Date:** 2026-03-19
+**Context:** Explaining how AX should generalize the `/internal/linear-proxy` idea as more credentialed skills are installed.
+**Lesson:** Do not model host-mediated auth as one bespoke internal route per skill. Skills are recipes and prompts; many of them will target the same upstream system. The scalable unit is a shared host-side service adapter/provider (for example `linear`, `github`, `slack`) that owns auth injection, request policy, and auditing. Skills should reference that service capability instead of declaring only raw env var names whenever host mediation is required.
+**Tags:** skills, architecture, proxy, credentials, providers, scaling
+
+### Env-auth CLIs cannot stay sandbox-safe without a proxy or helper
+**Date:** 2026-03-19
+**Context:** Reviewing how the published Linear skill (`LINEAR_API_KEY` env var plus a local Node CLI) could run in AX's k8s sandbox without violating the "no credentials in containers" invariant.
+**Lesson:** If a CLI must read a raw API key from its own process environment, there is no Kubernetes-only trick that keeps the sandbox credential-free. Env vars, Secret volumes, init containers, and stdin payloads all place the secret inside the untrusted process boundary. In AX, the safe options are: adapt the CLI to call a host-side credential-injecting proxy using a short-lived per-turn token, or run the credentialed CLI in a trusted helper/sidecar/plugin process and expose only a narrow RPC to the sandbox.
+**Tags:** skills, credentials, k8s, sandbox, proxy, sidecar, linear
+
 ### ClawHub API is at clawhub.ai, not registry.clawhub.dev; skills are ZIP files
 **Date:** 2026-03-18
 **Context:** Debugging skills.search network errors — registry-client.ts pointed at nonexistent domain

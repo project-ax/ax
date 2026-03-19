@@ -2,6 +2,14 @@
 
 Agent runner implementations, process management, dev/production mode split.
 
+## [2026-03-19 09:24] — Review PR 106 skill auto-install runner changes
+
+**Task:** Perform a code review of PR #106 adding automatic skill dependency installation in agent runners
+**What I did:** Fetched the PR into a separate worktree, reviewed the runner and installer diff in context, traced workspace/session behavior through server-completions and prompt modules, and identified concrete security and behavior regressions.
+**Files touched:** .claude/journal/agent/runner.md, .claude/journal/agent/index.md
+**Outcome:** Success — found three review findings: unscreened auto-execution from user-writable skill files, wrong install prefix selection for non-DM sessions, and missing proxy env wiring in the claude-code runner.
+**Notes:** The review used the PR worktree at /tmp/ax-pr106 so findings could reference exact changed lines without disturbing the main checkout.
+
 ## [2026-03-19 08:20] — Add skill dependency installer
 
 **Task:** Auto-install skill-declared package manager dependencies (npm, pip, cargo, go, uv) into persistent workspace directories
