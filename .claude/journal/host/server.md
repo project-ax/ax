@@ -2,6 +2,14 @@
 
 Server core, completions pipeline, file handling, bootstrap, admin gate, session management.
 
+## [2026-03-19 19:20] — Mid-request credential collection via event bus
+
+**Task:** Allow agents to request credentials mid-request after installing a skill. Host collects them via SSE, then re-spawns agent.
+**What I did:** Replaced in-memory promise map in credential-prompts.ts with event bus coordination. Added credential_request IPC schema/handler. Updated POST /v1/credentials/provide endpoints (server.ts, server-admin.ts) to emit via event bus. Updated oauth-skills.ts to use event bus. Added post-agent credential collection loop in processCompletion. Added request_credential action to skill tool catalog and MCP server. Updated skills prompt module with credential guidance.
+**Files touched:** src/ipc-schemas.ts, src/host/credential-prompts.ts, src/host/server.ts, src/host/server-admin.ts, src/host/oauth-skills.ts, src/host/server-completions.ts, src/host/ipc-server.ts, src/host/ipc-handlers/skills.ts, src/host/host-process.ts, src/agent/tool-catalog.ts, src/agent/mcp-server.ts, src/agent/prompt/modules/skills.ts, tests/ipc-schemas-credential.test.ts, tests/host/credential-prompts.test.ts, tests/host/credential-provide-endpoint.test.ts, tests/host/oauth-skills.test.ts, tests/host/credential-request-integration.test.ts, tests/agent/tool-catalog-credential.test.ts, tests/agent/tool-catalog.test.ts
+**Outcome:** Success — all 2471 tests pass, build compiles clean
+**Notes:** Key design: credential-prompts.ts now subscribes to event bus per-request instead of maintaining in-memory promise map, eliminating session affinity requirement.
+
 ## [2026-03-19 14:10] — Skill OAuth credential support (PKCE flow, auto-refresh, SSE events)
 
 **Task:** Add OAuth authentication support for skills so users can authenticate via browser redirect instead of pasting API keys

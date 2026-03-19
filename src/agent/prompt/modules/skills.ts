@@ -75,6 +75,17 @@ export class SkillsModule extends BasePromptModule {
       );
     }
 
+    lines.push(
+      '',
+      '### Credential Requirements',
+      '',
+      'Skills may declare required credentials (API keys, tokens) in their frontmatter.',
+      'After installing a skill, check its `requires.env` list. For each required env var,',
+      'use the skill tool with `type: "request_credential"` and the env var name.',
+      'This ends your current turn and prompts the user to provide the credential.',
+      'You will be re-invoked with the credentials available as environment variables.',
+    );
+
     return lines;
   }
 

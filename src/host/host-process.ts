@@ -203,6 +203,7 @@ async function main(): Promise<void> {
   const ipcSocketPath = join(ipcSocketDir, 'proxy.sock');
   const sessionCanaries = new Map<string, string>();
   const workspaceMap = new Map<string, string>();
+  const requestedCredentials = new Map<string, Set<string>>();
   const fileStore = await FileStore.create(providers.database);
 
   const agentSandbox = providers.sandbox;
@@ -223,6 +224,7 @@ async function main(): Promise<void> {
     fileStore,
     eventBus,
     workspaceMap,
+    requestedCredentials,
     sharedCredentialRegistry,
   };
 
@@ -275,6 +277,7 @@ async function main(): Promise<void> {
     orchestrator,
     agentRegistry,
     workspaceMap,
+    requestedCredentials,
   });
   completionDeps.ipcHandler = handleIPC;
 

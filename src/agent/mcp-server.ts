@@ -185,15 +185,26 @@ export function createIPCMcpServer(client: IIPCClient, opts?: MCPServerOptions):
       },
     ),
 
-    // ── Skill Search ──
+    // ── Skill ──
     tool('skill',
-      'Search for skills in the ClawHub registry.',
+      'Manage skills: search for skills or request credentials.\n' +
+      'Use type: "search" to find skills by query.\n' +
+      'Use type: "request_credential" to request a credential (e.g. API key) that a skill needs.',
       {
-        type: z.literal('search'),
-        query: z.string().describe('Search query'),
+        type: z.enum(['search', 'request_credential']),
+        query: z.string().optional().describe('Search query (for type: "search")'),
         limit: z.number().optional().describe('Max results (1-50, default 20)'),
+        envName: z.string().optional().describe('Environment variable name (for type: "request_credential")'),
       },
-      (args) => ipcCall('skill_search', { query: args.query, limit: args.limit }),
+      (args) => {
+        const { type, ...rest } = args;
+        const SKILL_ACTIONS: Record<string, string> = {
+          search: 'skill_search',
+          request_credential: 'credential_request',
+        };
+        const params = Object.fromEntries(Object.entries(rest).filter(([_, v]) => v !== undefined));
+        return ipcCall(SKILL_ACTIONS[type], params);
+      },
     ),
 
     // ── Workspace ──

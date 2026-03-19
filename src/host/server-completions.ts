@@ -58,6 +58,8 @@ export interface CompletionDeps {
   eventBus?: EventBus;
   /** Maps sessionId → workspace directory path. Shared with sandbox tool IPC handlers. */
   workspaceMap?: Map<string, string>;
+  /** Tracks credential_request IPC calls per session. Consumed by post-agent credential loop. */
+  requestedCredentials?: Map<string, Set<string>>;
   /** IPC handler function for reverse bridge connections (Apple containers). */
   ipcHandler?: (raw: string, ctx: import('./ipc-server.js').IPCContext) => Promise<string>;
   /** Extra env vars to inject into sandbox pods (per-turn IPC token, request ID). */
@@ -778,7 +780,7 @@ export async function processCompletion(
         // No stored credential or refresh failed — start OAuth flow
         const { startOAuthFlow } = await import('./oauth-skills.js');
         const redirectUri = `${publicUrl}/v1/oauth/callback/${oauthReq.name}`;
-        const authorizeUrl = startOAuthFlow(sessionId, oauthReq, redirectUri);
+        const authorizeUrl = startOAuthFlow(sessionId, requestId, oauthReq, redirectUri);
 
         reqLogger.info('oauth_prompt_emitting', { name: oauthReq.name });
         eventBus?.emit({
@@ -790,7 +792,7 @@ export async function processCompletion(
 
         // Block until user completes OAuth or timeout
         const { requestCredential } = await import('./credential-prompts.js');
-        const accessToken = await requestCredential(sessionId, oauthReq.name);
+        const accessToken = await requestCredential(sessionId, oauthReq.name, eventBus!, requestId);
         if (accessToken) {
           credentialMap.register(oauthReq.name, accessToken);
           oauthHandledNames.add(oauthReq.name);
@@ -816,7 +818,7 @@ export async function processCompletion(
           });
 
           const { requestCredential } = await import('./credential-prompts.js');
-          const provided = await requestCredential(sessionId, envName);
+          const provided = await requestCredential(sessionId, envName, eventBus!, requestId);
           if (provided) {
             await providers.credentials.set(envName, provided).catch(() => {
               reqLogger.debug('credential_store_failed', { envName });
@@ -1203,6 +1205,117 @@ export async function processCompletion(
       }
     }
 
+    // ── Post-agent credential collection ──
+    // If the agent called credential_request during this turn, re-scan
+    // skills from the now-committed workspace and collect any missing
+    // credentials. Then re-spawn the agent with credentials available.
+    const pendingCreds = deps.requestedCredentials?.get(sessionId);
+    if (pendingCreds && pendingCreds.size > 0 && eventBus) {
+      // Clean up the request set
+      deps.requestedCredentials!.delete(sessionId);
+
+      // Re-scan skills from the updated workspace
+      const { env: newEnvReqs } =
+        collectSkillCredentialRequirements(
+          agentWsPath ? join(agentWsPath, 'skills') : undefined,
+          userWsPath ? join(userWsPath, 'skills') : undefined,
+        );
+
+      // Collect credentials for env vars that are actually required and missing
+      const collectedEnvNames: string[] = [];
+      for (const envName of newEnvReqs) {
+        if (credentialMap.toEnvMap()[envName]) continue; // Already registered
+
+        let realValue = await providers.credentials.get(envName);
+
+        if (!realValue) {
+          reqLogger.info('post_agent_credential_prompt', { envName });
+          eventBus.emit({
+            type: 'credential.required',
+            requestId,
+            timestamp: Date.now(),
+            data: { envName, sessionId },
+          });
+
+          const { requestCredential } = await import('./credential-prompts.js');
+          const provided = await requestCredential(sessionId, envName, eventBus, requestId);
+          if (provided) {
+            await providers.credentials.set(envName, provided).catch(() => {
+              reqLogger.debug('credential_store_failed', { envName });
+            });
+            realValue = provided;
+          }
+        }
+
+        if (realValue) {
+          credentialMap.register(envName, realValue);
+          collectedEnvNames.push(envName);
+          reqLogger.debug('post_agent_credential_registered', { envName });
+        }
+      }
+
+      // If any new credentials were collected, re-spawn the agent
+      if (collectedEnvNames.length > 0) {
+        reqLogger.info('post_agent_respawn', { credentials: collectedEnvNames });
+
+        // Update the sandbox config env with new credential placeholders
+        const updatedEnv = {
+          ...sandboxConfig.extraEnv,
+          ...credentialMap.toEnvMap(),
+        };
+        const respawnConfig = { ...sandboxConfig, extraEnv: updatedEnv };
+
+        // Build new stdin payload with credential notification
+        const credMessage = `Credentials have been collected and are now available as environment variables: ${collectedEnvNames.join(', ')}. Confirm to the user that the skill is ready to use.`;
+        const respawnPayload = JSON.stringify({
+          history: [],
+          message: credMessage,
+          taintRatio: 0,
+          taintThreshold: 1,
+          profile: config.profile,
+          sandboxType: config.providers.sandbox,
+          userId: currentUserId,
+          sessionId,
+          requestId,
+          sessionScope: sessionScope ?? 'dm',
+          agentId: agentName,
+          agentWorkspace: agentWsPath,
+          userWorkspace: userWsPath,
+          workspaceProvider: config.providers.workspace,
+          identity: identityPayload,
+        });
+
+        // Re-spawn agent
+        const credProc = await agentSandbox.spawn(respawnConfig);
+
+        try {
+          credProc.stdin.write(respawnPayload);
+          credProc.stdin.end();
+        } catch {
+          // Process may have exited early
+        }
+
+        // Collect response
+        let credResponse = '';
+        for await (const chunk of credProc.stdout) {
+          credResponse += chunk.toString();
+        }
+        // Drain stderr
+        for await (const chunk of credProc.stderr) {
+          // just drain
+        }
+
+        const credExitCode = await credProc.exitCode;
+        if (credExitCode === 0 && credResponse.trim()) {
+          response = credResponse;
+          reqLogger.info('post_agent_respawn_done', { responseLength: credResponse.length });
+        } else {
+          reqLogger.warn('post_agent_respawn_failed', { exitCode: credExitCode });
+          // Fall through with original response
+        }
+      }
+    }
+
     // Parse structured response (may contain image blocks)
     const parsed = parseAgentResponse(response);
 
@@ -1381,9 +1494,6 @@ export async function processCompletion(
       const { cleanupSession } = await import('./web-proxy-approvals.js');
       cleanupSession(sessionId);
     }
-    // Clean up credential prompts
-    const { cleanupSession: cleanupCredentialPrompts } = await import('./credential-prompts.js');
-    cleanupCredentialPrompts(sessionId);
     // Clean up pending OAuth flows for this session
     {
       const { cleanupSession: cleanupOAuth } = await import('./oauth-skills.js');
