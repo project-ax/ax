@@ -1,8 +1,5 @@
 import { describe, test, expect, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { readFileSync } from 'node:fs';
+import { rmSync, readFileSync } from 'node:fs';
 
 describe('collectSkillEnvRequirements', () => {
   const dirs: string[] = [];

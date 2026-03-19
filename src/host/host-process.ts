@@ -207,6 +207,7 @@ async function main(): Promise<void> {
 
   const agentSandbox = providers.sandbox;
 
+  const sharedCredentialRegistry = new SharedCredentialRegistry();
   const completionDeps: CompletionDeps = {
     config,
     providers: { ...providers, sandbox: agentSandbox },
@@ -289,7 +290,6 @@ async function main(): Promise<void> {
   // ── Web proxy for agent outbound HTTP/HTTPS access ──
 
   let webProxy: WebProxy | undefined;
-  const sharedCredentialRegistry = new SharedCredentialRegistry();
   if (config.web_proxy) {
     const webProxyPort = parseInt(process.env.AX_PROXY_LISTEN_PORT ?? '3128', 10);
     // K8s shared proxy: governance gate uses the approval registry keyed by

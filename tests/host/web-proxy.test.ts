@@ -4,7 +4,7 @@ import * as net from 'node:net';
 import * as tls from 'node:tls';
 import * as http from 'node:http';
 import { join } from 'node:path';
-import { mkdtempSync, rmSync, existsSync, unlinkSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import type { AddressInfo } from 'node:net';
 import { startWebProxy, type WebProxy, type ProxyAuditEntry } from '../../src/host/web-proxy.js';
