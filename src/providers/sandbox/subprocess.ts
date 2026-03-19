@@ -27,6 +27,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         env: {
           ...process.env,
           ...sEnv,
+          ...config.extraEnv,
         },
         stdio: ['pipe', 'pipe', 'pipe'],
       });

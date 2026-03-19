@@ -1,4 +1,5 @@
 import { describe, test, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import type { Config } from '../../../src/types.js';
 
 function mockConfig(): Config {
@@ -43,6 +44,15 @@ describe('sandbox-apple provider', () => {
 
     // Should not throw for non-existent PID
     await expect(provider.kill(999999)).resolves.toBeUndefined();
+  });
+
+  test('apple provider passes extraEnv into container', () => {
+    const source = readFileSync(
+      new URL('../../../src/providers/sandbox/apple.ts', import.meta.url), 'utf-8',
+    );
+    // Must spread config.extraEnv as -e flags
+    expect(source).toContain('config.extraEnv');
+    expect(source).toMatch(/Object\.entries\(config\.extraEnv/);
   });
 
   test('respects AX_CONTAINER_IMAGE env var', async () => {

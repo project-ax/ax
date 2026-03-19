@@ -63,6 +63,29 @@ describe('sandbox-subprocess', () => {
     expect(code).not.toBe(0);
   }, 5000);
 
+  test('extraEnv vars are passed to the spawned process', async () => {
+    const provider = await create(mockConfig);
+    const proc = await provider.spawn({
+      workspace: '/tmp',
+      ipcSocket: '/tmp/test.sock',
+      command: ['sh', '-c', 'echo "$AX_TEST_CRED|$AX_TEST_CA"'],
+      timeoutSec: 10,
+      extraEnv: {
+        AX_TEST_CRED: 'ax-cred:abc123',
+        AX_TEST_CA: '/etc/ax/ca.crt',
+      },
+    });
+
+    let output = '';
+    for await (const chunk of proc.stdout) {
+      output += chunk.toString();
+    }
+
+    const code = await proc.exitCode;
+    expect(code).toBe(0);
+    expect(output.trim()).toBe('ax-cred:abc123|/etc/ax/ca.crt');
+  });
+
   test('provider.kill terminates by pid', async () => {
     const provider = await create(mockConfig);
     const proc = await provider.spawn({

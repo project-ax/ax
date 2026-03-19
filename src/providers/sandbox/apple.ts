@@ -105,6 +105,8 @@ export async function create(_config: Config): Promise<SandboxProvider> {
           // Tell the agent to listen (accept connections) instead of connecting out
           '-e', 'AX_IPC_LISTEN=1',
         ] : []),
+        // Per-turn extra env (credential placeholders, CA trust, etc.)
+        ...Object.entries(config.extraEnv ?? {}).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
       ];
 
       containerArgs.push(image, cmd, ...args);
