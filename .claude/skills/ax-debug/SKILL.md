@@ -292,6 +292,24 @@ nats sub "sandbox.work"
 3. In legacy mode, check staging_key lifecycle: upload → staging_key → IPC workspace_release
 4. Staging entries expire after 5 minutes — if the agent takes too long, the key is gone
 
+### npm/pip install hangs in sandbox
+
+**Root cause tree (check in order):**
+1. `config.web_proxy` not set → host never starts proxy → `AX_WEB_PROXY_URL` never sent to sandboxes
+2. Helm `webProxy.enabled: false` → no Service, no NetworkPolicy for port 3128
+3. Service selector mismatch → service has no endpoints (check `kubectl get endpoints ax-web-proxy`)
+4. Host NetworkPolicy blocks inbound port 3128 (only 8080 allowed by default)
+5. Web proxy bound to 127.0.0.1 → unreachable from other pods (needs `bindHost: '0.0.0.0'`)
+6. `AX_WEB_PROXY_URL` not in NATS payload → warm pool pods don't get it
+7. `parseStdinPayload()` doesn't extract `webProxyUrl` → runner never sets `HTTP_PROXY`
+
+**Debug steps:**
+1. Check host logs for `web_proxy_started` — if missing, `config.web_proxy` is false
+2. `kubectl get endpoints ax-web-proxy -n ax` — if empty, service selector is wrong
+3. `kubectl exec <sandbox-pod> -- node -e "..."` to test TCP connectivity to host:3128
+4. Check sandbox logs for `tool_execute name=bash` without subsequent `tool_result` — confirms hang
+5. Check host logs for `proxy_request` with `CONNECT registry.npmjs.org:443` — confirms proxy is processing traffic
+
 ### Agent never responds (timeout)
 
 **Debug steps:**
@@ -316,6 +334,10 @@ nats sub "sandbox.work"
 | IPC calls timing out | Token mismatch | Check `AX_IPC_TOKEN` and `AX_IPC_REQUEST_ID` match between host and agent |
 | Kind pods not picking up changes | Volume mounts not working | Verify `npm run k8s:dev status`, check `kind get nodes` has mounts |
 | Pod restart loop after flush | Code error in dist/ | Check `npm run k8s:dev logs sandbox` for stack trace, fix, `cycle` again |
+| npm/pip install hangs in sandbox | No web proxy or HTTP_PROXY not set | Enable `webProxy.enabled` + `config.web_proxy: true` in Helm values. Check: (1) `ax-web-proxy` service has endpoints, (2) host-network policy allows port 3128 ingress, (3) sandbox-web-proxy-egress policy exists, (4) `AX_WEB_PROXY_URL` in NATS payload via `webProxyUrl` field |
+| Host crashes with `ERR_SOCKET_BAD_PORT` NaN | K8s service `ax-web-proxy` auto-generates `AX_WEB_PROXY_PORT=tcp://IP:PORT` | Never use env var names that collide with k8s service discovery. Our env var is `AX_PROXY_LISTEN_PORT` (not `AX_WEB_PROXY_PORT`) |
+| Web proxy unreachable from sandbox (ECONNREFUSED) | Proxy bound to 127.0.0.1 or service selector mismatch | Check `bindHost: '0.0.0.0'` in host-process.ts startWebProxy call. Verify service selector matches host pod labels (`ax.selectorLabels`) |
+| Warm pool pod missing per-request env vars | Env var only in cold-spawn pod spec, not in NATS payload | Add to stdinPayload in server-completions.ts AND parseStdinPayload()+applyPayload() in runner.ts |
 
 ## Key Files
 

@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createLocalSandbox } from '../../src/agent/local-sandbox.js';
+import { createLocalSandbox, extractNetworkDomains } from '../../src/agent/local-sandbox.js';
 import type { IPCClient } from '../../src/agent/ipc-client.js';
 
 function mockClient(approveResult: Record<string, unknown> = { approved: true }): IPCClient {
@@ -83,6 +83,24 @@ describe('Local sandbox executor', () => {
       const result = await sandbox.bash('exit 42');
       expect(result.output).toContain('Exit code 42');
     });
+
+    test('does not make web_proxy_approve calls (auto-approval is host-side)', async () => {
+      const client = mockClient();
+      const sandbox = createLocalSandbox({ client, workspace });
+      await sandbox.bash('npm install express');
+
+      const calls = (client.call as any).mock.calls.map((c: any[]) => c[0]);
+      const proxyApprovals = calls.filter((c: any) => c.action === 'web_proxy_approve');
+      expect(proxyApprovals).toHaveLength(0);
+    });
+
+    test('kills process on timeout', async () => {
+      const client = mockClient();
+      const sandbox = createLocalSandbox({ client, workspace, timeoutMs: 500 });
+      // Use node instead of sleep — node exits on SIGTERM while sleep may ignore it
+      const result = await sandbox.bash('node -e "setTimeout(()=>{},60000)"');
+      expect(result.output).toContain('Exit code');
+    }, 15_000);
   });
 
   // ── readFile ──
@@ -163,6 +181,34 @@ describe('Local sandbox executor', () => {
       const sandbox = createLocalSandbox({ client, workspace });
       const result = await sandbox.editFile('edit.txt', 'a', 'b');
       expect(result.error).toBe('Denied: policy');
+    });
+  });
+
+  // ── extractNetworkDomains ──
+
+  describe('extractNetworkDomains', () => {
+    test('extracts npm registry for npm install', () => {
+      expect(extractNetworkDomains('npm install express')).toEqual(['registry.npmjs.org']);
+    });
+
+    test('extracts npm registry for npx', () => {
+      expect(extractNetworkDomains('npx create-react-app myapp')).toEqual(['registry.npmjs.org']);
+    });
+
+    test('extracts pip domains', () => {
+      const domains = extractNetworkDomains('pip install requests');
+      expect(domains).toContain('pypi.org');
+      expect(domains).toContain('files.pythonhosted.org');
+    });
+
+    test('returns empty for non-network commands', () => {
+      expect(extractNetworkDomains('echo hello')).toEqual([]);
+      expect(extractNetworkDomains('ls -la')).toEqual([]);
+    });
+
+    test('deduplicates domains', () => {
+      const domains = extractNetworkDomains('npm install foo && npm ci');
+      expect(domains).toEqual(['registry.npmjs.org']);
     });
   });
 });

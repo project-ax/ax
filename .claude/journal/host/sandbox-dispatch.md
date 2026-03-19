@@ -2,6 +2,22 @@
 
 Local and NATS-based sandbox dispatching, lazy sandbox spawning, NATS IPC handler.
 
+## [2026-03-18 22:15] — Enable web proxy for k8s sandboxes (npm install E2E fix)
+
+**Task:** After the deadlock fix, npm install still hung in k8s. Debug and fix the web proxy pipeline for warm pool pods.
+**What I did:** Found 6 issues in the k8s web proxy pipeline: (1) `web_proxy` missing from Zod config schema → host crash. (2) K8s auto-injects `AX_WEB_PROXY_PORT=tcp://IP:PORT` from the service name, colliding with our env var → NaN port → crash. Renamed to `AX_PROXY_LISTEN_PORT`. (3) Web proxy bound to 127.0.0.1 → unreachable from other pods. Added `bindHost` option, k8s uses 0.0.0.0. (4) Helm chart service/networkpolicy selectors used wrong label keys → no endpoints. (5) Host network policy missing ingress rule for port 3128. (6) Warm pool pods don't get `AX_WEB_PROXY_URL` — added `webProxyUrl` to NATS work payload and `parseStdinPayload`.
+**Files touched:** `src/config.ts`, `src/host/web-proxy.ts`, `src/host/host-process.ts`, `src/host/server-completions.ts`, `src/agent/runner.ts`, `src/agent/runners/{pi-session,claude-code}.ts`, `charts/ax/templates/{host/deployment,web-proxy-service,network-policy,networkpolicies/host-network}.yaml`
+**Outcome:** Success — npm i debug completes via proxy in kind cluster (CONNECT registry.npmjs.org:443 → 200, 298KB).
+**Notes:** Debugged using systematic approach: pod logs → env var inspection → connectivity tests → incremental fix. The K8s service discovery env var collision was especially subtle — `parseInt("tcp://10.96.104.65:3128", 10)` silently returns NaN.
+
+## [2026-03-18 17:30] — Fix agent hang on network bash commands (npm install deadlock)
+
+**Task:** Debug and fix deadlock where asking the agent to run `npm install -g @googleworkspace/cli` causes it to hang indefinitely.
+**What I did:** Root-caused a deadlock: in container mode, `execFileSync` blocks the event loop while npm routes through the web proxy, which blocks for 120s waiting for domain approval the agent can't send. Five-part fix: (1) Auto-approve well-known registry domains (npm, pip, yarn, etc.) before bash execution in `local-sandbox.ts`. (2) Replace `execFileSync` with async `spawn` in `local-sandbox.ts`. (3) Replace `execSync` with async `spawn` in `sandbox-tools.ts`, increase timeout 30s→120s. (4) Increase bash tool IPC timeout 60s→180s in `tool-catalog.ts`. (5) Add `MAX_TOOL_CALLS=50` limit in pi-session runner to prevent infinite retry loops.
+**Files touched:** `src/agent/local-sandbox.ts`, `src/host/ipc-handlers/sandbox-tools.ts`, `src/agent/tool-catalog.ts`, `src/agent/runners/pi-session.ts`, `tests/agent/local-sandbox.test.ts`, `tests/host/ipc-handlers/sandbox-tools.test.ts`
+**Outcome:** Success — all 2398 tests pass (203 files), tsc builds clean.
+**Notes:** The deadlock was a circular wait: agent → npm → proxy → agent. The auto-approve breaks the cycle by pre-approving domains before the command runs. Async spawn is a defense-in-depth measure so the event loop stays responsive. The maxToolCalls limit prevents the pi-session runner from looping infinitely (claude-code already had maxTurns: 20).
+
 ## [2026-03-16 18:00] — Update ax-host skill to reflect NATS IPC handler and deleted files
 
 **Task:** Update `.claude/skills/ax-host/SKILL.md` to reflect deleted files (nats-sandbox-dispatch.ts, agent-runtime-process.ts, local-sandbox-dispatch.ts), new nats-ipc-handler.ts, three-phase container orchestration, warm pool, IPC server fixes, sandbox-tools audit gate, provider-map changes, and streaming fixes.
