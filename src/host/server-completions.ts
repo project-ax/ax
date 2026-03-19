@@ -4,7 +4,7 @@
  * agent spawning, outbound scanning, and memory persistence.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readdirSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
@@ -22,6 +22,9 @@ import { type Logger, truncate } from '../logger.js';
 import { drainGeneratedImages } from './ipc-handlers/image.js';
 import { startAnthropicProxy } from './proxy.js';
 import { startWebProxy, type WebProxy } from './web-proxy.js';
+import { CredentialPlaceholderMap } from './credential-placeholders.js';
+import { getOrCreateCA, type CAKeyPair } from './proxy-ca.js';
+import { parseAgentSkill } from '../utils/skill-format-parser.js';
 import { connectIPCBridge } from './ipc-server.js';
 import { diagnoseError } from '../errors.js';
 import { buildLifecyclePlan, prepareGitWorkspace, finalizeGitWorkspace } from '../providers/workspace/lifecycle.js';
@@ -535,8 +538,12 @@ export async function processCompletion(
     // Start web forward proxy for outbound HTTP/HTTPS access (npm install,
     // pip install, curl, git clone). Opt-in: only when config.web_proxy is truthy.
     // Container sandboxes get a Unix socket; subprocess mode gets a TCP port.
+    // The credential map is populated by reference later (after agentWsPath is set),
+    // so the proxy will see the registered credentials when handling requests.
     let webProxySocketPath: string | undefined;
     let webProxyPort: number | undefined;
+    const credentialMap = new CredentialPlaceholderMap();
+    const credentialEnv: Record<string, string> = {};
     if (config.web_proxy) {
       const canaryToken = sessionCanaries.get(queued.session_id) ?? undefined;
       const isContainerSandboxForProxy = new Set(['docker', 'apple']).has(config.providers.sandbox);
@@ -563,6 +570,17 @@ export async function processCompletion(
         const approved = await requestApproval(sessionId, domain);
         return { approved, reason: approved ? undefined : `Network access to ${domain} requires user approval` };
       };
+
+      // Generate MITM CA — always create it upfront so we can pass it to the proxy.
+      // Credentials are registered later (after agentWsPath is set) by reference.
+      const caDir = join(agentDir(agentName), 'ca');
+      const ca = await getOrCreateCA(caDir);
+      const mitmConfig = {
+        ca,
+        credentials: credentialMap,
+        bypassDomains: new Set(config.mitm_bypass_domains ?? []),
+      };
+
       if (isContainerSandboxForProxy) {
         // Unix socket mode — placed in same dir as IPC socket (already mounted)
         webProxySocketPath = join(ipcSocketDir, 'web-proxy.sock');
@@ -572,6 +590,7 @@ export async function processCompletion(
           canaryToken,
           onAudit: webProxyAudit,
           onApprove: webProxyApprove,
+          mitm: mitmConfig,
         });
         webProxyCleanup = webProxy.stop;
       } else {
@@ -582,10 +601,19 @@ export async function processCompletion(
           canaryToken,
           onAudit: webProxyAudit,
           onApprove: webProxyApprove,
+          mitm: mitmConfig,
         });
         webProxyPort = webProxy.address as number;
         webProxyCleanup = webProxy.stop;
       }
+
+      // Inject CA trust env vars so sandbox processes trust the proxy's certs
+      const isContainerSandbox = new Set(['docker', 'apple', 'k8s-pod']).has(config.providers.sandbox);
+      const caCertPath = join(caDir, 'ca.crt');
+      const sandboxCaCertPath = isContainerSandbox ? '/etc/ax/ca.crt' : caCertPath;
+      credentialEnv.NODE_EXTRA_CA_CERTS = sandboxCaCertPath;
+      credentialEnv.SSL_CERT_FILE = sandboxCaCertPath;
+      credentialEnv.REQUESTS_CA_BUNDLE = sandboxCaCertPath;
     }
 
     const maxTokens = config.max_tokens ?? 8192;
@@ -702,6 +730,26 @@ export async function processCompletion(
       userWsPath = userWsPath ?? enterpriseUserWs;
     }
 
+    // Build credential placeholders for skill-required env vars (now that workspace paths are set).
+    // Skills declare required env vars in requires.env — the host resolves them
+    // from the credential provider and injects placeholders into the sandbox.
+    // The MITM proxy replaces placeholders with real values in intercepted HTTPS traffic.
+    if (config.web_proxy) {
+      const skillEnvRequirements = collectSkillEnvRequirements(
+        agentWsPath ? join(agentWsPath, 'skills') : undefined,
+        userWsPath ? join(userWsPath, 'skills') : undefined,
+      );
+      for (const envName of skillEnvRequirements) {
+        const realValue = await providers.credentials.get(envName);
+        if (realValue) {
+          credentialMap.register(envName, realValue);
+          reqLogger.debug('credential_placeholder_registered', { envName });
+        } else {
+          reqLogger.debug('credential_not_found', { envName });
+        }
+      }
+    }
+
     // Create a symlink mountRoot for the sandbox tool IPC handlers.
     // This mirrors the layout the sandbox provider creates for the agent subprocess
     // (scratch/, agent/, user/ as siblings), so tools like sandbox_bash see the same
@@ -799,6 +847,9 @@ export async function processCompletion(
         ...deps.extraSandboxEnv,
         // Web proxy — agent runners detect these to start bridge / set HTTP_PROXY
         ...(webProxyPort ? { AX_PROXY_LISTEN_PORT: String(webProxyPort) } : {}),
+        // Credential placeholders + CA trust env vars for MITM proxy
+        ...credentialMap.toEnvMap(),
+        ...credentialEnv,
       },
     };
 
@@ -1303,4 +1354,28 @@ export function isTransientAgentFailure(exitCode: number, stderr: string): boole
   if (exitCode !== 0) return true;
 
   return false;
+}
+
+/** Scan skill files in agent and user skill directories for requires.env declarations. */
+function collectSkillEnvRequirements(
+  agentSkillsDir?: string,
+  userSkillsDir?: string,
+): Set<string> {
+  const envVars = new Set<string>();
+  for (const dir of [agentSkillsDir, userSkillsDir]) {
+    if (!dir || !existsSync(dir)) continue;
+    try {
+      const files = readdirSync(dir).filter(f => f.endsWith('.md'));
+      for (const file of files) {
+        try {
+          const raw = readFileSync(join(dir, file), 'utf-8');
+          const parsed = parseAgentSkill(raw);
+          for (const env of parsed.requires.env) {
+            envVars.add(env);
+          }
+        } catch { /* skip unparseable skills */ }
+      }
+    } catch { /* skip unreadable directories */ }
+  }
+  return envVars;
 }
