@@ -1,10 +1,10 @@
 /**
  * Skill dependency installer.
  *
- * Reads SKILL.md files from agentWorkspace skill directories (store-screened
- * only — userWorkspace skills are agent-created and unscreened), parses
- * install specs, and runs missing installs with package-manager prefix env
- * vars redirecting binaries to the target workspace path.
+ * Reads SKILL.md files from workspace skill directories, parses install
+ * specs, and runs missing installs with package-manager prefix env vars
+ * redirecting binaries into each workspace's own prefix (so agent-workspace
+ * deps stay shared and user-workspace deps stay per-user).
  *
  * Called by runners after the web proxy bridge is up (so HTTP_PROXY is set)
  * and before the agent loop starts.
@@ -97,18 +97,21 @@ function loadSkillSpecs(dir: string): ParsedAgentSkill[] {
   }
 }
 
+export interface SkillSource {
+  /** Directory containing SKILL.md files (e.g. /workspace/agent/skills) */
+  skillDir: string;
+  /** Install prefix — binaries land under prefix/bin/ */
+  prefix: string;
+}
+
 /**
  * Install missing skill dependencies.
  *
- * @param skillDirs - Directories containing SKILL.md files (agent/skills, user/skills)
- * @param prefix - Target install prefix (/workspace/user or /workspace/agent)
+ * Each source maps a skill directory to its install prefix so that
+ * agent-workspace deps install to the shared location and user-workspace
+ * deps install to the per-user location.
  */
-export async function installSkillDeps(skillDirs: string[], prefix: string): Promise<void> {
-  const skills = skillDirs.flatMap(dir => loadSkillSpecs(dir));
-  const stepsToRun = skills.flatMap(s => s.install);
-
-  if (stepsToRun.length === 0) return;
-
+export async function installSkillDeps(sources: SkillSource[]): Promise<void> {
   const os = currentOS();
   if (!os) {
     logger.warn('unsupported_platform', { platform: process.platform });
@@ -116,34 +119,41 @@ export async function installSkillDeps(skillDirs: string[], prefix: string): Pro
   }
 
   const { shell, flag } = shellCommand();
-  const env = buildInstallEnv(prefix);
   let installed = 0;
 
-  for (const step of stepsToRun) {
-    // OS filter
-    if (step.os?.length && !step.os.includes(os)) {
-      logger.debug('skip_os', { run: step.run, os: step.os, current: os });
-      continue;
-    }
+  for (const { skillDir, prefix } of sources) {
+    const skills = loadSkillSpecs(skillDir);
+    const steps = skills.flatMap(s => s.install);
+    if (steps.length === 0) continue;
 
-    // Already installed?
-    if (step.bin && await binExists(step.bin)) {
-      logger.debug('skip_exists', { bin: step.bin });
-      continue;
-    }
+    const env = buildInstallEnv(prefix);
 
-    // Run install — shell command from screened SKILL.md, explicit shell invocation
-    try {
-      logger.info('installing', { run: step.run, bin: step.bin, prefix });
-      execFileSync(shell, [flag, step.run], { env, timeout: INSTALL_TIMEOUT_MS, stdio: 'pipe' });
-      installed++;
-      logger.info('installed', { bin: step.bin });
-    } catch (err) {
-      logger.warn('install_failed', { run: step.run, error: (err as Error).message });
+    for (const step of steps) {
+      // OS filter
+      if (step.os?.length && !step.os.includes(os)) {
+        logger.debug('skip_os', { run: step.run, os: step.os, current: os });
+        continue;
+      }
+
+      // Already installed?
+      if (step.bin && await binExists(step.bin)) {
+        logger.debug('skip_exists', { bin: step.bin });
+        continue;
+      }
+
+      // Run install — shell command from screened SKILL.md, explicit shell invocation
+      try {
+        logger.info('installing', { run: step.run, bin: step.bin, prefix });
+        execFileSync(shell, [flag, step.run], { env, timeout: INSTALL_TIMEOUT_MS, stdio: 'pipe' });
+        installed++;
+        logger.info('installed', { bin: step.bin });
+      } catch (err) {
+        logger.warn('install_failed', { run: step.run, error: (err as Error).message });
+      }
     }
   }
 
   if (installed > 0) {
-    logger.info('install_complete', { count: installed, prefix });
+    logger.info('install_complete', { count: installed });
   }
 }

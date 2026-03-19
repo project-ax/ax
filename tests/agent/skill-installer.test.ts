@@ -46,7 +46,7 @@ Browser skill`);
 
     mockedBinExists.mockResolvedValue(true);
 
-    await installSkillDeps([skillDir], '/workspace/user');
+    await installSkillDeps([{ skillDir, prefix: '/workspace/user' }]);
 
     expect(mockedBinExists).toHaveBeenCalledWith('playwright');
     expect(mockedExecFileSync).not.toHaveBeenCalled();
@@ -66,7 +66,7 @@ Browser skill`);
 
     mockedBinExists.mockResolvedValue(false);
 
-    await installSkillDeps([skillDir], '/workspace/user');
+    await installSkillDeps([{ skillDir, prefix: '/workspace/user' }]);
 
     expect(mockedExecFileSync).toHaveBeenCalledTimes(1);
     expect(mockedExecFileSync).toHaveBeenCalledWith(
@@ -99,7 +99,7 @@ Mac only`);
 
     mockedBinExists.mockResolvedValue(false);
 
-    await installSkillDeps([skillDir], '/workspace/user');
+    await installSkillDeps([{ skillDir, prefix: '/workspace/user' }]);
 
     if (process.platform === 'darwin') {
       expect(mockedExecFileSync).toHaveBeenCalledTimes(1);
@@ -124,7 +124,7 @@ Deploy skill`);
 
     mockedBinExists.mockResolvedValue(false);
 
-    await installSkillDeps([skillDir], '/workspace/agent');
+    await installSkillDeps([{ skillDir, prefix: '/workspace/agent' }]);
 
     expect(mockedExecFileSync).toHaveBeenCalledWith(
       expectedShell,
@@ -165,7 +165,7 @@ B`);
       .mockImplementationOnce(() => Buffer.from(''));
 
     // Should not throw — logs error and continues
-    await installSkillDeps([skillDir], '/workspace/user');
+    await installSkillDeps([{ skillDir, prefix: '/workspace/user' }]);
 
     expect(mockedExecFileSync).toHaveBeenCalledTimes(2);
   });
@@ -177,14 +177,14 @@ description: No deps needed
 ---
 Just a simple skill`);
 
-    await installSkillDeps([skillDir], '/workspace/user');
+    await installSkillDeps([{ skillDir, prefix: '/workspace/user' }]);
 
     expect(mockedBinExists).not.toHaveBeenCalled();
     expect(mockedExecFileSync).not.toHaveBeenCalled();
   });
 
   test('handles empty or missing skill directories', async () => {
-    await installSkillDeps(['/nonexistent/path'], '/workspace/user');
+    await installSkillDeps([{ skillDir: '/nonexistent/path', prefix: '/workspace/user' }]);
     expect(mockedExecFileSync).not.toHaveBeenCalled();
   });
 });

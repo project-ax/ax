@@ -139,12 +139,11 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
     process.env.https_proxy = webProxyEnvUrl;
   }
 
-  // Install missing skill dependencies from store-screened skills only.
-  // Only agentWorkspace/skills is used — userWorkspace/skills may contain
-  // agent-created files that haven't been through the screening pipeline.
-  if (config.agentWorkspace) {
-    await installSkillDeps([join(config.agentWorkspace, 'skills')], config.agentWorkspace);
-  }
+  // Install missing skill dependencies — each workspace installs to its own prefix
+  const skillSources: { skillDir: string; prefix: string }[] = [];
+  if (config.agentWorkspace) skillSources.push({ skillDir: join(config.agentWorkspace, 'skills'), prefix: config.agentWorkspace });
+  if (config.userWorkspace) skillSources.push({ skillDir: join(config.userWorkspace, 'skills'), prefix: config.userWorkspace });
+  if (skillSources.length > 0) await installSkillDeps(skillSources);
 
   // 2. Connect IPC client for MCP tools
   // Use pre-connected client if available (listen mode starts before stdin read).
