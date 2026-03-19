@@ -67,6 +67,11 @@ export function sendSSEChunk(res: ServerResponse, chunk: OpenAIStreamChunk): voi
   res.write(`data: ${JSON.stringify(chunk)}\n\n`);
 }
 
+/** Send a named SSE event (non-OpenAI format, for custom client handling). */
+export function sendSSENamedEvent(res: ServerResponse, eventName: string, data: Record<string, unknown>): void {
+  res.write(`event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
 export async function readBody(req: IncomingMessage, maxBytes?: number): Promise<string> {
   const chunks: Buffer[] = [];
   let size = 0;

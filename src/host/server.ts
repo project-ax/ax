@@ -30,7 +30,7 @@ import { attachEventConsole, attachJsonEventConsole } from './event-console.js';
 import { createOrchestrator, type Orchestrator } from './orchestration/orchestrator.js';
 
 // Extracted modules
-import { sendError, sendSSEChunk, readBody } from './server-http.js';
+import { sendError, sendSSEChunk, sendSSENamedEvent, readBody } from './server-http.js';
 import type { OpenAIChatRequest, OpenAIChatResponse, OpenAIStreamChunk } from './server-http.js';
 import { processCompletion, type CompletionDeps } from './server-completions.js';
 import { cleanStaleWorkspaces } from './server-lifecycle.js';
@@ -857,6 +857,15 @@ export async function createServer(
                 },
               }],
             }, finish_reason: null }],
+          });
+        } else if (event.type === 'credential.required' && event.data.envName) {
+          // Emit as a named SSE event — web chat UIs show a credential input modal.
+          // This is NOT an OpenAI-format chunk; clients that don't understand named
+          // events will safely ignore it.
+          sendSSENamedEvent(res, 'credential_required', {
+            envName: event.data.envName as string,
+            sessionId: event.data.sessionId as string,
+            requestId,
           });
         }
       });
