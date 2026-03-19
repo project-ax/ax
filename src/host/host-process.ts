@@ -35,6 +35,7 @@ import { createOrchestrator } from './orchestration/orchestrator.js';
 import { FileStore } from '../file-store.js';
 import { templatesDir as resolveTemplatesDir, seedSkillsDir as resolveSeedSkillsDir } from '../utils/assets.js';
 import { startWebProxy, type WebProxy } from './web-proxy.js';
+import { SharedCredentialRegistry } from './credential-placeholders.js';
 import { decode, eventSubject } from './nats-session-protocol.js';
 import type { StreamEvent } from './event-bus.js';
 import type { EventBus } from './event-bus.js';
@@ -221,6 +222,7 @@ async function main(): Promise<void> {
     fileStore,
     eventBus,
     workspaceMap,
+    sharedCredentialRegistry,
   };
 
   // Delegation handler
@@ -287,6 +289,7 @@ async function main(): Promise<void> {
   // ── Web proxy for agent outbound HTTP/HTTPS access ──
 
   let webProxy: WebProxy | undefined;
+  const sharedCredentialRegistry = new SharedCredentialRegistry();
   if (config.web_proxy) {
     const webProxyPort = parseInt(process.env.AX_PROXY_LISTEN_PORT ?? '3128', 10);
     // K8s shared proxy: governance gate uses the approval registry keyed by
@@ -294,6 +297,13 @@ async function main(): Promise<void> {
     // proxy request itself (it's a transparent forward proxy), so the k8s
     // shared proxy uses a global approval scope ('host-process').
     const { requestApproval } = await import('./web-proxy-approvals.js');
+
+    // MITM config for credential injection — shared across all sessions.
+    // Per-session credential maps are registered/deregistered by processCompletion.
+    const { getOrCreateCA } = await import('./proxy-ca.js');
+    const caDir = join(agentDirPath(agentName), 'ca');
+    const ca = await getOrCreateCA(caDir);
+
     webProxy = await startWebProxy({
       listen: webProxyPort,
       bindHost: '0.0.0.0',
@@ -312,8 +322,13 @@ async function main(): Promise<void> {
         const approved = await requestApproval('host-process', domain);
         return { approved, reason: approved ? undefined : `Network access to ${domain} requires user approval` };
       },
+      mitm: {
+        ca,
+        credentials: sharedCredentialRegistry,
+        bypassDomains: new Set(config.mitm_bypass_domains ?? []),
+      },
     });
-    logger.info('web_proxy_started', { port: webProxyPort });
+    logger.info('web_proxy_started', { port: webProxyPort, mitm: true });
   }
 
   const port = parseInt(process.env.PORT ?? '8080', 10);

@@ -65,4 +65,54 @@ export class CredentialPlaceholderMap {
     }
     return result;
   }
+
+  /** Return the raw placeholder→real map (for SharedCredentialRegistry merging). */
+  entries(): ReadonlyMap<string, string> {
+    return this.placeholderToReal;
+  }
+}
+
+/**
+ * Aggregates per-session CredentialPlaceholderMaps so a shared proxy
+ * (e.g. k8s) can replace placeholders from any active session.
+ *
+ * Placeholders are globally unique (ax-cred:<random>), so there's no
+ * cross-session collision risk.
+ */
+export class SharedCredentialRegistry {
+  private readonly sessions = new Map<string, CredentialPlaceholderMap>();
+
+  /** Register a session's credential map. Called at sandbox launch. */
+  register(sessionId: string, map: CredentialPlaceholderMap): void {
+    this.sessions.set(sessionId, map);
+  }
+
+  /** Deregister a session's credential map. Called at session cleanup. */
+  deregister(sessionId: string): void {
+    this.sessions.delete(sessionId);
+  }
+
+  /** Check if any registered session has placeholders in the input. */
+  hasPlaceholders(input: string): boolean {
+    for (const map of this.sessions.values()) {
+      if (map.hasPlaceholders(input)) return true;
+    }
+    return false;
+  }
+
+  /** Replace placeholders from all active sessions. */
+  replaceAll(input: string): string {
+    let result = input;
+    for (const map of this.sessions.values()) {
+      result = map.replaceAll(result);
+    }
+    return result;
+  }
+
+  /** Replace placeholders in a Buffer across all active sessions. */
+  replaceAllBuffer(input: Buffer): Buffer {
+    const str = input.toString('utf-8');
+    if (!this.hasPlaceholders(str)) return input;
+    return Buffer.from(this.replaceAll(str));
+  }
 }

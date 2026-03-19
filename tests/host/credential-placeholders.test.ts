@@ -58,3 +58,51 @@ describe('credential-placeholders', () => {
     expect(map.hasPlaceholders(`Bearer ${ph}`)).toBe(true);
   });
 });
+
+describe('SharedCredentialRegistry', () => {
+  test('replaces placeholders from multiple sessions', async () => {
+    const { CredentialPlaceholderMap, SharedCredentialRegistry } = await import('../../src/host/credential-placeholders.js');
+    const registry = new SharedCredentialRegistry();
+
+    const map1 = new CredentialPlaceholderMap();
+    const ph1 = map1.register('LINEAR_KEY', 'lin_real');
+    registry.register('sess-1', map1);
+
+    const map2 = new CredentialPlaceholderMap();
+    const ph2 = map2.register('GITHUB_TOKEN', 'ghp_real');
+    registry.register('sess-2', map2);
+
+    // Should replace placeholders from both sessions
+    const input = `linear=${ph1}&github=${ph2}`;
+    expect(registry.replaceAll(input)).toBe('linear=lin_real&github=ghp_real');
+    expect(registry.hasPlaceholders(input)).toBe(true);
+  });
+
+  test('deregister removes a session', async () => {
+    const { CredentialPlaceholderMap, SharedCredentialRegistry } = await import('../../src/host/credential-placeholders.js');
+    const registry = new SharedCredentialRegistry();
+
+    const map = new CredentialPlaceholderMap();
+    const ph = map.register('KEY', 'secret');
+    registry.register('sess-1', map);
+
+    expect(registry.hasPlaceholders(`val=${ph}`)).toBe(true);
+
+    registry.deregister('sess-1');
+    expect(registry.hasPlaceholders(`val=${ph}`)).toBe(false);
+    expect(registry.replaceAll(`val=${ph}`)).toBe(`val=${ph}`); // no replacement
+  });
+
+  test('replaceAllBuffer works across sessions', async () => {
+    const { CredentialPlaceholderMap, SharedCredentialRegistry } = await import('../../src/host/credential-placeholders.js');
+    const registry = new SharedCredentialRegistry();
+
+    const map = new CredentialPlaceholderMap();
+    const ph = map.register('TOKEN', 'real_token');
+    registry.register('sess-1', map);
+
+    const buf = Buffer.from(`Authorization: ${ph}`);
+    const result = registry.replaceAllBuffer(buf);
+    expect(result.toString()).toBe('Authorization: real_token');
+  });
+});

@@ -68,6 +68,10 @@ export interface CompletionDeps {
    *  If podName is undefined, uses queue group (warm pool) — returns the claiming pod's name.
    *  If podName is set, publishes to that specific pod (cold start fallback). */
   publishWork?: (podName: string | undefined, payload: string) => Promise<string>;
+  /** Shared credential registry for k8s shared proxy MITM mode.
+   *  Per-session credential maps are registered/deregistered here so the
+   *  shared proxy can replace placeholders from any active session. */
+  sharedCredentialRegistry?: import('./credential-placeholders.js').SharedCredentialRegistry;
 }
 
 export interface ExtractedFile {
@@ -544,6 +548,10 @@ export async function processCompletion(
     let webProxyPort: number | undefined;
     const credentialMap = new CredentialPlaceholderMap();
     const credentialEnv: Record<string, string> = {};
+    // Register in the shared registry so k8s shared proxy can see this session's credentials
+    if (deps.sharedCredentialRegistry) {
+      deps.sharedCredentialRegistry.register(sessionId, credentialMap);
+    }
     if (config.web_proxy) {
       const canaryToken = sessionCanaries.get(queued.session_id) ?? undefined;
       const isContainerSandboxForProxy = new Set(['docker', 'apple']).has(config.providers.sandbox);
@@ -1322,6 +1330,10 @@ export async function processCompletion(
     // Clean up credential prompts
     const { cleanupSession: cleanupCredentialPrompts } = await import('./credential-prompts.js');
     cleanupCredentialPrompts(sessionId);
+    // Deregister session from shared credential registry (k8s shared proxy)
+    if (deps.sharedCredentialRegistry) {
+      deps.sharedCredentialRegistry.deregister(sessionId);
+    }
     // Workspace provider: cleanup session scope for ephemeral sessions
     if (!isPersistent) {
       try { await providers.workspace.cleanup(sessionId); } catch {

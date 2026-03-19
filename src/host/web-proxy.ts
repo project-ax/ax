@@ -27,7 +27,8 @@ import { existsSync, unlinkSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { getLogger } from '../logger.js';
 import type { CAKeyPair } from './proxy-ca.js';
-import type { CredentialPlaceholderMap } from './credential-placeholders.js';
+// CredentialPlaceholderMap and SharedCredentialRegistry both satisfy the
+// credentials duck-type ({ replaceAllBuffer, hasPlaceholders }).
 
 const logger = getLogger().child({ component: 'web-proxy' });
 
@@ -84,7 +85,7 @@ export interface WebProxyOptions {
    */
   mitm?: {
     ca: CAKeyPair;
-    credentials: CredentialPlaceholderMap;
+    credentials: { replaceAllBuffer(input: Buffer): Buffer; hasPlaceholders(input: string): boolean };
     /** Domains that bypass MITM inspection (cert-pinning CLIs). Raw TCP tunnel. */
     bypassDomains?: Set<string>;
   };
