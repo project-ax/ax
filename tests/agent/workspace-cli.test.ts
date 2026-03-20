@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { provisionWorkspace, releaseWorkspace, computeCacheKey, provisionScope, diffScope } from '../../src/agent/workspace.js';
+import { provisionWorkspace, releaseWorkspace, provisionScope, diffScope } from '../../src/agent/workspace.js';
 import { mkdirSync, rmSync, existsSync, writeFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -19,18 +19,7 @@ describe('workspace provisioning (migrated)', () => {
     try { rmSync(testRoot, { recursive: true, force: true }); } catch {}
   });
 
-  test('computeCacheKey produces deterministic hash', () => {
-    const key1 = computeCacheKey('https://github.com/org/repo.git', 'main');
-    const key2 = computeCacheKey('https://github.com/org/repo.git', 'main');
-    const key3 = computeCacheKey('https://github.com/org/repo.git', 'develop');
-
-    expect(key1).toBe(key2);
-    expect(key1).not.toBe(key3);
-    expect(key1.length).toBe(16);
-    expect(key1).toMatch(/^[a-f0-9]{16}$/);
-  });
-
-  test('provisions empty workspace when no gitUrl', async () => {
+  test('provisions empty workspace when no config', async () => {
     const result = await provisionWorkspace(testRoot, 'session-1');
 
     expect(result.source).toBe('empty');
@@ -39,7 +28,7 @@ describe('workspace provisioning (migrated)', () => {
     expect(result.path).toContain('session-1');
   });
 
-  test('provisions empty workspace with config but no gitUrl', async () => {
+  test('provisions empty workspace with empty config', async () => {
     const result = await provisionWorkspace(testRoot, 'session-2', {});
 
     expect(result.source).toBe('empty');

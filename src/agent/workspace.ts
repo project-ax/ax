@@ -1,12 +1,12 @@
 // src/agent/workspace.ts — Workspace provisioning for agent containers.
 //
 // Migrated from src/sandbox-worker/workspace.ts for the unified agent container model.
-// Handles git clone + GCS cache restore for fast workspace setup.
-// On provision: check GCS cache first, fall back to git clone --depth=1.
-// On cleanup: diff scopes, upload changes to GCS, git push, delete workspace.
+// Handles GCS cache restore for fast workspace setup.
+// On provision: check GCS cache first, fall back to empty workspace.
+// On cleanup: diff scopes, upload changes to GCS, delete workspace.
 
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync, statSync, readFileSync, writeFileSync, chmodSync, readdirSync } from 'node:fs';
+import { mkdirSync, rmSync, readFileSync, writeFileSync, chmodSync, readdirSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
@@ -21,15 +21,13 @@ export interface FileMeta {
 
 /** Workspace setup configuration. */
 export interface WorkspaceConfig {
-  gitUrl?: string;
-  ref?: string;
   cacheKey?: string;
 }
 
 /** Workspace provisioning result. */
 export interface WorkspaceResult {
   path: string;
-  source: 'cache' | 'git-clone' | 'empty';
+  source: 'cache' | 'empty';
   durationMs: number;
 }
 
@@ -40,23 +38,11 @@ export interface WorkspaceResult {
 const CACHE_BUCKET = process.env.WORKSPACE_CACHE_BUCKET ?? '';
 
 /**
- * Compute a cache key for a git repo + branch combination.
- */
-export function computeCacheKey(gitUrl: string, ref?: string): string {
-  const hash = createHash('sha256')
-    .update(`${gitUrl}:${ref ?? 'HEAD'}`)
-    .digest('hex')
-    .slice(0, 16);
-  return hash;
-}
-
-/**
  * Provision a workspace directory for an agent container.
  *
  * Priority:
  * 1. GCS cache restore (fastest, ~5-10s)
- * 2. Git clone --depth=1 (~10-30s depending on repo)
- * 3. Empty workspace (instant, for sessions without git)
+ * 2. Empty workspace (instant)
  */
 export async function provisionWorkspace(
   workspaceRoot: string,
@@ -67,54 +53,29 @@ export async function provisionWorkspace(
   const workspace = join(workspaceRoot, sessionId);
   mkdirSync(workspace, { recursive: true });
 
-  // No git URL → empty workspace
-  if (!config?.gitUrl) {
-    return { path: workspace, source: 'empty', durationMs: Date.now() - start };
-  }
-
-  const cacheKey = config.cacheKey ?? computeCacheKey(config.gitUrl, config.ref);
+  const cacheKey = config?.cacheKey;
 
   // Try GCS cache restore first
-  if (CACHE_BUCKET) {
+  if (CACHE_BUCKET && cacheKey) {
     const cached = tryGCSRestore(workspace, cacheKey);
     if (cached) {
-      // Pull latest changes on top of cache
-      tryGitPull(workspace, config.ref);
       return { path: workspace, source: 'cache', durationMs: Date.now() - start };
     }
   }
 
-  // Fall back to git clone
-  const cloned = tryGitClone(workspace, config.gitUrl, config.ref);
-  if (cloned) {
-    // Restore dependency cache (node_modules, etc.) if available
-    if (CACHE_BUCKET) {
-      tryDependencyRestore(workspace);
-    }
-    return { path: workspace, source: 'git-clone', durationMs: Date.now() - start };
-  }
-
-  // If git clone fails, return empty workspace
   return { path: workspace, source: 'empty', durationMs: Date.now() - start };
 }
 
 /**
  * Clean up a workspace on release.
- * If changes exist, commit and push them back to the repo.
  * Optionally update GCS cache for future use.
  */
 export async function releaseWorkspace(
   workspace: string,
-  options?: { pushChanges?: boolean; updateCache?: boolean; cacheKey?: string },
+  options?: { updateCache?: boolean; cacheKey?: string },
 ): Promise<void> {
-  const isGitRepo = existsSync(join(workspace, '.git'));
-
-  if (isGitRepo && options?.pushChanges) {
-    tryGitPush(workspace);
-  }
-
   // Update GCS cache in background (non-blocking)
-  if (CACHE_BUCKET && options?.updateCache && options?.cacheKey && isGitRepo) {
+  if (CACHE_BUCKET && options?.updateCache && options?.cacheKey) {
     // Fire and forget — don't block release on cache upload
     void updateGCSCache(workspace, options.cacheKey).catch(() => {
       // Cache update failure is non-fatal
@@ -266,92 +227,6 @@ function tryGCSRestore(workspace: string, cacheKey: string): boolean {
   } catch {
     console.log(`[workspace] cache miss for: ${cacheKey}`);
     return false;
-  }
-}
-
-function tryGitClone(workspace: string, gitUrl: string, ref?: string): boolean {
-  try {
-    const branch = ref ? `--branch ${ref}` : '';
-    // nosemgrep: javascript.lang.security.detect-child-process — workspace: controlled git URL
-    execSync(
-      `git clone --depth=1 ${branch} "${gitUrl}" "${workspace}"`,
-      { timeout: 120_000, stdio: 'pipe' },
-    );
-    console.log(`[workspace] cloned: ${gitUrl}${ref ? `@${ref}` : ''}`);
-    return true;
-  } catch (err) {
-    console.error(`[workspace] clone failed: ${(err as Error).message}`);
-    return false;
-  }
-}
-
-function tryGitPull(workspace: string, ref?: string): void {
-  try {
-    const branch = ref ?? 'HEAD';
-    // nosemgrep: javascript.lang.security.detect-child-process — workspace: controlled ref
-    execSync(`git -C "${workspace}" pull --ff-only origin ${branch}`, {
-      timeout: 30_000,
-      stdio: 'pipe',
-    });
-  } catch {
-    // Pull failure is non-fatal — cache state is still usable
-  }
-}
-
-function tryGitPush(workspace: string): void {
-  try {
-    // Check if there are any changes to commit
-    const status = execSync(`git -C "${workspace}" status --porcelain`, {
-      encoding: 'utf-8',
-      timeout: 10_000,
-    }).trim();
-
-    if (!status) return;  // No changes
-
-    execSync(
-      `git -C "${workspace}" add . && git -C "${workspace}" commit -m "sandbox: auto-commit workspace changes"`,
-      { timeout: 30_000, stdio: 'pipe' },
-    );
-    execSync(`git -C "${workspace}" push`, {
-      timeout: 60_000,
-      stdio: 'pipe',
-    });
-    console.log('[workspace] changes pushed');
-  } catch (err) {
-    console.error(`[workspace] push failed: ${(err as Error).message}`);
-  }
-}
-
-function tryDependencyRestore(workspace: string): void {
-  // Check for lockfile to determine dependency cache key
-  const lockfiles = ['package-lock.json', 'yarn.lock', 'pnpm-lock.yaml'];
-  for (const lockfile of lockfiles) {
-    const lockPath = join(workspace, lockfile);
-    if (existsSync(lockPath)) {
-      try {
-        const stats = statSync(lockPath);
-        const lockHash = createHash('sha256')
-          .update(`${lockfile}:${stats.size}:${stats.mtimeMs}`)
-          .digest('hex')
-          .slice(0, 16);
-        const depCachePath = `gs://${CACHE_BUCKET}/${lockHash}/node_modules.tar.gz`;
-
-        // nosemgrep: javascript.lang.security.detect-child-process — workspace: controlled cache path
-        execSync(`gsutil -q cp "${depCachePath}" /tmp/deps-cache.tar.gz`, {
-          timeout: 60_000,
-          stdio: 'pipe',
-        });
-        execSync(`tar xzf /tmp/deps-cache.tar.gz -C "${workspace}"`, {
-          timeout: 60_000,
-          stdio: 'pipe',
-        });
-        try { rmSync('/tmp/deps-cache.tar.gz'); } catch { /* ignore */ }
-        console.log(`[workspace] dependency cache restored: ${lockfile}`);
-        return;
-      } catch {
-        // Dependency cache miss — npm install will handle it
-      }
-    }
   }
 }
 

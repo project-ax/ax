@@ -1,20 +1,12 @@
 // src/agent/workspace-release.ts — Agent-side workspace file release for k8s pods.
 //
 // Delegates the heavy work (diff, gzip, HTTP upload) to workspace-cli.ts
-// running as a subprocess. Two modes:
-//
-// HTTP mode (AX_IPC_TRANSPORT=http):
-//   workspace-cli.ts posts directly to /internal/workspace/release with auth token.
-//   No IPC call needed — single HTTP round-trip.
-//
-// Legacy NATS mode:
-//   workspace-cli.ts uploads to /internal/workspace-staging → gets staging_key.
-//   This module sends workspace_release IPC with the staging_key via NATS.
+// running as a subprocess. workspace-cli.ts posts directly to
+// /internal/workspace/release with auth token — single HTTP round-trip.
 
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { IIPCClient } from './runner.js';
 import { getLogger } from '../logger.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -30,7 +22,6 @@ const RELEASE_TIMEOUT_MS = 120_000;
  */
 export async function releaseWorkspaceScopes(
   hostUrl: string,
-  client: IIPCClient,
   scopes?: string,
 ): Promise<void> {
   // Resolve the workspace-cli.js path — in production it's compiled to dist/
@@ -41,15 +32,14 @@ export async function releaseWorkspaceScopes(
     args.push('--scopes', scopes);
   }
 
-  // In HTTP mode, pass the per-turn token so workspace-cli posts directly
-  // to /internal/workspace/release — no staging key + IPC round-trip needed.
+  // Pass the per-turn token so workspace-cli posts directly
+  // to /internal/workspace/release — single HTTP round-trip.
   const token = process.env.AX_IPC_TOKEN;
-  const isDirectRelease = process.env.AX_IPC_TRANSPORT === 'http' && !!token;
-  if (isDirectRelease) {
+  if (token) {
     args.push('--token', token);
   }
 
-  logger.info('workspace_release_start', { hostUrl, cliPath, direct: isDirectRelease });
+  logger.info('workspace_release_start', { hostUrl, cliPath });
 
   let result: string;
   try {
@@ -78,15 +68,5 @@ export async function releaseWorkspaceScopes(
     return;
   }
 
-  if (isDirectRelease) {
-    // Direct release mode — workspace-cli already posted changes via HTTP.
-    // No IPC call needed.
-    logger.info('workspace_release_complete', { mode: 'direct' });
-    return;
-  }
-
-  // Legacy staging mode — send workspace_release IPC with the staging key
-  logger.info('workspace_release_staged', { stagingKey: result });
-  await client.call({ action: 'workspace_release', staging_key: result });
-  logger.info('workspace_release_complete', { stagingKey: result });
+  logger.info('workspace_release_complete', { mode: 'direct' });
 }

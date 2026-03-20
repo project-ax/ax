@@ -272,7 +272,7 @@ describe('buildSDKPrompt', () => {
 
 describe('claude-code k8s HTTP transport detection', () => {
   // The claude-code runner uses direct HTTP to the host LLM proxy when
-  // AX_IPC_TRANSPORT=http. No bridge process needed — ANTHROPIC_BASE_URL
+  // AX_HOST_URL is set. No bridge process needed — ANTHROPIC_BASE_URL
   // points to host's /internal/llm-proxy with per-turn token as API key.
 
   test('runner detects HTTP transport mode', () => {
@@ -280,7 +280,7 @@ describe('claude-code k8s HTTP transport detection', () => {
       join(__dirname, '../../../src/agent/runners/claude-code.ts'),
       'utf-8',
     );
-    expect(source).toContain("AX_IPC_TRANSPORT === 'http'");
+    expect(source).toContain('AX_HOST_URL');
     expect(source).toContain('isHTTPTransport');
   });
 

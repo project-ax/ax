@@ -235,10 +235,9 @@ describe('parseStdinPayload with taint state', () => {
     expect(result.identity).toBeUndefined();
   });
 
-  test('extracts ipcToken from JSON payload (NATS 503 fix)', () => {
-    // Reproduces: warm pool pods need the per-turn IPC token from the work
-    // payload to build the correct NATS subject ipc.request.{requestId}.{token}.
-    // Without ipcToken, NATSIPCClient falls back to ipc.request.{sessionId} → 503.
+  test('extracts ipcToken from JSON payload', () => {
+    // Warm pool pods need the per-turn IPC token from the work payload
+    // for HTTP IPC authentication (Authorization: Bearer <token>).
     const payload = JSON.stringify({
       message: 'hello',
       history: [],

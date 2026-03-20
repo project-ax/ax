@@ -4,6 +4,7 @@ IPC protocol, schemas, heartbeat keep-alive.
 
 ## Entries
 
+- 2026-03-20 12:20 — Remove AX_IPC_TRANSPORT env var, auto-detect HTTP mode from AX_HOST_URL [protocol.md](protocol.md)
 - 2026-03-16 16:58 — Fix NATS IPC client receiving JetStream PubAck instead of IPC response [protocol.md](protocol.md)
 - 2026-03-16 07:34 — Add NATS IPC handler for host-side request routing [protocol.md](protocol.md)
 - 2026-03-16 07:33 — Add NATS IPC client for k8s sandbox pods [protocol.md](protocol.md)

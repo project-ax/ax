@@ -88,20 +88,6 @@ describe('P1 fix: read-only scope locks directories', () => {
   });
 });
 
-describe('P1 fix: HTTP GCS path provisions git workspace', () => {
-  test('runner.ts provisions git workspace inside HTTP GCS block', () => {
-    const source = readFileSync(resolve('src/agent/runner.ts'), 'utf-8');
-    // The HTTP GCS branch (hostUrl && workspaceProvider === 'gcs') must also
-    // handle workspaceGitUrl before returning, not skip it.
-    const httpGcsBranch = source.indexOf("if (hostUrl && payload.workspaceProvider === 'gcs')");
-    const earlyReturn = source.indexOf('return;', httpGcsBranch);
-    const gitInHttpBlock = source.indexOf('payload.workspaceGitUrl', httpGcsBranch);
-    // Git provisioning should appear BEFORE the early return in the HTTP GCS block
-    expect(gitInHttpBlock).toBeGreaterThan(httpGcsBranch);
-    expect(gitInHttpBlock).toBeLessThan(earlyReturn);
-  });
-});
-
 describe('P1 fix: workspace provision validates scope IDs against token context', () => {
   test('provision endpoint validates id against provisionIds', () => {
     const source = readFileSync(resolve('src/host/server-k8s.ts'), 'utf-8');

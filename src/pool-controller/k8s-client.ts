@@ -163,7 +163,6 @@ export async function createPoolK8sClient(namespace?: string): Promise<PoolK8sCl
               workingDir: '/workspace',
               env: [
                 { name: 'NATS_URL', value: template.natsUrl },
-                { name: 'AX_IPC_TRANSPORT', value: 'http' },
                 { name: 'AX_HOST_URL', value: process.env.AX_HOST_URL ?? `http://ax-host.${ns}.svc` },
                 { name: 'AX_WORKSPACE', value: '/workspace' },
                 { name: 'AX_AGENT_WORKSPACE', value: '/workspace/agent' },

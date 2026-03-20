@@ -19,17 +19,15 @@ import { createCanonicalSymlinks, symlinkEnv } from '../../../src/providers/sand
 const DEFAULT_NATS_URL = 'nats://localhost:4222';
 
 export interface NATSSubprocessOptions {
-  /** IPC transport: 'nats' uses NATSIPCClient, 'http' uses HttpIPCClient. */
-  ipcTransport?: 'nats' | 'http';
+  /** Unused — kept for API compat. HTTP IPC is always used (auto-detected from AX_HOST_URL). */
+  ipcTransport?: 'http';
 }
 
 export async function create(config: Config, opts?: NATSSubprocessOptions): Promise<SandboxProvider> {
   const natsUrl = process.env.NATS_URL ?? DEFAULT_NATS_URL;
   const hostUrl = process.env.AX_HOST_URL ?? `http://localhost:${process.env.PORT ?? '8080'}`;
   const debugAgent = process.env.AX_DEBUG_AGENT === '1';
-  const ipcTransport = opts?.ipcTransport ?? 'nats';
-
-  console.log(`[nats-subprocess] NATS: ${natsUrl}, Host: ${hostUrl}, Transport: ${ipcTransport}, Debug: ${debugAgent}`);
+  console.log(`[nats-subprocess] NATS: ${natsUrl}, Host: ${hostUrl}, Debug: ${debugAgent}`);
 
   return {
     workspaceLocation: 'sandbox' as const,
@@ -44,7 +42,7 @@ export async function create(config: Config, opts?: NATSSubprocessOptions): Prom
       const [cmd, ...args] = sandboxConfig.command;
       const finalArgs = debugAgent ? ['--inspect-brk', ...args] : args;
 
-      // Filter out AX_IPC_SOCKET from symlink env — NATS replaces Unix sockets
+      // Filter out AX_IPC_SOCKET from symlink env — k8s uses HTTP IPC
       const { AX_IPC_SOCKET: _, ...filteredEnv } = sEnv;
 
       // nosemgrep: javascript.lang.security.detect-child-process — sandbox provider: spawning is its purpose
@@ -53,8 +51,6 @@ export async function create(config: Config, opts?: NATSSubprocessOptions): Prom
         env: {
           ...process.env,
           ...filteredEnv,
-          // IPC transport — 'nats' uses NATSIPCClient, 'http' uses HttpIPCClient
-          AX_IPC_TRANSPORT: ipcTransport,
           NATS_URL: natsUrl,
           POD_NAME: podName,
           // Host URL for workspace staging uploads

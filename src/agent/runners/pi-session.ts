@@ -500,8 +500,8 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
     });
   }
 
-  // In k8s mode (NATS or HTTP), buffer text instead of writing to stdout — response goes via IPC
-  const isK8sTransport = process.env.AX_IPC_TRANSPORT === 'nats' || process.env.AX_IPC_TRANSPORT === 'http';
+  // In k8s mode, buffer text instead of writing to stdout — response goes via IPC
+  const isK8sTransport = !!process.env.AX_HOST_URL;
   const textBuffer: string[] | undefined = isK8sTransport ? [] : undefined;
 
   // Subscribe to events — stream text to stdout (or buffer for NATS), log tools/errors to stderr
@@ -543,41 +543,22 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
 
   logger.debug('session_complete', { eventCount: eventState.eventCount(), hasOutput: eventState.hasOutput() });
 
-  // In NATS mode, release workspace files then send agent_response
+  // In k8s mode, release workspace files then send agent_response
   if (isK8sTransport) {
     // Upload workspace file changes to host via sidecar before agent_response
     const hostUrl = process.env.AX_HOST_URL;
     if (hostUrl) {
       try {
         const { releaseWorkspaceScopes } = await import('../workspace-release.js');
-        await releaseWorkspaceScopes(hostUrl, client);
+        await releaseWorkspaceScopes(hostUrl);
       } catch (err) {
         logger.warn('workspace_release_failed', { error: (err as Error).message });
         // Non-fatal — don't lose the response over workspace sync failure
       }
     }
 
-    // Sandbox-side finalize: git push + GCS cache update.
-    // In k8s, the pod owns the workspace — finalize must happen in-pod.
-    // Host-side providers (Docker/Apple) handle this after container exit.
-    try {
-      const { releaseWorkspace } = await import('../workspace.js');
-      const scratchPath = '/workspace/scratch';
-      const { existsSync } = await import('node:fs');
-      if (existsSync(scratchPath + '/.git')) {
-        await releaseWorkspace(scratchPath, {
-          pushChanges: true,
-          updateCache: !!process.env.WORKSPACE_CACHE_BUCKET,
-          cacheKey: process.env.AX_WORKSPACE_CACHE_KEY,
-        });
-        logger.info('workspace_cleanup_done');
-      }
-    } catch (err) {
-      logger.warn('workspace_cleanup_failed', { error: (err as Error).message });
-    }
-
     const buffered = eventState.getBuffered();
-    logger.debug('nats_agent_response', { contentLength: buffered.length });
+    logger.debug('k8s_agent_response', { contentLength: buffered.length });
     try {
       await client.call({ action: 'agent_response', content: buffered });
     } catch (err) {

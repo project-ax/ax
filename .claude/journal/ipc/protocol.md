@@ -1,6 +1,14 @@
 # IPC: Protocol
 
-IPC protocol enhancements: heartbeat keep-alive, schema hardening, NATS transport.
+IPC protocol enhancements: heartbeat keep-alive, schema hardening, transport simplification.
+
+## [2026-03-20 12:20] — Remove AX_IPC_TRANSPORT env var, auto-detect HTTP mode from AX_HOST_URL
+
+**Task:** Remove dead NATS transport references and eliminate AX_IPC_TRANSPORT env var — HTTP mode is now auto-detected from AX_HOST_URL presence
+**What I did:** Replaced all `AX_IPC_TRANSPORT` checks with `AX_HOST_URL` presence detection. Removed `AX_IPC_TRANSPORT` from k8s pod env, pool-controller pod env. Simplified workspace-release.ts to remove legacy NATS staging mode (always direct HTTP). Updated isK8sTransport/isHTTPTransport variables to check AX_HOST_URL. Renamed nats_agent_response log keys to k8s_agent_response. Updated all tests.
+**Files touched:** src/agent/runner.ts, src/agent/runners/claude-code.ts, src/agent/runners/pi-session.ts, src/agent/http-ipc-client.ts, src/agent/workspace-release.ts, src/logger.ts, src/providers/sandbox/k8s.ts, src/pool-controller/k8s-client.ts, tests/agent/runner.test.ts, tests/agent/runners/claude-code.test.ts, tests/agent/workspace-release.test.ts, tests/providers/sandbox/k8s.test.ts, tests/pool-controller/k8s-client.test.ts, tests/providers/sandbox/nats-subprocess.ts, tests/providers/sandbox/docker-nats.ts
+**Outcome:** Success — build passes, all 2469 tests pass
+**Notes:** AX_HOST_URL was already set for k8s pods via extraSandboxEnv (server-k8s.ts) and pool-controller. The separate AX_IPC_TRANSPORT=http was redundant.
 
 ## [2026-03-17 14:50] — Fix workspace_write IPC schema rejecting session tier
 
