@@ -177,4 +177,102 @@ describe('regression test sequence', () => {
     expect(res.status).toBe(200);
     expect(res.content.length).toBeGreaterThan(0);
   }, 120_000);
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 10. MEMORY WRITE — store a preference via memory tool
+  // ──────────────────────────────────────────────────────────────────────
+  test('10. memory: write a preference', async () => {
+    const sessionId = `${SESSION_PREFIX}:memory`;
+    const res = await client.sendMessage(
+      'Please remember that I prefer dark mode for all my settings.',
+      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.content.length).toBeGreaterThan(0);
+  }, 120_000);
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 11. MEMORY DEDUP — writing the same fact reinforces, not duplicates
+  // ──────────────────────────────────────────────────────────────────────
+  test('11. memory: duplicate write reinforces existing item', async () => {
+    const sessionId = `${SESSION_PREFIX}:memory`;
+    const res = await client.sendMessage(
+      'Also remember too that I prefer dark mode — just to be sure.',
+      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.content.length).toBeGreaterThan(0);
+  }, 120_000);
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 12. MEMORY RECALL — new session, query memories
+  // ──────────────────────────────────────────────────────────────────────
+  test('12. memory: cross-session recall via query', async () => {
+    const sessionId = `${SESSION_PREFIX}:memory2`;
+    const res = await client.sendMessage(
+      'What are my preferences? Recall from memory please.',
+      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.content.length).toBeGreaterThan(0);
+  }, 120_000);
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 13. MEMORY LIST — list all stored memories in scope
+  // ──────────────────────────────────────────────────────────────────────
+  test('13. memory: list all memories in scope', async () => {
+    const sessionId = `${SESSION_PREFIX}:memory2`;
+    const res = await client.sendMessage(
+      'List all memories you have stored. Show me everything remembered.',
+      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.content.length).toBeGreaterThan(0);
+  }, 120_000);
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 14. SCHEDULER ADD CRON — create a recurring scheduled task
+  // ──────────────────────────────────────────────────────────────────────
+  test('14. scheduler: add daily cron job', async () => {
+    const sessionId = `${SESSION_PREFIX}:scheduler`;
+    const res = await client.sendMessage(
+      'Schedule a daily reminder at 9 AM to check my test results.',
+      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.content.length).toBeGreaterThan(0);
+  }, 120_000);
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 15. SCHEDULER RUN_AT — schedule a one-shot future task
+  // ──────────────────────────────────────────────────────────────────────
+  test('15. scheduler: schedule one-time task', async () => {
+    const sessionId = `${SESSION_PREFIX}:scheduler`;
+    const res = await client.sendMessage(
+      'Remind me at midnight on New Year\'s Eve. Run at 2026-12-31T23:59.',
+      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.content.length).toBeGreaterThan(0);
+  }, 120_000);
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 16. SCHEDULER LIST — verify scheduled jobs persist
+  // ──────────────────────────────────────────────────────────────────────
+  test('16. scheduler: list scheduled jobs', async () => {
+    const sessionId = `${SESSION_PREFIX}:scheduler`;
+    const res = await client.sendMessage(
+      'What is currently scheduled? List all my scheduled jobs.',
+      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.content.length).toBeGreaterThan(0);
+  }, 120_000);
 });
