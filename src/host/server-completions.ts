@@ -28,7 +28,6 @@ import { parseAgentSkill } from '../utils/skill-format-parser.js';
 import type { OAuthRequirement } from '../providers/skills/types.js';
 import { connectIPCBridge } from './ipc-server.js';
 import { diagnoseError } from '../errors.js';
-import { buildLifecyclePlan, prepareGitWorkspace, finalizeGitWorkspace } from '../providers/workspace/lifecycle.js';
 import { ensureOAuthTokenFreshViaProvider, ensureOAuthTokenFresh, refreshOAuthTokenFromEnv, forceRefreshOAuthViaProvider } from '../dotenv.js';
 import { runnerPath as resolveRunnerPath, tsxLoader, isDevMode } from '../utils/assets.js';
 import type { OpenAIChatRequest } from './server-http.js';
@@ -604,6 +603,9 @@ export async function processCompletion(
           onAudit: webProxyAudit,
           onApprove: webProxyApprove,
           mitm: mitmConfig,
+          urlRewrites: config.url_rewrites
+            ? new Map(Object.entries(config.url_rewrites))
+            : undefined,
         });
         webProxyCleanup = webProxy.stop;
       } else {
@@ -615,6 +617,9 @@ export async function processCompletion(
           onAudit: webProxyAudit,
           onApprove: webProxyApprove,
           mitm: mitmConfig,
+          urlRewrites: config.url_rewrites
+            ? new Map(Object.entries(config.url_rewrites))
+            : undefined,
         });
         webProxyPort = webProxy.address as number;
         webProxyCleanup = webProxy.stop;
@@ -861,25 +866,8 @@ export async function processCompletion(
     // Identity is delivered to the agent via stdin payload (below).
     // Skills are now loaded directly from filesystem directories by the agent.
 
-    // ── Workspace lifecycle ──
-    // Build a plan once per turn. Host-side providers (Docker/Apple) use it to
-    // prepare/finalize on bind-mounted paths. Sandbox-side providers (k8s) include
-    // the plan fields in the NATS work payload for in-pod provisioning.
-    const workspaceGitUrl = process.env.AX_WORKSPACE_GIT_URL;
-    const workspaceGcsPrefix = config.workspace?.prefix ?? process.env.AX_WORKSPACE_GCS_PREFIX;
+    // ── Workspace GCS prefixes ──
     const gcsPrefixes = resolveWorkspaceGcsPrefixes(config, agentName, currentUserId ?? '', sessionId);
-
-    const lifecyclePlan = buildLifecyclePlan({
-      gitUrl: workspaceGitUrl,
-      gitRef: process.env.AX_WORKSPACE_GIT_REF,
-      gcsPrefix: workspaceGcsPrefix,
-      agentName,
-      userId: currentUserId,
-      sessionId,
-      agentWorkspaceWritable,
-      scratchPath: workspace,
-    });
-    const workspaceCacheKey = lifecyclePlan.cacheKey;
 
     // Build stdin payload once — reused across retry attempts.
     const taintState = taintBudget.getState(sessionId);
@@ -908,9 +896,6 @@ export async function processCompletion(
       // Identity from DocumentStore (skills are now filesystem-based)
       identity: identityPayload,
       // Workspace provisioning fields (sandbox-side providers provision in-pod)
-      workspaceGitUrl: process.env.AX_WORKSPACE_GIT_URL,
-      workspaceGitRef: process.env.AX_WORKSPACE_GIT_REF,
-      workspaceCacheKey,
       ...gcsPrefixes,
       agentReadOnly: !agentWorkspaceWritable,
     });
@@ -938,17 +923,6 @@ export async function processCompletion(
         ...credentialEnv,
       },
     };
-
-    // Host-side prepare: provision git workspace on bind-mount paths before spawn.
-    // Sandbox-side (k8s) skips this — the runner provisions in-pod from payload.
-    if (agentSandbox.workspaceLocation === 'host' && lifecyclePlan.gitUrl) {
-      try {
-        await prepareGitWorkspace(lifecyclePlan);
-        reqLogger.debug('host_prepare_done', { gitUrl: lifecyclePlan.gitUrl });
-      } catch (err) {
-        reqLogger.warn('host_prepare_failed', { error: (err as Error).message });
-      }
-    }
 
     let response = '';
     let stderr = '';
@@ -1191,17 +1165,6 @@ export async function processCompletion(
         }
       } catch (err) {
         reqLogger.warn('workspace_commit_failed', { error: (err as Error).message });
-      }
-    }
-
-    // Host-side finalize: git push + GCS cache update on bind-mount paths after exit.
-    // Sandbox-side (k8s) skips this — the runner handles it in-pod.
-    if (agentSandbox.workspaceLocation === 'host' && lifecyclePlan.gitUrl) {
-      try {
-        await finalizeGitWorkspace(lifecyclePlan);
-        reqLogger.debug('host_finalize_done');
-      } catch (err) {
-        reqLogger.warn('host_finalize_failed', { error: (err as Error).message });
       }
     }
 

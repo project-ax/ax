@@ -42,7 +42,7 @@ export interface AgentConfig {
   /** If true, the IPC client listens for an incoming connection instead of
    *  connecting out. Used by Apple Container sandbox (reverse bridge). */
   ipcListen?: boolean;
-  /** Pre-connected IPC client (created before stdin read in listen/NATS mode).
+  /** Pre-connected IPC client (created before stdin read in listen/HTTP mode).
    *  Runners should use this instead of creating a new IPCClient. */
   ipcClient?: IIPCClient;
   workspace: string;
@@ -218,14 +218,14 @@ function parseArgs(): AgentConfig {
   const workspace = process.env.AX_WORKSPACE || '';
   const ipcListen = process.env.AX_IPC_LISTEN === '1';
 
-  const ipcTransport = process.env.AX_IPC_TRANSPORT ?? 'socket';
+  const isHTTPMode = !!process.env.AX_HOST_URL;
 
-  if (ipcTransport === 'socket' && (!ipcSocket || !workspace)) {
+  if (!isHTTPMode && (!ipcSocket || !workspace)) {
     logger.error('missing_args', { message: 'Usage: agent-runner --agent <type> --ipc-socket <path> (AX_WORKSPACE env var required)' });
     process.exit(1);
   }
-  if (ipcTransport === 'http' && !workspace) {
-    logger.error('missing_args', { message: 'AX_IPC_TRANSPORT=http requires AX_WORKSPACE env var' });
+  if (isHTTPMode && !workspace) {
+    logger.error('missing_args', { message: 'AX_HOST_URL requires AX_WORKSPACE env var' });
     process.exit(1);
   }
 
@@ -272,10 +272,6 @@ export interface StdinPayload {
   workspaceProvider?: string;
   /** Pre-loaded identity files from host (loaded from DocumentStore). */
   identity?: Partial<IdentityFiles>;
-  /** Git URL for scratch workspace provisioning (k8s in-pod). */
-  workspaceGitUrl?: string;
-  /** Git ref for workspace checkout. */
-  workspaceGitRef?: string;
   /** GCS cache key for workspace restore. */
   workspaceCacheKey?: string;
   /** GCS prefix for agent scope provisioning. */
@@ -334,8 +330,6 @@ export function parseStdinPayload(data: string): StdinPayload {
         // Identity from host (loaded from DocumentStore)
         identity: parsed.identity && typeof parsed.identity === 'object' ? parsed.identity as Partial<IdentityFiles> : undefined,
         // Workspace provisioning fields (sandbox-side providers provision in-pod)
-        workspaceGitUrl: typeof parsed.workspaceGitUrl === 'string' ? parsed.workspaceGitUrl : undefined,
-        workspaceGitRef: typeof parsed.workspaceGitRef === 'string' ? parsed.workspaceGitRef : undefined,
         workspaceCacheKey: typeof parsed.workspaceCacheKey === 'string' ? parsed.workspaceCacheKey : undefined,
         agentGcsPrefix: typeof parsed.agentGcsPrefix === 'string' ? parsed.agentGcsPrefix : undefined,
         userGcsPrefix: typeof parsed.userGcsPrefix === 'string' ? parsed.userGcsPrefix : undefined,
@@ -356,7 +350,7 @@ export function parseStdinPayload(data: string): StdinPayload {
  * Writes hash snapshots to /tmp/.ax-hashes.json for the release step.
  */
 async function provisionWorkspaceFromPayload(payload: StdinPayload): Promise<void> {
-  const { provisionScope, provisionWorkspace } = await import('./workspace.js');
+  const { provisionScope } = await import('./workspace.js');
   const { CANONICAL } = await import('../providers/sandbox/canonical-paths.js');
   const snapshot: Record<string, [string, string][]> = {};
 
@@ -399,20 +393,6 @@ async function provisionWorkspaceFromPayload(payload: StdinPayload): Promise<voi
       logger.warn('provision_session_scope_failed', { error: (err as Error).message });
     }
 
-    // Git workspace → /workspace/scratch (even in HTTP-GCS mode, bootstrap repo if configured)
-    if (payload.workspaceGitUrl) {
-      try {
-        const result = await provisionWorkspace(CANONICAL.scratch, '', {
-          gitUrl: payload.workspaceGitUrl,
-          ref: payload.workspaceGitRef,
-          cacheKey: payload.workspaceCacheKey,
-        });
-        logger.info('provision_workspace', { source: result.source, durationMs: result.durationMs });
-      } catch (err) {
-        logger.warn('provision_workspace_failed', { error: (err as Error).message });
-      }
-    }
-
     // Write hash snapshot for workspace release to diff against
     if (Object.keys(snapshot).length > 0) {
       try {
@@ -423,20 +403,6 @@ async function provisionWorkspaceFromPayload(payload: StdinPayload): Promise<voi
       }
     }
     return;
-  }
-
-  // Git workspace → /workspace/scratch
-  if (payload.workspaceGitUrl) {
-    try {
-      const result = await provisionWorkspace(CANONICAL.scratch, '', {
-        gitUrl: payload.workspaceGitUrl,
-        ref: payload.workspaceGitRef,
-        cacheKey: payload.workspaceCacheKey,
-      });
-      logger.info('provision_workspace', { source: result.source, durationMs: result.durationMs });
-    } catch (err) {
-      logger.warn('provision_workspace_failed', { error: (err as Error).message });
-    }
   }
 
   // Agent scope → /workspace/agent
@@ -513,7 +479,7 @@ export async function run(config: AgentConfig): Promise<void> {
 
 /**
  * Apply a parsed StdinPayload to the AgentConfig.
- * Shared between stdin and NATS work subscription paths.
+ * Shared between stdin and NATS work dispatch paths.
  */
 function applyPayload(config: AgentConfig, payload: StdinPayload): void {
   const msgText = typeof payload.message === 'string' ? payload.message : extractText(payload.message);
@@ -537,8 +503,6 @@ function applyPayload(config: AgentConfig, payload: StdinPayload): void {
   config.requestId = payload.requestId;
   config.sessionScope = payload.sessionScope;
   // Update the IPC client with session context from the payload.
-  // For NATS mode, the token is critical — it scopes the IPC subject to
-  // ipc.request.{requestId}.{token} which the host handler subscribes to.
   if (config.ipcClient) {
     config.ipcClient.setContext({
       sessionId: payload.sessionId,
@@ -623,14 +587,13 @@ if (isMain) {
   const config = parseArgs();
   logger.debug('main_start', { agent: config.agent, workspace: config.workspace });
 
-  // Choose IPC transport based on env var. Four modes:
-  // 1. HTTP (k8s, new): use HttpIPCClient + NATS queue group for work dispatch
-  // 2. NATS (k8s, legacy): use NATS request/reply for IPC
-  // 3. Listen (Apple Container): listen for incoming connection before stdin
-  // 4. Default (socket connect): runners create their own IPCClient later
-  const ipcTransport = process.env.AX_IPC_TRANSPORT ?? 'socket';
+  // Choose IPC transport. Three modes:
+  // 1. HTTP (k8s): AX_HOST_URL set → HttpIPCClient + NATS queue group for work dispatch
+  // 2. Listen (Apple Container): AX_IPC_LISTEN=1 → listen for incoming connection before stdin
+  // 3. Default (socket connect): runners create their own IPCClient later
+  const isHTTPMode = !!process.env.AX_HOST_URL;
 
-  if (ipcTransport === 'http') {
+  if (isHTTPMode) {
     // K8s HTTP mode: use HttpIPCClient for IPC, NATS only for work dispatch.
     const { HttpIPCClient } = await import('./http-ipc-client.js');
     const client = new HttpIPCClient({

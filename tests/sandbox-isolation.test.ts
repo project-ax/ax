@@ -473,12 +473,11 @@ describe('k8s pod spec workspace tier volumes', () => {
 // ── K8s Pod Spec GCS/Git Env Vars ─────────────────────────────────────
 
 describe('k8s pod spec GCS/git env vars', () => {
-  test('k8s pod spec includes GCS and git workspace env vars', async () => {
+  test('k8s pod spec includes GCS workspace env vars', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(resolve('src/providers/sandbox/k8s.ts'), 'utf-8');
     expect(source).toContain('GCS_WORKSPACE_BUCKET');
     expect(source).toContain('WORKSPACE_CACHE_BUCKET');
-    expect(source).toContain('AX_WORKSPACE_GIT_URL');
   });
 });
 
@@ -565,33 +564,9 @@ describe('lifecycle dispatch replaces three-phase orchestration', () => {
     expect(source).not.toContain('workspace-cli.js cleanup');
   });
 
-  test('server-completions uses workspaceLocation for lifecycle dispatch', async () => {
-    const { readFileSync } = await import('node:fs');
-    const source = readFileSync(resolve('src/host/server-completions.ts'), 'utf-8');
-    expect(source).toContain('workspaceLocation');
-    expect(source).toContain('prepareGitWorkspace');
-    expect(source).toContain('finalizeGitWorkspace');
-    expect(source).toContain('buildLifecyclePlan');
-  });
 });
 
-// ── In-Pod Workspace Cleanup (Sandbox-Side Finalize) ─────────────────
-
-describe('in-pod workspace cleanup (sandbox-side finalize)', () => {
-  test('claude-code runner calls releaseWorkspace after workspace release', async () => {
-    const { readFileSync } = await import('node:fs');
-    const source = readFileSync(resolve('src/agent/runners/claude-code.ts'), 'utf-8');
-    expect(source).toContain('releaseWorkspace');
-    expect(source).toContain('workspace_cleanup');
-  });
-
-  test('pi-session runner calls releaseWorkspace after workspace release', async () => {
-    const { readFileSync } = await import('node:fs');
-    const source = readFileSync(resolve('src/agent/runners/pi-session.ts'), 'utf-8');
-    expect(source).toContain('releaseWorkspace');
-    expect(source).toContain('workspace_cleanup');
-  });
-});
+// In-pod git workspace cleanup removed — git workspace provisioning no longer exists.
 
 // ── Work Payload Workspace Provisioning Fields ───────────────────────
 
@@ -607,7 +582,6 @@ describe('work payload includes workspace provisioning fields', () => {
   test('StdinPayload type includes provisioning fields', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync(resolve('src/agent/runner.ts'), 'utf-8');
-    expect(source).toContain('workspaceGitUrl');
     expect(source).toContain('agentGcsPrefix');
     expect(source).toContain('agentReadOnly');
   });

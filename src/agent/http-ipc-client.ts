@@ -1,8 +1,8 @@
 // src/agent/http-ipc-client.ts — HTTP-based IPC client for k8s sandbox pods.
 //
-// Drop-in replacement for NATSIPCClient when running inside a k8s pod with
-// AX_IPC_TRANSPORT=http. Uses fetch() POST to host HTTP server instead of
-// NATS request/reply. Selected by runner.ts based on env var.
+// Used when running inside a k8s pod (AX_HOST_URL set). Uses fetch() POST to
+// host HTTP server instead of Unix sockets. Selected by runner.ts when
+// AX_HOST_URL is present.
 
 import { getLogger } from '../logger.js';
 import type { IIPCClient } from './runner.js';

@@ -1,0 +1,134 @@
+# Kind cluster overrides for automated regression tests
+#
+# Uses k8s sandbox with HTTP IPC and NATS work dispatch.
+# Host pod creates sandbox pods via K8s API for each request.
+# All external services mocked via mock-server on host.
+# URL rewrites (set dynamically by global-setup.ts) redirect
+# api.linear.app and mock-target.test to mock server.
+
+global:
+  imageTag: local
+  imageRepository: ax-test
+
+imageDefaults:
+  registry: ""
+  tag: local
+  pullPolicy: IfNotPresent
+
+host:
+  replicas: 1
+  image:
+    registry: ""
+    repository: ax-test
+    tag: local
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: "500m", memory: "1Gi" }
+    limits: { cpu: "1", memory: "2Gi" }
+
+config:
+  agent: pi-coding-agent
+  profile: yolo
+  models:
+    default:
+      - openrouter/google/gemini-3-flash-preview
+  providers:
+    memory: cortex
+    audit: database
+    credentials: database
+    sandbox: k8s
+    screener: static
+    scheduler: plainjob
+    browser: none
+    skills: git
+    channels: []
+    web: fetch
+    scanner: patterns
+    storage: database
+    database: postgresql
+    eventbus: nats
+    workspace: gcs
+  history:
+    max_turns: 50
+    thread_context_turns: 5
+    summarize: false
+    summarize_threshold: 40
+    summarize_keep_recent: 10
+    memory_recall: true
+    memory_recall_limit: 5
+    memory_recall_scope: "*"
+    embedding_model: deepinfra/Qwen/Qwen3-Embedding-0.6B
+    embedding_dimensions: 1024
+  workspace:
+    bucket: ax-e2e-workspace
+    maxFileSize: 10485760
+    maxFiles: 100
+    maxCommitSize: 52428800
+    ignorePatterns:
+      - "node_modules"
+      - ".git"
+  sandbox:
+    timeout_sec: 120
+    memory_mb: 512
+  scheduler:
+    active_hours:
+      start: "00:00"
+      end: "23:59"
+      timezone: UTC
+    max_token_budget: 4096
+    heartbeat_interval_min: 60
+  web_proxy: true
+
+namespace:
+  create: false
+  name: ax-e2e
+
+poolController:
+  enabled: false
+
+sandbox:
+  runtimeClass: ""
+  image:
+    registry: ""
+    repository: ax-test
+    tag: local
+    pullPolicy: IfNotPresent
+
+postgresql:
+  external:
+    enabled: false
+  internal:
+    enabled: true
+    auth:
+      database: ax
+      username: ax
+    primary:
+      persistence:
+        size: 1Gi
+
+nats:
+  enabled: true
+  config:
+    cluster:
+      enabled: false
+    jetstream:
+      enabled: true
+      memoryStore:
+        enabled: true
+        maxSize: 256Mi
+
+webProxy:
+  enabled: true
+
+networkPolicies:
+  enabled: false
+
+apiCredentials:
+  existingSecret: "ax-api-credentials"
+  envVars:
+    OPENROUTER_API_KEY: "OPENROUTER_API_KEY"
+    OPENROUTER_BASE_URL: "OPENROUTER_BASE_URL"
+    STORAGE_EMULATOR_HOST: "STORAGE_EMULATOR_HOST"
+    GCS_WORKSPACE_BUCKET: "GCS_WORKSPACE_BUCKET"
+    CLAWHUB_API_URL: "CLAWHUB_API_URL"
+    DEEPINFRA_API_KEY: "DEEPINFRA_API_KEY"

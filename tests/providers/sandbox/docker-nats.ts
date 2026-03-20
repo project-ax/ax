@@ -75,7 +75,6 @@ export async function create(_config: Config, opts: DockerNATSOptions): Promise<
         ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
 
         // NATS + HTTP IPC environment (k8s mode)
-        '-e', `AX_IPC_TRANSPORT=http`,
         '-e', `NATS_URL=${natsUrl}`,
         '-e', `POD_NAME=${podName}`,
         '-e', `AX_HOST_URL=${hostUrl}`,

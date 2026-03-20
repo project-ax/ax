@@ -100,7 +100,7 @@ describe('pool-controller k8s-client createPod', () => {
     expect(natsPass).toBeUndefined();
   });
 
-  test('createPod sets AX_IPC_TRANSPORT=http', async () => {
+  test('createPod sets AX_HOST_URL', async () => {
     delete process.env.NATS_SANDBOX_PASS;
 
     const client = await createPoolK8sClient('ax');
@@ -109,8 +109,8 @@ describe('pool-controller k8s-client createPod', () => {
     const body = mockCreateNamespacedPod.mock.calls[0][0].body;
     const env = body.spec.containers[0].env;
 
-    const transport = env.find((e: any) => e.name === 'AX_IPC_TRANSPORT');
-    expect(transport).toEqual({ name: 'AX_IPC_TRANSPORT', value: 'http' });
+    const hostUrl = env.find((e: any) => e.name === 'AX_HOST_URL');
+    expect(hostUrl).toBeDefined();
   });
 
   test('createPod sets NATS_URL from template', async () => {

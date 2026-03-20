@@ -18,29 +18,12 @@ describe('workspace-release', () => {
     expect(source).toContain('release');
   });
 
-  test('passes --token in HTTP mode for direct release', async () => {
+  test('passes --token for direct release', async () => {
     const { readFileSync } = await import('node:fs');
     const source = readFileSync('src/agent/workspace-release.ts', 'utf-8');
 
     expect(source).toContain("'--token'");
     expect(source).toContain('AX_IPC_TOKEN');
-    expect(source).toContain("AX_IPC_TRANSPORT === 'http'");
-  });
-
-  test('skips IPC call in direct release mode', async () => {
-    const { readFileSync } = await import('node:fs');
-    const source = readFileSync('src/agent/workspace-release.ts', 'utf-8');
-
-    expect(source).toContain('if (isDirectRelease)');
-    expect(source).toContain("mode: 'direct'");
-  });
-
-  test('sends workspace_release IPC with staging_key in legacy mode', async () => {
-    const { readFileSync } = await import('node:fs');
-    const source = readFileSync('src/agent/workspace-release.ts', 'utf-8');
-
-    expect(source).toContain("action: 'workspace_release'");
-    expect(source).toContain('staging_key');
   });
 
   test('skips IPC call when result is empty (no changes)', async () => {

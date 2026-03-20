@@ -2,6 +2,52 @@
 
 End-to-end test framework, simulated providers, scenario coverage.
 
+## [2026-03-20] — Update ax-debug skill to prefer e2e infrastructure
+
+**Task:** Restructure ax-debug skill to use e2e test infrastructure as the primary debugging approach
+**What I did:** Rewrote ax-debug skill with a 3-tier hierarchy: (1) E2E test infrastructure (preferred — deterministic, CI-friendly), (2) Kind cluster dev loop (production-parity pod behavior), (3) Local process harnesses (debugger attachment). Added Tier 1 section documenting the full e2e architecture, debugging workflow, how to add reproduction tests and scripted turns, and when to escalate. Updated "Debugging Specific Issues" section to lead with Tier 1 steps. All existing Tier 2/3 content preserved.
+**Files touched:** .claude/skills/ax-debug/SKILL.md (rewritten)
+**Outcome:** Success — skill now directs to e2e tests first with clear escalation criteria
+**Notes:** The key insight is that most bugs can be reproduced with a scripted turn + test case, avoiding the overhead of manual kind cluster setup or local process juggling.
+
+## [2026-03-20] — Update skills to match test restructuring
+
+**Task:** Update ax-testing, ax-debug, and acceptance-test skills to reflect recent commits that restructured tests
+**What I did:**
+1. Deleted `acceptance-test` skill — the entire `tests/acceptance/` directory was removed; the manual test plan approach was replaced by automated vitest regression tests in `tests/e2e/`
+2. Updated `ax-testing` skill — refreshed the complete directory listing to match current files, removed references to deleted `tests/e2e/scenarios/`, added new e2e regression test section, added `npm run test:e2e` command, documented ScriptedTurn pattern and mock server architecture
+3. Left `ax-debug` skill unchanged — all referenced files still exist (`scripts/k8s-dev.sh`, `run-http-local.ts`, etc.)
+**Files touched:** .claude/skills/acceptance-test/SKILL.md (deleted), .claude/skills/ax-testing/SKILL.md (rewritten)
+**Outcome:** Success — skills now accurately reflect the codebase
+**Notes:** The old acceptance-test skill was a 1000-line manual workflow for spawning agents against live servers. The new tests/e2e/ approach uses mock servers with scripted LLM responses, making tests deterministic and CI-friendly.
+
+## [2026-03-20 10:50] — Restructure acceptance tests into tests/e2e/
+
+**Task:** Refactor test directory structure: delete old tests/e2e/, flatten tests/acceptance/automated/, split scripted-turns.ts into modules, rename tests/acceptance/ to tests/e2e/
+**What I did:**
+1. Deleted old tests/e2e/ (8 sandbox test files, superseded)
+2. Flattened tests/acceptance/automated/* up one level into tests/acceptance/
+3. Split scripted-turns.ts into tests/acceptance/scripts/ with individual files per turn category (types, bootstrap, chat, skills, memory, scheduler, index)
+4. Renamed tests/acceptance/ to tests/e2e/ via git mv
+5. Updated import in mock-server/openrouter.ts (../scripted-turns.js -> ../scripts/index.js)
+6. Updated tests/e2e/vitest.config.ts paths
+7. Updated root vitest.config.ts excludes (removed old tests/acceptance/automated/** entry)
+8. Renamed package.json script test:acceptance -> test:e2e
+**Files touched:**
+- Deleted: tests/e2e/ (old), tests/acceptance/automated/, tests/acceptance/scripted-turns.ts
+- Created: tests/e2e/scripts/{types,bootstrap,chat,skills,memory,scheduler,index}.ts
+- Modified: tests/e2e/mock-server/openrouter.ts, tests/e2e/vitest.config.ts, vitest.config.ts, package.json
+**Outcome:** Success — 215 test files, 2478 tests pass. Mock server verified. All imports clean.
+**Notes:** git mv required staging the flattened state first since git tracked the old automated/ paths.
+
+## [2026-03-20 10:10] — Delete Layer A scenario tests, keep Layer B sandbox tests
+
+**Task:** Remove Layer A scenario tests from tests/e2e/ while preserving Layer B sandbox tests
+**What I did:** Verified import dependencies before deleting. Found that `scriptable-llm.ts` and `mock-providers.ts` are imported by all 4 kept test files and both server harnesses, so they were NOT deleted. Deleted `tests/e2e/scenarios/` (13 test files), `tests/e2e/harness.ts`, and `tests/e2e/scripted-llm.ts`. Staged deletions and ran full test suite (215 files, 2478 tests pass).
+**Files touched:** Deleted 15 files (13 scenario tests + harness.ts + scripted-llm.ts), 3740 lines removed
+**Outcome:** Success — no test regressions
+**Notes:** `scriptable-llm.ts` and `mock-providers.ts` could not be deleted as originally planned because Layer B files depend on them. `vitest.e2e.config.ts` kept (still needed for Layer B tests).
+
 ## [2026-03-17 16:00] — K8s Docker E2E simulation: full stack implementation
 
 **Task:** Create Docker+NATS E2E tests simulating k8s host+sandbox communication

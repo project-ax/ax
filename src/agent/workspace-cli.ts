@@ -3,8 +3,8 @@
 //
 // Invoked as: node dist/agent/workspace-cli.js provision|cleanup|release [options]
 //
-// provision: GCS restore / git clone / scope provisioning / hash snapshot
-// cleanup:   diff scopes / upload changes to GCS / git push / delete workspace
+// provision: GCS cache restore / scope provisioning / hash snapshot
+// cleanup:   diff scopes / upload changes to GCS / delete workspace
 // release:   diff scopes / gzip / upload to host staging endpoint (k8s NATS mode)
 
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
@@ -44,10 +44,8 @@ async function provision(args: Record<string, string>): Promise<void> {
   const workspace = args.workspace ?? '/workspace';
   const session = args.session ?? 'default';
 
-  // Provision workspace (GCS cache → git clone → empty)
+  // Provision workspace (GCS cache → empty)
   const wsResult = await provisionWorkspace(workspace, session, {
-    gitUrl: args['git-url'],
-    ref: args.ref,
     cacheKey: args['cache-key'],
   });
   console.log(`[provision] workspace ready: ${wsResult.source} (${wsResult.durationMs}ms)`);
@@ -124,9 +122,8 @@ async function cleanup(args: Record<string, string>): Promise<void> {
     console.log(`[cleanup] session scope: ${changes.session.length} changes`);
   }
 
-  // Release workspace (git push, GCS cache update, cleanup)
+  // Release workspace (GCS cache update, cleanup)
   await releaseWorkspace(wsPath, {
-    pushChanges: args['push-changes'] === 'true',
     updateCache: args['update-cache'] === 'true',
     cacheKey: args['cache-key'],
   });
@@ -309,8 +306,8 @@ if (command === 'provision') {
   });
 } else {
   console.error(`Usage: workspace-cli.js <provision|cleanup|release> [options]`);
-  console.error(`  provision: --workspace --session --git-url --ref --cache-key --agent-gcs-prefix --user-gcs-prefix --session-gcs-prefix`);
-  console.error(`  cleanup:   --workspace --session --push-changes --update-cache --cache-key`);
+  console.error(`  provision: --workspace --session --cache-key --agent-gcs-prefix --user-gcs-prefix --session-gcs-prefix`);
+  console.error(`  cleanup:   --workspace --session --update-cache --cache-key`);
   console.error(`  release:   --host-url <url> [--scopes session,agent,user]`);
   process.exit(1);
 }
