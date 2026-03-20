@@ -388,25 +388,16 @@ async function handleAdminAPI(
     return;
   }
 
-  // POST /admin/api/credentials/provide — resolve a pending credential prompt
+  // POST /admin/api/credentials/provide — store a credential for future requests
   if (pathname === '/admin/api/credentials/provide' && method === 'POST') {
     try {
       const body = JSON.parse(await readBody(req));
-      const { sessionId, envName, value, requestId: credRequestId } = body;
-      if (typeof sessionId !== 'string' || !sessionId ||
-          typeof envName !== 'string' || !envName ||
-          typeof value !== 'string' ||
-          typeof credRequestId !== 'string' || !credRequestId) {
-        sendError(res, 400, 'Missing required fields: sessionId, envName, value, requestId');
+      const { envName, value } = body;
+      if (typeof envName !== 'string' || !envName || typeof value !== 'string') {
+        sendError(res, 400, 'Missing required fields: envName, value');
         return;
       }
       await deps.providers.credentials.set(envName, value);
-      deps.eventBus.emit({
-        type: 'credential.resolved',
-        requestId: credRequestId,
-        timestamp: Date.now(),
-        data: { envName, sessionId, value },
-      });
       sendJSON(res, { ok: true });
     } catch (err) {
       sendError(res, 400, `Invalid request: ${(err as Error).message}`);

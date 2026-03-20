@@ -127,12 +127,6 @@ export async function resolveOAuthCallback(
     if (!res.ok) {
       const text = await res.text();
       logger.error('oauth_token_exchange_failed', { provider, status: res.status, body: text });
-      eventBus.emit({
-        type: 'credential.resolved',
-        requestId,
-        timestamp: Date.now(),
-        data: { envName: req.name, sessionId, value: '' },
-      });
       return false;
     }
 
@@ -153,23 +147,9 @@ export async function resolveOAuthCallback(
     const credKey = `oauth:${req.name}`;
     await credentials.set(credKey, JSON.stringify(blob));
     logger.info('oauth_tokens_stored', { provider, credKey });
-
-    // Emit credential.resolved so processCompletion unblocks
-    eventBus.emit({
-      type: 'credential.resolved',
-      requestId,
-      timestamp: Date.now(),
-      data: { envName: req.name, sessionId, value: blob.access_token },
-    });
     return true;
   } catch (err) {
     logger.error('oauth_callback_error', { provider, error: (err as Error).message });
-    eventBus.emit({
-      type: 'credential.resolved',
-      requestId,
-      timestamp: Date.now(),
-      data: { envName: req.name, sessionId, value: '' },
-    });
     return false;
   }
 }

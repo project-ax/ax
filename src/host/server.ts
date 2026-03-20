@@ -656,27 +656,16 @@ export async function createServer(
       return;
     }
 
-    // POST /v1/credentials/provide — resolve a pending credential prompt
+    // POST /v1/credentials/provide — store a credential for future requests
     if (url === '/v1/credentials/provide' && req.method === 'POST') {
       try {
         const body = JSON.parse(await readBody(req));
-        const { sessionId, envName, value, requestId: credRequestId } = body;
-        if (typeof sessionId !== 'string' || !sessionId ||
-            typeof envName !== 'string' || !envName ||
-            typeof value !== 'string' ||
-            typeof credRequestId !== 'string' || !credRequestId) {
-          sendError(res, 400, 'Missing required fields: sessionId, envName, value, requestId');
+        const { envName, value } = body;
+        if (typeof envName !== 'string' || !envName || typeof value !== 'string') {
+          sendError(res, 400, 'Missing required fields: envName, value');
           return;
         }
-        // Store credential for future requests
         await providers.credentials.set(envName, value);
-        // Emit event so the waiting processCompletion unblocks (works across replicas via NATS)
-        eventBus.emit({
-          type: 'credential.resolved',
-          requestId: credRequestId,
-          timestamp: Date.now(),
-          data: { envName, sessionId, value },
-        });
         const responseBody = JSON.stringify({ ok: true });
         res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(responseBody) });
         res.end(responseBody);
