@@ -2,6 +2,20 @@
 
 Acceptance test skill and framework for validating features against plan design goals.
 
+## [2026-03-20 13:10] — Switch e2e tests from subprocess to k8s sandbox
+
+**Task:** Modify e2e test framework to use K8s sandbox with NATS work dispatch and HTTP IPC
+**What I did:**
+- Changed kind-values.yaml: `sandbox: subprocess` → `sandbox: k8s`, added `webProxy.enabled: true`, fixed secret key mappings
+- Added `url_rewrites` via Helm `--set` in global-setup.ts for mock-target.test and api.linear.app
+- Added `url_rewrites` to ConfigSchema in config.ts (was in types.ts but missing from Zod schema)
+- Fixed `getHostIP()` to use `host.docker.internal` on macOS (bridge gateway IP doesn't route to host)
+- Made build step non-fatal (tsc may exit non-zero but still emits dist/)
+- Increased all timeouts for K8s pod cold-start latency
+**Files touched:** tests/e2e/kind-values.yaml, tests/e2e/global-setup.ts, tests/e2e/vitest.config.ts, tests/e2e/regression.test.ts, src/config.ts
+**Outcome:** Success — all 18 tests pass with K8s sandbox pods
+**Notes:** Three bugs found during integration: (1) url_rewrites missing from ConfigSchema, (2) secret key mapping mismatch (kebab-case vs UPPER_CASE), (3) Docker bridge gateway unreachable from kind on macOS
+
 ## [2026-03-20 09:45] — Implement automated regression test suite (12 tasks)
 
 **Task:** Create a full automated regression test suite per docs/plans/2026-03-20-automated-regression-tests.md

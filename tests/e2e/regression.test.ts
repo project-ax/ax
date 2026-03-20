@@ -40,13 +40,13 @@ describe('regression test sequence', () => {
     const sessionId = `${SESSION_PREFIX}:bootstrap`;
     const res = await client.sendMessage(
       'Hello! My name is TestUser and I am here for acceptance testing.',
-      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+      { sessionId, user: 'testuser', timeoutMs: 120_000 },
     );
 
     expect(res.status).toBe(200);
     expect(res.content.length).toBeGreaterThan(0);
     expect(res.finishReason).toBeTruthy();
-  }, 120_000);
+  }, 180_000);
 
   // ──────────────────────────────────────────────────────────────────────
   // 2b. BOOTSTRAP — user sets agent identity
@@ -55,12 +55,12 @@ describe('regression test sequence', () => {
     const sessionId = `${SESSION_PREFIX}:bootstrap`;
     const res = await client.sendMessage(
       'Your name is Reginald. You are witty and funny. Your purpose is acceptance testing.',
-      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+      { sessionId, user: 'testuser', timeoutMs: 120_000 },
     );
 
     expect(res.status).toBe(200);
     expect(res.content.length).toBeGreaterThan(0);
-  }, 120_000);
+  }, 180_000);
 
   // ──────────────────────────────────────────────────────────────────────
   // 3. PERSISTENCE — new session, agent responds with established identity
@@ -69,12 +69,12 @@ describe('regression test sequence', () => {
     const sessionId = `${SESSION_PREFIX}:persist`;
     const res = await client.sendMessage(
       'Who are you? What is your name?',
-      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+      { sessionId, user: 'testuser', timeoutMs: 120_000 },
     );
 
     expect(res.status).toBe(200);
     expect(res.content.length).toBeGreaterThan(0);
-  }, 120_000);
+  }, 180_000);
 
   // ──────────────────────────────────────────────────────────────────────
   // 4. TOOL CALL — web_fetch through proxy
@@ -83,12 +83,12 @@ describe('regression test sequence', () => {
     const sessionId = `${SESSION_PREFIX}:tools`;
     const res = await client.sendMessage(
       'Please fetch this URL for me: http://mock-target.test/web-fetch-target',
-      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+      { sessionId, user: 'testuser', timeoutMs: 120_000 },
     );
 
     expect(res.status).toBe(200);
     expect(res.content.length).toBeGreaterThan(0);
-  }, 120_000);
+  }, 180_000);
 
   // ──────────────────────────────────────────────────────────────────────
   // 5. FILE OPS — agent creates files in workspace
@@ -97,12 +97,12 @@ describe('regression test sequence', () => {
     const sessionId = `${SESSION_PREFIX}:files`;
     const res = await client.sendMessage(
       'Please create a file called test-file.txt with the content "acceptance-test-content-12345"',
-      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+      { sessionId, user: 'testuser', timeoutMs: 120_000 },
     );
 
     expect(res.status).toBe(200);
     expect(res.content.length).toBeGreaterThan(0);
-  }, 120_000);
+  }, 180_000);
 
   // ──────────────────────────────────────────────────────────────────────
   // 6. FILE PERSIST — new session, agent reads back files
@@ -111,12 +111,12 @@ describe('regression test sequence', () => {
     const sessionId = `${SESSION_PREFIX}:files2`;
     const res = await client.sendMessage(
       'Can you read the file test-file.txt and tell me what it contains?',
-      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+      { sessionId, user: 'testuser', timeoutMs: 120_000 },
     );
 
     expect(res.status).toBe(200);
     expect(res.content.length).toBeGreaterThan(0);
-  }, 120_000);
+  }, 180_000);
 
   // ──────────────────────────────────────────────────────────────────────
   // 7. BASH + PROXY — curl command through web proxy
@@ -125,12 +125,12 @@ describe('regression test sequence', () => {
     const sessionId = `${SESSION_PREFIX}:proxy`;
     const res = await client.sendMessage(
       'Run a curl command to http://mock-target.test/web-fetch-target and show me the output',
-      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+      { sessionId, user: 'testuser', timeoutMs: 120_000 },
     );
 
     expect(res.status).toBe(200);
     expect(res.content.length).toBeGreaterThan(0);
-  }, 120_000);
+  }, 180_000);
 
   // ──────────────────────────────────────────────────────────────────────
   // 8a. SKILL INSTALL — triggers credential_required SSE event
@@ -139,14 +139,14 @@ describe('regression test sequence', () => {
     const sessionId = `${SESSION_PREFIX}:skills`;
     const res = await client.sendMessage(
       'Please install the Linear skill from ManuelHettich/linear',
-      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+      { sessionId, user: 'testuser', timeoutMs: 120_000 },
     );
 
     expect(res.status).toBe(200);
     // The response should indicate that a credential is needed
     // This may come as a named SSE event or in the response content
     expect(res.content.length).toBeGreaterThan(0);
-  }, 120_000);
+  }, 180_000);
 
   // ──────────────────────────────────────────────────────────────────────
   // 8b. CREDENTIALS — provide credential via POST
@@ -171,12 +171,12 @@ describe('regression test sequence', () => {
     const sessionId = `${SESSION_PREFIX}:skills`;
     const res = await client.sendMessage(
       'Show me my Linear issues. List all issues please.',
-      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+      { sessionId, user: 'testuser', timeoutMs: 120_000 },
     );
 
     expect(res.status).toBe(200);
     expect(res.content.length).toBeGreaterThan(0);
-  }, 120_000);
+  }, 180_000);
 
   // ──────────────────────────────────────────────────────────────────────
   // 10. MEMORY WRITE — store a preference via memory tool
@@ -185,12 +185,12 @@ describe('regression test sequence', () => {
     const sessionId = `${SESSION_PREFIX}:memory`;
     const res = await client.sendMessage(
       'Please remember that I prefer dark mode for all my settings.',
-      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+      { sessionId, user: 'testuser', timeoutMs: 120_000 },
     );
 
     expect(res.status).toBe(200);
     expect(res.content.length).toBeGreaterThan(0);
-  }, 120_000);
+  }, 180_000);
 
   // ──────────────────────────────────────────────────────────────────────
   // 11. MEMORY DEDUP — writing the same fact reinforces, not duplicates
@@ -199,12 +199,12 @@ describe('regression test sequence', () => {
     const sessionId = `${SESSION_PREFIX}:memory`;
     const res = await client.sendMessage(
       'Also remember too that I prefer dark mode — just to be sure.',
-      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+      { sessionId, user: 'testuser', timeoutMs: 120_000 },
     );
 
     expect(res.status).toBe(200);
     expect(res.content.length).toBeGreaterThan(0);
-  }, 120_000);
+  }, 180_000);
 
   // ──────────────────────────────────────────────────────────────────────
   // 12. MEMORY RECALL — new session, query memories
@@ -213,12 +213,12 @@ describe('regression test sequence', () => {
     const sessionId = `${SESSION_PREFIX}:memory2`;
     const res = await client.sendMessage(
       'What are my preferences? Recall from memory please.',
-      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+      { sessionId, user: 'testuser', timeoutMs: 120_000 },
     );
 
     expect(res.status).toBe(200);
     expect(res.content.length).toBeGreaterThan(0);
-  }, 120_000);
+  }, 180_000);
 
   // ──────────────────────────────────────────────────────────────────────
   // 13. MEMORY LIST — list all stored memories in scope
@@ -227,12 +227,12 @@ describe('regression test sequence', () => {
     const sessionId = `${SESSION_PREFIX}:memory2`;
     const res = await client.sendMessage(
       'List all memories you have stored. Show me everything remembered.',
-      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+      { sessionId, user: 'testuser', timeoutMs: 120_000 },
     );
 
     expect(res.status).toBe(200);
     expect(res.content.length).toBeGreaterThan(0);
-  }, 120_000);
+  }, 180_000);
 
   // ──────────────────────────────────────────────────────────────────────
   // 14. SCHEDULER ADD CRON — create a recurring scheduled task
@@ -241,12 +241,12 @@ describe('regression test sequence', () => {
     const sessionId = `${SESSION_PREFIX}:scheduler`;
     const res = await client.sendMessage(
       'Schedule a daily reminder at 9 AM to check my test results.',
-      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+      { sessionId, user: 'testuser', timeoutMs: 120_000 },
     );
 
     expect(res.status).toBe(200);
     expect(res.content.length).toBeGreaterThan(0);
-  }, 120_000);
+  }, 180_000);
 
   // ──────────────────────────────────────────────────────────────────────
   // 15. SCHEDULER RUN_AT — schedule a one-shot future task
@@ -255,12 +255,12 @@ describe('regression test sequence', () => {
     const sessionId = `${SESSION_PREFIX}:scheduler`;
     const res = await client.sendMessage(
       'Remind me at midnight on New Year\'s Eve. Run at 2026-12-31T23:59.',
-      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+      { sessionId, user: 'testuser', timeoutMs: 120_000 },
     );
 
     expect(res.status).toBe(200);
     expect(res.content.length).toBeGreaterThan(0);
-  }, 120_000);
+  }, 180_000);
 
   // ──────────────────────────────────────────────────────────────────────
   // 16. SCHEDULER LIST — verify scheduled jobs persist
@@ -269,10 +269,10 @@ describe('regression test sequence', () => {
     const sessionId = `${SESSION_PREFIX}:scheduler`;
     const res = await client.sendMessage(
       'What is currently scheduled? List all my scheduled jobs.',
-      { sessionId, user: 'testuser', timeoutMs: 90_000 },
+      { sessionId, user: 'testuser', timeoutMs: 120_000 },
     );
 
     expect(res.status).toBe(200);
     expect(res.content.length).toBeGreaterThan(0);
-  }, 120_000);
+  }, 180_000);
 });

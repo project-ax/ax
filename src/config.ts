@@ -156,6 +156,7 @@ const ConfigSchema = z.strictObject({
   }).default({ enabled: true, port: 8080 }),
   web_proxy: z.boolean().optional(),
   namespace: z.string().optional(),
+  url_rewrites: z.record(z.string(), z.string()).optional(),
 });
 
 /**

@@ -1,3 +1,15 @@
+### macOS Docker Desktop: use host.docker.internal, not bridge gateway
+**Date:** 2026-03-20
+**Context:** E2e tests with K8s sandbox got ECONNREFUSED when accessing mock server at Docker bridge gateway IP (172.19.0.1) from inside kind containers.
+**Lesson:** On macOS, the Docker bridge gateway (172.x.x.x) is inside the Linux VM and doesn't route to the macOS host. Always use `host.docker.internal` on macOS (`process.platform === 'darwin'`) to reach the host from inside kind/Docker containers.
+**Tags:** macos, docker, kind, networking, e2e
+
+### K8s sandbox needs all API env vars mapped in Helm secret
+**Date:** 2026-03-20
+**Context:** K8s sandbox pods got empty LLM responses because OPENROUTER_API_KEY and OPENROUTER_BASE_URL weren't set on the host pod. The Helm `apiCredentials.envVars` mapping had wrong secret keys (kebab-case vs UPPER_CASE).
+**Lesson:** The `apiCredentials.envVars` mapping in kind-values.yaml must use the EXACT secret key names created in global-setup.ts. Also include ALL env vars needed by the host (OPENROUTER_BASE_URL, STORAGE_EMULATOR_HOST, etc.), not just API keys. In subprocess mode these were unnecessary because the LLM call path was different; K8s sandbox uses the host's providers directly.
+**Tags:** k8s, helm, secrets, e2e, env-vars
+
 ### node-forge requires default import, not namespace import
 **Date:** 2026-03-19
 **Context:** proxy-ca.ts used `import * as forge from 'node-forge'` which worked locally with tsx but crashed in k8s container with `Cannot read properties of undefined (reading 'rsa')`.

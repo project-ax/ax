@@ -1,8 +1,10 @@
 # Kind cluster overrides for automated regression tests
 #
-# Uses subprocess sandbox (no NATS bridge needed).
+# Uses k8s sandbox with HTTP IPC and NATS work dispatch.
+# Host pod creates sandbox pods via K8s API for each request.
 # All external services mocked via mock-server on host.
-# URL rewrites redirect api.linear.app and mock-target.test to mock server.
+# URL rewrites (set dynamically by global-setup.ts) redirect
+# api.linear.app and mock-target.test to mock server.
 
 global:
   imageTag: local
@@ -34,7 +36,7 @@ config:
     memory: cortex
     audit: database
     credentials: database
-    sandbox: subprocess
+    sandbox: k8s
     screener: static
     scheduler: plainjob
     browser: none
@@ -81,8 +83,6 @@ namespace:
   create: false
   name: ax-e2e
 
-agentRuntime:
-  enabled: true
 poolController:
   enabled: false
 
@@ -117,11 +117,18 @@ nats:
         enabled: true
         maxSize: 256Mi
 
+webProxy:
+  enabled: true
+
 networkPolicies:
   enabled: false
 
 apiCredentials:
   existingSecret: "ax-api-credentials"
   envVars:
-    OPENROUTER_API_KEY: "openrouter-api-key"
-    DEEPINFRA_API_KEY: "deepinfra-api-key"
+    OPENROUTER_API_KEY: "OPENROUTER_API_KEY"
+    OPENROUTER_BASE_URL: "OPENROUTER_BASE_URL"
+    STORAGE_EMULATOR_HOST: "STORAGE_EMULATOR_HOST"
+    GCS_WORKSPACE_BUCKET: "GCS_WORKSPACE_BUCKET"
+    CLAWHUB_API_URL: "CLAWHUB_API_URL"
+    DEEPINFRA_API_KEY: "DEEPINFRA_API_KEY"
