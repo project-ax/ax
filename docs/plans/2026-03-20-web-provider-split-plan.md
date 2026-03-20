@@ -12,7 +12,7 @@
 
 ---
 
-### Task 1: New type interfaces
+## Task 1: New type interfaces
 
 **Files:**
 - Modify: `src/providers/web/types.ts`
@@ -87,7 +87,7 @@ git commit -m "feat(web): add WebExtractProvider and WebSearchProvider interface
 
 ---
 
-### Task 2: Tavily Extract provider
+## Task 2: Tavily Extract provider
 
 **Files:**
 - Create: `src/providers/web/tavily-extract.ts`
@@ -222,7 +222,7 @@ git commit -m "feat(web): add tavily extract provider"
 
 ---
 
-### Task 3: Tavily Search provider
+## Task 3: Tavily Search provider
 
 **Files:**
 - Create: `src/providers/web/tavily-search.ts`
@@ -357,7 +357,7 @@ git commit -m "feat(web): add tavily search provider"
 
 ---
 
-### Task 4: Brave Search provider
+## Task 4: Brave Search provider
 
 **Files:**
 - Create: `src/providers/web/brave-search.ts`
@@ -511,7 +511,7 @@ git commit -m "feat(web): add brave search provider"
 
 ---
 
-### Task 5: None stubs for extract and search
+## Task 5: None stubs for extract and search
 
 **Files:**
 - Create: `src/providers/web/none-extract.ts`
@@ -586,7 +586,7 @@ git commit -m "feat(web): add disabled stubs for extract and search"
 
 ---
 
-### Task 6: Update provider map and config types
+## Task 6: Update provider map and config types
 
 **Files:**
 - Modify: `src/host/provider-map.ts` (lines 44-48, 114)
@@ -684,7 +684,7 @@ git commit -m "feat(web): update config, types, and provider map for extract/sea
 
 ---
 
-### Task 7: Update provider registry loading
+## Task 7: Update provider registry loading
 
 **Files:**
 - Modify: `src/host/registry.ts` (line 116)
@@ -723,7 +723,7 @@ git commit -m "feat(web): update registry loading for split web providers"
 
 ---
 
-### Task 8: Update IPC schema and handler
+## Task 8: Update IPC schema and handler
 
 **Files:**
 - Modify: `src/ipc-schemas.ts` (add `WebExtractSchema`)
@@ -859,7 +859,7 @@ git commit -m "feat(web): add web_extract IPC schema and update handlers"
 
 ---
 
-### Task 9: Update tool catalog
+## Task 9: Update tool catalog
 
 **Files:**
 - Modify: `src/agent/tool-catalog.ts` (lines 87-115)
@@ -920,7 +920,7 @@ git commit -m "feat(web): add extract variant to web tool catalog"
 
 ---
 
-### Task 10: Update onboarding defaults and remaining references
+## Task 10: Update onboarding defaults and remaining references
 
 **Files:**
 - Modify: `src/onboarding/prompts.ts`
@@ -982,7 +982,7 @@ git commit -m "feat(web): update onboarding defaults and fix remaining reference
 
 ---
 
-### Task 11: Delete old files
+## Task 11: Delete old files
 
 **Files:**
 - Delete: `src/providers/web/tavily.ts`
@@ -1008,7 +1008,7 @@ git commit -m "refactor(web): remove old monolithic tavily and none providers"
 
 ---
 
-### Task 12: Update skill and documentation
+## Task 12: Update skill and documentation
 
 **Files:**
 - Modify: `.claude/skills/ax-provider-web/skill.md`
@@ -1036,7 +1036,7 @@ git commit -m "docs: update web provider skill and journal for extract/search sp
 
 ---
 
-### Task 13: Final verification
+## Task 13: Final verification
 
 **Step 1: Run full build**
 

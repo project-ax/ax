@@ -94,7 +94,7 @@ function mockProviders(opts?: {
     },
     channels: [],
     webFetch: {
-      async fetch() { return { status: 200, headers: {}, body: '', taint: { source: 'web', trust: 'external', timestamp: new Date() } }; },
+      async fetch() { return { status: 200, headers: {}, body: '', taint: { source: 'web_fetch', trust: 'external', timestamp: new Date() } }; },
     },
     webExtract: {
       async extract() { return { url: '', content: '', taint: { source: 'web_extract', trust: 'external', timestamp: new Date() } }; },
