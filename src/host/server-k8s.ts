@@ -302,10 +302,10 @@ async function main(): Promise<void> {
     if (isK8s) {
       activeTokens.set(turnToken, {
         handleIPC: wrappedHandleIPC,
-        ctx: { sessionId, agentId: 'main', userId: userId ?? defaultUserId },
+        ctx: { sessionId, agentId: 'main', userId: userId ?? defaultUserId, requestId },
         provisionIds: { agent: agentName, user: userId ?? defaultUserId, session: sessionId },
       });
-      logger.info('token_registered', { sessionId, requestId, turnToken });
+      logger.info('token_registered', { sessionId, requestId, tokenPresent: true });
     }
 
     // NATS work publisher

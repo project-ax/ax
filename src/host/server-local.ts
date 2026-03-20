@@ -133,7 +133,13 @@ export async function createServer(
     }
   }
   // Cleanup: USER_BOOTSTRAP.md should NOT be in identityFilesDir (it's passed via stdin).
-  try { unlinkSync(join(identityFilesDir, 'USER_BOOTSTRAP.md')); } catch { /* may not exist */ }
+  try {
+    unlinkSync(join(identityFilesDir, 'USER_BOOTSTRAP.md'));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      logger.debug('user_bootstrap_cleanup_failed', { error: (err as Error).message });
+    }
+  }
 
   // USER_BOOTSTRAP.md → agentConfigDir (filesystem copy, server.ts-specific)
   {
