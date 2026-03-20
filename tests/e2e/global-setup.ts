@@ -15,7 +15,7 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { startMockServer, type MockServerInfo } from './mock-server/index.js';
 
-const STATE_DIR = '/tmp/ax-acceptance-state';
+const STATE_DIR = '/tmp/ax-e2e-state';
 const STATE_FILE = join(STATE_DIR, 'state.json');
 
 interface SetupState {
@@ -74,13 +74,17 @@ async function waitForHealth(url: string, timeoutMs = 60_000): Promise<void> {
 }
 
 /** Find a free port. */
-function findFreePort(): number {
-  const { createServer } = require('node:net');
-  const srv = createServer();
-  srv.listen(0, '127.0.0.1');
-  const port = srv.address().port;
-  srv.close();
-  return port;
+async function findFreePort(): Promise<number> {
+  const { createServer } = await import('node:net');
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.listen(0, '127.0.0.1', () => {
+      const addr = srv.address();
+      const port = typeof addr === 'object' && addr ? addr.port : 0;
+      srv.close(() => resolve(port));
+    });
+    srv.on('error', reject);
+  });
 }
 
 export async function setup(): Promise<void> {
@@ -147,7 +151,7 @@ export async function setup(): Promise<void> {
   // 7. Create namespace
   console.log(`[setup] Creating namespace...`);
   try {
-    run('kubectl', ['create', 'namespace', 'ax-acceptance']);
+    run('kubectl', ['create', 'namespace', 'ax-e2e']);
   } catch {
     // Namespace may already exist
   }
@@ -155,17 +159,17 @@ export async function setup(): Promise<void> {
   // 8. Create k8s secret with env vars pointing at mock server
   console.log(`[setup] Creating API credentials secret...`);
   try {
-    run('kubectl', ['delete', 'secret', 'ax-api-credentials', '-n', 'ax-acceptance']);
+    run('kubectl', ['delete', 'secret', 'ax-api-credentials', '-n', 'ax-e2e']);
   } catch {
     // Secret may not exist yet
   }
   run('kubectl', [
     'create', 'secret', 'generic', 'ax-api-credentials',
-    '-n', 'ax-acceptance',
+    '-n', 'ax-e2e',
     `--from-literal=OPENROUTER_API_KEY=test-openrouter-key`,
     `--from-literal=OPENROUTER_BASE_URL=${mockBaseUrl}/v1`,
     `--from-literal=STORAGE_EMULATOR_HOST=${mockBaseUrl}`,
-    `--from-literal=GCS_WORKSPACE_BUCKET=ax-acceptance-workspace`,
+    `--from-literal=GCS_WORKSPACE_BUCKET=ax-e2e-workspace`,
     `--from-literal=CLAWHUB_API_URL=${mockBaseUrl}/clawhub/api/v1`,
     `--from-literal=DEEPINFRA_API_KEY=test-deepinfra-key`,
   ]);
@@ -175,7 +179,7 @@ export async function setup(): Promise<void> {
   const valuesPath = join(import.meta.dirname, 'kind-values.yaml');
   run('helm', [
     'upgrade', '--install', 'ax', './charts/ax',
-    '-n', 'ax-acceptance',
+    '-n', 'ax-e2e',
     '-f', valuesPath,
     '--set', `global.imageTag=local`,
     '--set', `global.imageRepository=ax-test`,
@@ -186,13 +190,13 @@ export async function setup(): Promise<void> {
 
   // 10. Wait for rollout
   console.log(`[setup] Waiting for rollout...`);
-  run('kubectl', ['rollout', 'status', 'deployment/ax-host', '-n', 'ax-acceptance', '--timeout=180s']);
+  run('kubectl', ['rollout', 'status', 'deployment/ax-host', '-n', 'ax-e2e', '--timeout=180s']);
 
   // 11. Port-forward
-  const localPort = findFreePort();
+  const localPort = await findFreePort();
   console.log(`[setup] Port-forwarding to localhost:${localPort}...`);
   const pf = spawn('kubectl', [
-    'port-forward', 'svc/ax-host', `${localPort}:8080`, '-n', 'ax-acceptance',
+    'port-forward', 'svc/ax-host', `${localPort}:80`, '-n', 'ax-e2e',
   ], {
     stdio: ['pipe', 'pipe', 'pipe'],
     detached: true,
@@ -221,7 +225,7 @@ export async function setup(): Promise<void> {
 
   // 14. Wait for health
   console.log(`[setup] Waiting for server health...`);
-  await waitForHealth(`${serverUrl}/health`, 60_000);
+  await waitForHealth(`${serverUrl}/health`, 120_000);
   console.log(`[setup] Server healthy at ${serverUrl}`);
 }
 

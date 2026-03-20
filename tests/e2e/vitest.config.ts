@@ -1,6 +1,7 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  root: import.meta.dirname + '/../..',
   test: {
     globals: true,
     testTimeout: 120_000,       // 2 min per test

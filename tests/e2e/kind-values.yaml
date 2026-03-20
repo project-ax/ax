@@ -8,6 +8,22 @@ global:
   imageTag: local
   imageRepository: ax-test
 
+imageDefaults:
+  registry: ""
+  tag: local
+  pullPolicy: IfNotPresent
+
+host:
+  replicas: 1
+  image:
+    registry: ""
+    repository: ax-test
+    tag: local
+    pullPolicy: IfNotPresent
+  resources:
+    requests: { cpu: "500m", memory: "1Gi" }
+    limits: { cpu: "1", memory: "2Gi" }
+
 config:
   agent: pi-coding-agent
   profile: yolo
@@ -42,8 +58,7 @@ config:
     embedding_model: deepinfra/Qwen/Qwen3-Embedding-0.6B
     embedding_dimensions: 1024
   workspace:
-    basePath: /workspace
-    bucket: ax-acceptance-workspace
+    bucket: ax-e2e-workspace
     maxFileSize: 10485760
     maxFiles: 100
     maxCommitSize: 52428800
@@ -64,13 +79,7 @@ config:
 
 namespace:
   create: false
-  name: ax-acceptance
-
-host:
-  replicas: 1
-  resources:
-    requests: { cpu: "500m", memory: "1Gi" }
-    limits: { cpu: "1", memory: "2Gi" }
+  name: ax-e2e
 
 agentRuntime:
   enabled: true
@@ -79,6 +88,11 @@ poolController:
 
 sandbox:
   runtimeClass: ""
+  image:
+    registry: ""
+    repository: ax-test
+    tag: local
+    pullPolicy: IfNotPresent
 
 postgresql:
   external:
