@@ -8,12 +8,13 @@ namespace:
   name: ax-dev
 
 imageDefaults:
+  registry: ""
   tag: latest
   pullPolicy: IfNotPresent
 
 host:
   replicas: 1
-  command: ["node", "--inspect=0.0.0.0:9229", "/ax-dev/dist/host/host-process.js"]
+  command: ["node", "--inspect=0.0.0.0:9229", "/opt/ax/dist/host/host-process.js"]
   extraVolumeMounts:
     - name: ax-dev-dist
       mountPath: /opt/ax/dist
@@ -34,7 +35,7 @@ host:
 
 poolController:
   replicas: 1
-  command: ["node", "/ax-dev/dist/pool-controller/main.js"]
+  command: ["node", "/opt/ax/dist/pool-controller/main.js"]
   reconcileIntervalMs: 3000
   extraVolumeMounts:
     - name: ax-dev-dist
@@ -56,7 +57,7 @@ sandbox:
       minReady: 2
       maxReady: 5
       template:
-        command: ["node", "/ax-dev/dist/agent/runner.js"]
+        command: ["node", "/opt/ax/dist/agent/runner.js"]
         cpu: "500m"
         memory: "512Mi"
         workspaceRoot: "/workspace"
@@ -81,7 +82,7 @@ sandbox:
       minReady: 0
       maxReady: 1
       template:
-        command: ["node", "/ax-dev/dist/agent/runner.js"]
+        command: ["node", "/opt/ax/dist/agent/runner.js"]
         cpu: "1"
         memory: "2Gi"
         workspaceRoot: "/workspace"
@@ -140,7 +141,8 @@ networkPolicies:
 apiCredentials:
   existingSecret: "ax-api-credentials"
   envVars:
-    ANTHROPIC_API_KEY: "anthropic-api-key"
+    OPENROUTER_API_KEY: "openrouter-api-key"
+    DEEPINFRA_API_KEY: "deepinfra-api-key"
 
 webProxy:
   enabled: true
@@ -149,6 +151,9 @@ webProxy:
 config:
   profile: balanced
   web_proxy: true
+  models:
+    default:
+      - openrouter/google/gemini-3-flash-preview
   providers:
     storage: database
     database: postgresql
