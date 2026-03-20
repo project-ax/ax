@@ -10,7 +10,6 @@ export default defineConfig({
       '**/.worktrees/**',
       'dashboard/tests/**',
       'tests/e2e/**',
-      'tests/acceptance/automated/**',
     ],
   },
 });

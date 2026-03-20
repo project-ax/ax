@@ -20,7 +20,7 @@
     "send": "NODE_NO_WARNINGS=1 tsx src/cli/index.ts send",
     "configure": "NODE_NO_WARNINGS=1 tsx src/cli/index.ts configure",
     "k8s:dev": "bash scripts/k8s-dev.sh",
-    "test:acceptance": "vitest run --config tests/acceptance/automated/vitest.config.ts"
+    "test:e2e": "vitest run --config tests/e2e/vitest.config.ts"
   },
   "keywords": [
     "ai",

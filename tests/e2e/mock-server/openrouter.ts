@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { ALL_TURNS, type ScriptedTurn } from '../scripted-turns.js';
+import { ALL_TURNS, type ScriptedTurn } from '../scripts/index.js';
 
 let turnIndex = 0;
 
