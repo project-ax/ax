@@ -8,10 +8,11 @@ describe('skill tool credential_request action', () => {
     expect(skillTool?.actionMap).toHaveProperty('request_credential', 'credential_request');
   });
 
-  it('has search and request_credential types', () => {
-    // Verify both action types exist in the actionMap
+  it('has search, download, and request_credential types', () => {
+    // Verify all action types exist in the actionMap
     expect(skillTool?.actionMap).toEqual({
       search: 'skill_search',
+      download: 'skill_download',
       request_credential: 'credential_request',
     });
   });

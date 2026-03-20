@@ -196,8 +196,9 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     name: 'skill',
     label: 'Skill',
     description:
-      'Manage skills: search for skills or request credentials.\n\n' +
+      'Manage skills: search, download from ClawHub, or request credentials.\n\n' +
       'Use `type: "search"` to find skills by query.\n' +
+      'Use `type: "download"` to download a skill package by slug. Returns all files and required credentials.\n' +
       'Use `type: "request_credential"` to request a credential (e.g. API key) that a skill needs.\n' +
       'The host will prompt the user to provide it. This ends the current turn; you will be\n' +
       're-invoked with the credential available as an environment variable.',
@@ -208,6 +209,10 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
         limit: Type.Optional(Type.Number({ description: 'Max results (1-50, default 20)' })),
       }),
       Type.Object({
+        type: Type.Literal('download'),
+        slug: Type.String({ description: 'ClawHub skill slug (e.g. "linear-skill")' }),
+      }),
+      Type.Object({
         type: Type.Literal('request_credential'),
         envName: Type.String({ description: 'Environment variable name the skill requires (e.g. LINEAR_API_KEY)' }),
       }),
@@ -215,6 +220,7 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     category: 'skill',
     actionMap: {
       search: 'skill_search',
+      download: 'skill_download',
       request_credential: 'credential_request',
     },
   },

@@ -746,12 +746,16 @@ export async function processCompletion(
     // the host resolves them from the credential provider and injects placeholders
     // into the sandbox. The MITM proxy replaces placeholders with real values in
     // intercepted HTTPS traffic.
+    // Snapshot pre-agent skill requirements so the post-agent loop can detect NEW ones.
+    let preAgentEnvReqs = new Set<string>();
     if (config.web_proxy) {
       const { env: skillEnvRequirements, oauth: skillOAuthRequirements } =
         collectSkillCredentialRequirements(
           agentWsPath ? join(agentWsPath, 'skills') : undefined,
           userWsPath ? join(userWsPath, 'skills') : undefined,
+          workspace ? join(workspace, 'skills') : undefined,
         );
+      preAgentEnvReqs = skillEnvRequirements;
 
       // Track which env names were successfully resolved by OAuth
       // (only marked after token is obtained, so plain env fallback still runs on failure)
@@ -1206,24 +1210,66 @@ export async function processCompletion(
     }
 
     // ── Post-agent credential collection ──
-    // If the agent called credential_request during this turn, re-scan
-    // skills from the now-committed workspace and collect any missing
-    // credentials. Then re-spawn the agent with credentials available.
-    const pendingCreds = deps.requestedCredentials?.get(sessionId);
-    if (pendingCreds && pendingCreds.size > 0 && eventBus) {
-      // Clean up the request set
-      deps.requestedCredentials!.delete(sessionId);
-
+    // After the agent finishes, re-scan skills from the now-committed workspace.
+    // If any NEW credential requirements appeared (skills installed during this
+    // turn), collect them from the user via SSE and re-spawn the agent.
+    // This runs unconditionally — the agent may or may not have called
+    // credential_request, but the host auto-detects new requirements.
+    //
+    // Two detection strategies:
+    // 1. Frontmatter scan: parse SKILL.md files for requires.env (works when
+    //    agent used skill.download or wrote proper frontmatter)
+    // 2. ClawHub fallback: for new skill directories with no requires.env in
+    //    frontmatter, try to match the directory name against ClawHub and use
+    //    the registry's metadata (works when agent wrote files manually)
+    deps.requestedCredentials?.delete(sessionId); // Clean up any explicit requests
+    if (eventBus) {
       // Re-scan skills from the updated workspace
-      const { env: newEnvReqs } =
+      const { env: postEnvReqs } =
         collectSkillCredentialRequirements(
           agentWsPath ? join(agentWsPath, 'skills') : undefined,
           userWsPath ? join(userWsPath, 'skills') : undefined,
+          workspace ? join(workspace, 'skills') : undefined,
         );
+
+      // Only consider NEW requirements that weren't present before the agent ran
+      const newRequirements = new Set<string>();
+      for (const envName of postEnvReqs) {
+        if (!preAgentEnvReqs.has(envName)) newRequirements.add(envName);
+      }
+
+      // Strategy 2: if frontmatter scan found no new reqs, check for new skill
+      // directories and try ClawHub fallback to discover credential requirements
+      if (newRequirements.size === 0) {
+        const newSkillSlugs = detectNewSkillDirectories(
+          agentWsPath ? join(agentWsPath, 'skills') : undefined,
+          userWsPath ? join(userWsPath, 'skills') : undefined,
+          workspace ? join(workspace, 'skills') : undefined,
+        );
+        if (newSkillSlugs.length > 0) {
+          reqLogger.info('post_agent_clawhub_fallback', { slugs: newSkillSlugs });
+          const { fetchSkillPackage } = await import('../clawhub/registry-client.js');
+          for (const slug of newSkillSlugs) {
+            try {
+              const pkg = await fetchSkillPackage(slug);
+              for (const envName of pkg.requiresEnv) {
+                newRequirements.add(envName);
+              }
+              reqLogger.debug('post_agent_clawhub_match', { slug, requiresEnv: pkg.requiresEnv });
+            } catch {
+              reqLogger.debug('post_agent_clawhub_miss', { slug });
+            }
+          }
+        }
+      }
+
+      if (newRequirements.size > 0) {
+        reqLogger.info('post_agent_new_skill_credentials', { envNames: [...newRequirements] });
+      }
 
       // Collect credentials for env vars that are actually required and missing
       const collectedEnvNames: string[] = [];
-      for (const envName of newEnvReqs) {
+      for (const envName of newRequirements) {
         if (credentialMap.toEnvMap()[envName]) continue; // Already registered
 
         let realValue = await providers.credentials.get(envName);
@@ -1562,15 +1608,14 @@ export function isTransientAgentFailure(exitCode: number, stderr: string): boole
   return false;
 }
 
-/** Scan skill files in agent and user skill directories for requires.env and requires.oauth declarations.
+/** Scan skill files in workspace skill directories for requires.env and requires.oauth declarations.
  *  Handles both file-based skills (greeting.md) and directory-based skills (deploy/SKILL.md). */
 function collectSkillCredentialRequirements(
-  agentSkillsDir?: string,
-  userSkillsDir?: string,
+  ...skillsDirs: (string | undefined)[]
 ): { env: Set<string>; oauth: OAuthRequirement[] } {
   const envVars = new Set<string>();
   const oauthReqs: OAuthRequirement[] = [];
-  for (const dir of [agentSkillsDir, userSkillsDir]) {
+  for (const dir of skillsDirs) {
     if (!dir || !existsSync(dir)) continue;
     try {
       const entries = readdirSync(dir, { withFileTypes: true });
@@ -1599,4 +1644,39 @@ function collectSkillCredentialRequirements(
     } catch { /* skip unreadable directories */ }
   }
   return { env: envVars, oauth: oauthReqs };
+}
+
+/**
+ * Detect new skill directories that appeared in the workspace after the agent ran.
+ * Returns directory names as potential ClawHub slugs for fallback credential lookup.
+ * Only considers directories that contain SKILL.md (valid skill packages).
+ */
+function detectNewSkillDirectories(
+  ...skillsDirs: (string | undefined)[]
+): string[] {
+  const slugs: string[] = [];
+  for (const dir of skillsDirs) {
+    if (!dir || !existsSync(dir)) continue;
+    try {
+      const entries = readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const skillMdPath = join(dir, entry.name, 'SKILL.md');
+        if (!existsSync(skillMdPath)) continue;
+        // Parse the SKILL.md to check if it already has requires.env
+        try {
+          const raw = readFileSync(skillMdPath, 'utf-8');
+          const parsed = parseAgentSkill(raw);
+          if (parsed.requires.env.length === 0) {
+            // No requires.env in frontmatter — candidate for ClawHub fallback
+            slugs.push(entry.name);
+          }
+        } catch {
+          // If parsing fails, still try ClawHub fallback
+          slugs.push(entry.name);
+        }
+      }
+    } catch { /* skip unreadable dirs */ }
+  }
+  return slugs;
 }

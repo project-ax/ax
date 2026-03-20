@@ -2,6 +2,20 @@
 
 Server core, completions pipeline, file handling, bootstrap, admin gate, session management.
 
+## [2026-03-20 00:40] — Fix skill installation credential detection
+
+**Task:** Skill installation was broken — agent never called request_credential, host never detected new skill credentials
+**What I did:**
+1. Added `skill_download` IPC action — downloads ClawHub ZIP, extracts all files, returns requires.env
+2. Removed `credential_request` gate — host now auto-scans skills after EVERY agent turn
+3. Added ClawHub fallback — when SKILL.md lacks frontmatter, host queries ClawHub by slug to discover requires.env
+4. Made SkillsModule always render (even with no skills) so agents get ClawHub install guidance
+5. Extended credential scan to session/scratch workspace (not just agent/user)
+6. Removed `config.web_proxy` gate on post-agent credential loop
+**Files touched:** src/clawhub/registry-client.ts, src/ipc-schemas.ts, src/host/ipc-handlers/skills.ts, src/host/server-completions.ts, src/agent/tool-catalog.ts, src/agent/mcp-server.ts, src/agent/prompt/modules/skills.ts, + 5 test files
+**Outcome:** Code correct, 2479 tests pass. E2E validation blocked by npm install hanging in sandbox (web_proxy not configured in kind cluster)
+**Notes:** The LLM (Gemini Flash) doesn't reliably follow tool instructions — may not use skill.download or call request_credential. The ClawHub fallback + auto-scan addresses this by detecting credentials server-side.
+
 ## [2026-03-19 19:20] — Mid-request credential collection via event bus
 
 **Task:** Allow agents to request credentials mid-request after installing a skill. Host collects them via SSE, then re-spawns agent.

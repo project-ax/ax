@@ -142,8 +142,13 @@ apiCredentials:
   envVars:
     ANTHROPIC_API_KEY: "anthropic-api-key"
 
+webProxy:
+  enabled: true
+  port: 3128
+
 config:
   profile: balanced
+  web_proxy: true
   providers:
     storage: database
     database: postgresql

@@ -1,5 +1,5 @@
 /**
- * IPC handlers: skill search (ClawHub), audit, and credential requests.
+ * IPC handlers: skill search (ClawHub), skill download, audit, and credential requests.
  */
 import type { ProviderRegistry } from '../../types.js';
 import type { IPCContext } from '../ipc-server.js';
@@ -23,6 +23,28 @@ export function createSkillsHandlers(providers: ProviderRegistry, opts?: SkillsH
         args: { query },
       });
       return { results };
+    },
+
+    skill_download: async (req: any, ctx: IPCContext) => {
+      const { slug } = req;
+      logger.info('skill_download_start', { slug, sessionId: ctx.sessionId });
+
+      const pkg = await clawhub.fetchSkillPackage(slug);
+
+      await providers.audit.log({
+        action: 'skill_download',
+        sessionId: ctx.sessionId,
+        args: { slug, fileCount: pkg.files.length, requiresEnv: pkg.requiresEnv },
+      });
+
+      // Return files + credential requirements so the agent can write locally
+      // and call request_credential for each missing env var
+      return {
+        slug: pkg.slug,
+        displayName: pkg.displayName,
+        files: pkg.files,
+        requiresEnv: pkg.requiresEnv,
+      };
     },
 
     audit_query: async (req: any) => {
