@@ -5,7 +5,7 @@
 // On provision: check GCS cache first, fall back to empty workspace.
 // On cleanup: diff scopes, upload changes to GCS, delete workspace.
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync, readFileSync, writeFileSync, chmodSync, readdirSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -37,6 +37,15 @@ export interface WorkspaceResult {
  */
 const CACHE_BUCKET = process.env.WORKSPACE_CACHE_BUCKET ?? '';
 
+/** Strict allowlist for cache keys — alphanumeric, dash, underscore only. */
+const CACHE_KEY_RE = /^[a-zA-Z0-9_-]+$/;
+
+function validateCacheKey(key: string): void {
+  if (!CACHE_KEY_RE.test(key)) {
+    throw new Error(`Invalid cache key: ${key} — must match ${CACHE_KEY_RE}`);
+  }
+}
+
 /**
  * Provision a workspace directory for an agent container.
  *
@@ -57,6 +66,7 @@ export async function provisionWorkspace(
 
   // Try GCS cache restore first
   if (CACHE_BUCKET && cacheKey) {
+    validateCacheKey(cacheKey);
     const cached = tryGCSRestore(workspace, cacheKey);
     if (cached) {
       return { path: workspace, source: 'cache', durationMs: Date.now() - start };
@@ -74,12 +84,13 @@ export async function releaseWorkspace(
   workspace: string,
   options?: { updateCache?: boolean; cacheKey?: string },
 ): Promise<void> {
-  // Update GCS cache in background (non-blocking)
+  // Update GCS cache before cleanup (synchronous — must complete before rmSync)
   if (CACHE_BUCKET && options?.updateCache && options?.cacheKey) {
-    // Fire and forget — don't block release on cache upload
-    void updateGCSCache(workspace, options.cacheKey).catch(() => {
+    try {
+      updateGCSCache(workspace, options.cacheKey);
+    } catch {
       // Cache update failure is non-fatal
-    });
+    }
   }
 
   // Clean up workspace directory
@@ -209,15 +220,15 @@ export function diffScope(
 // ── Internal helpers ──
 
 function tryGCSRestore(workspace: string, cacheKey: string): boolean {
+  validateCacheKey(cacheKey);
   const cachePath = `gs://${CACHE_BUCKET}/${cacheKey}/workspace.tar.gz`;
 
   try {
-    // nosemgrep: javascript.lang.security.detect-child-process — workspace: controlled cache key
-    execSync(`gsutil -q cp "${cachePath}" /tmp/workspace-cache.tar.gz`, {
+    execFileSync('gsutil', ['-q', 'cp', cachePath, '/tmp/workspace-cache.tar.gz'], {
       timeout: 30_000,
       stdio: 'pipe',
     });
-    execSync(`tar xzf /tmp/workspace-cache.tar.gz -C "${workspace}"`, {
+    execFileSync('tar', ['xzf', '/tmp/workspace-cache.tar.gz', '-C', workspace], {
       timeout: 60_000,
       stdio: 'pipe',
     });
@@ -271,18 +282,19 @@ function hashContent(content: Buffer): string {
   return createHash('sha256').update(content).digest('hex');
 }
 
-async function updateGCSCache(workspace: string, cacheKey: string): Promise<void> {
+function updateGCSCache(workspace: string, cacheKey: string): void {
+  validateCacheKey(cacheKey);
   const cachePath = `gs://${CACHE_BUCKET}/${cacheKey}/workspace.tar.gz`;
 
   try {
-    execSync(
-      `tar czf /tmp/workspace-upload.tar.gz -C "${workspace}" .`,
-      { timeout: 120_000, stdio: 'pipe' },
-    );
-    execSync(
-      `gsutil -q cp /tmp/workspace-upload.tar.gz "${cachePath}"`,
-      { timeout: 120_000, stdio: 'pipe' },
-    );
+    execFileSync('tar', ['czf', '/tmp/workspace-upload.tar.gz', '-C', workspace, '.'], {
+      timeout: 120_000,
+      stdio: 'pipe',
+    });
+    execFileSync('gsutil', ['-q', 'cp', '/tmp/workspace-upload.tar.gz', cachePath], {
+      timeout: 120_000,
+      stdio: 'pipe',
+    });
     try { rmSync('/tmp/workspace-upload.tar.gz'); } catch { /* ignore */ }
     console.log(`[workspace] cache updated: ${cacheKey}`);
   } catch (err) {

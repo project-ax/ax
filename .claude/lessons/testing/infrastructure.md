@@ -1,5 +1,7 @@
 # Testing Infrastructure
 
+## Lessons
+
 ### Module-level const from env var won't reflect runtime changes
 **Date:** 2026-03-20
 **Context:** CLAWHUB_API_URL env override didn't work because `const CLAWHUB_API = process.env.CLAWHUB_API_URL || '...'` is evaluated at module load time, not at call time.

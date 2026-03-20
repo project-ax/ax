@@ -102,7 +102,10 @@ export class AcceptanceClient {
         const res = await fetch(`${this.baseUrl}/health`, {
           signal: AbortSignal.timeout(2000),
         });
-        if (res.ok) return;
+        if (res.ok) {
+          const body = await res.json().catch(() => null) as { status?: string } | null;
+          if (body?.status === 'ok') return;
+        }
       } catch {
         // Server not ready yet
       }
@@ -152,7 +155,10 @@ export class AcceptanceClient {
           // Data line
           if (line.startsWith('data: ')) {
             const data = line.slice(6);
-            if (data === '[DONE]') continue;
+            if (data === '[DONE]') {
+              reader.releaseLock();
+              return { content, events, chunks, status, finishReason };
+            }
 
             try {
               const parsed = JSON.parse(data);

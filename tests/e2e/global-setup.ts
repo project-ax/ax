@@ -97,18 +97,18 @@ export async function setup(): Promise<void> {
   // Clean up any stale state
   mkdirSync(STATE_DIR, { recursive: true });
 
-  // Skip cluster if AX_SERVER_URL already set
+  // Skip cluster if AX_SERVER_URL already set.
+  // In local mode the caller is responsible for configuring the AX server's
+  // OPENROUTER_BASE_URL / CLAWHUB_API_URL / STORAGE_EMULATOR_HOST env vars
+  // to point at a running mock server. We don't start a mock here because we
+  // cannot inject env vars into an externally-managed server process.
   if (process.env.AX_SERVER_URL) {
     console.log(`[setup] AX_SERVER_URL set — skipping kind cluster creation`);
     console.log(`[setup] Using server at ${process.env.AX_SERVER_URL}`);
 
-    // Start mock server even in local mode
-    const mockInfo = await startMockServer(0);
-    console.log(`[setup] Mock server started on port ${mockInfo.port}`);
-
     const state: SetupState = {
       clusterName: '',
-      mockServerPort: mockInfo.port,
+      mockServerPort: 0,
       portForwardPort: 0,
       portForwardPid: 0,
       serverUrl: process.env.AX_SERVER_URL,
@@ -118,7 +118,6 @@ export async function setup(): Promise<void> {
 
     // Set env for vitest
     process.env.AX_SERVER_URL = state.serverUrl;
-    process.env.MOCK_SERVER_PORT = String(state.mockServerPort);
     return;
   }
 
@@ -129,23 +128,19 @@ export async function setup(): Promise<void> {
   const mockInfo = await startMockServer(0);
   console.log(`[setup] Mock server started on port ${mockInfo.port}`);
 
-  // 2. Detect host IP for kind containers
-  const hostIP = getHostIP();
-  console.log(`[setup] Host IP for kind containers: ${hostIP}`);
-  const mockBaseUrl = `http://${hostIP}:${mockInfo.port}`;
-
-  // 3. Create kind cluster
+  // 2. Create kind cluster (must happen before getHostIP so Docker's `kind` network exists)
   console.log(`[setup] Creating kind cluster...`);
   run('kind', ['create', 'cluster', '--name', clusterName, '--wait', '120s']);
   console.log(`[setup] Kind cluster created`);
 
-  // 4. Build AX (tsc may exit non-zero with pre-existing TS errors but still emits dist/)
+  // 3. Detect host IP for kind containers (after cluster so Docker bridge network exists)
+  const hostIP = getHostIP();
+  console.log(`[setup] Host IP for kind containers: ${hostIP}`);
+  const mockBaseUrl = `http://${hostIP}:${mockInfo.port}`;
+
+  // 4. Build AX
   console.log(`[setup] Building AX...`);
-  try {
-    run('npm', ['run', 'build']);
-  } catch {
-    console.log(`[setup] Build had TS errors — continuing with emitted dist/`);
-  }
+  run('npm', ['run', 'build']);
   console.log(`[setup] Build complete`);
 
   // 5. Docker build

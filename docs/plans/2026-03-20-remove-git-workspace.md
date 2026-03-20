@@ -10,7 +10,7 @@
 
 ---
 
-### Task 1: Remove git helpers from workspace lifecycle
+## Task 1: Remove git helpers from workspace lifecycle
 
 **Files:**
 - Modify: `src/providers/workspace/lifecycle.ts` (remove git functions and helpers, keep `buildLifecyclePlan` but remove gitUrl/gitRef fields)
@@ -52,7 +52,7 @@ git commit -m "refactor: remove git helpers from workspace lifecycle"
 
 ---
 
-### Task 2: Remove git workspace code from agent workspace.ts
+## Task 2: Remove git workspace code from agent workspace.ts
 
 **Files:**
 - Modify: `src/agent/workspace.ts` (remove git clone/pull/push from provisionWorkspace and releaseWorkspace)
@@ -93,7 +93,7 @@ git commit -m "refactor: remove git clone/pull/push from agent workspace"
 
 ---
 
-### Task 3: Remove git fields from StdinPayload and parsing
+## Task 3: Remove git fields from StdinPayload and parsing
 
 **Files:**
 - Modify: `src/agent/runner.ts` (remove workspaceGitUrl, workspaceGitRef from StdinPayload and parseStdinPayload)
@@ -121,7 +121,7 @@ git commit -m "refactor: remove git fields from StdinPayload"
 
 ---
 
-### Task 4: Remove git workspace from server-completions.ts
+## Task 4: Remove git workspace from server-completions.ts
 
 **Files:**
 - Modify: `src/host/server-completions.ts`
@@ -136,12 +136,12 @@ Remove:
 - `workspaceGitUrl` and `workspaceGitRef` from stdinPayload object (lines 917-918)
 
 Remove the host-side prepare block (~lines 948-957):
-```
+```typescript
 if (agentSandbox.workspaceLocation === 'host' && lifecyclePlan.gitUrl) { ... }
 ```
 
 Remove the host-side finalize block (~lines 1203-1212):
-```
+```typescript
 if (agentSandbox.workspaceLocation === 'host' && lifecyclePlan.gitUrl) { ... }
 ```
 
@@ -154,7 +154,7 @@ git commit -m "refactor: remove git workspace from server-completions"
 
 ---
 
-### Task 5: Remove git env vars from k8s sandbox provider
+## Task 5: Remove git env vars from k8s sandbox provider
 
 **Files:**
 - Modify: `src/providers/sandbox/k8s.ts` (lines 135-136)
@@ -178,7 +178,7 @@ git commit -m "refactor: remove git env vars from k8s pod spec"
 
 ---
 
-### Task 6: Remove git finalize from agent runners
+## Task 6: Remove git finalize from agent runners
 
 **Files:**
 - Modify: `src/agent/runners/claude-code.ts` (~lines 283-299)
@@ -201,7 +201,7 @@ git commit -m "refactor: remove git finalize from agent runners"
 
 ---
 
-### Task 7: Clean up workspace-cli.ts git references
+## Task 7: Clean up workspace-cli.ts git references
 
 **Files:**
 - Modify: `src/agent/workspace-cli.ts`
@@ -233,7 +233,7 @@ git commit -m "refactor: remove git references from workspace CLI"
 
 ---
 
-### Task 8: Fix tests
+## Task 8: Fix tests
 
 **Files:**
 - Modify: `tests/sandbox-isolation.test.ts`
@@ -273,7 +273,7 @@ git commit -m "test: update tests after git workspace removal"
 
 ---
 
-### Task 9: Build and verify
+## Task 9: Build and verify
 
 **Step 1: Full build**
 

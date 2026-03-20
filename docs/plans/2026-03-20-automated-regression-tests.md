@@ -4,7 +4,7 @@
 
 **Goal:** Create an automated, vitest-based regression test suite that exercises core AX workflows (bootstrap, chat, tool calls, file persistence, proxy commands, skill install + credentials) against a live k8s server deployed in an auto-managed kind cluster, with all external services mocked.
 
-**Architecture:** A single vitest config (`tests/acceptance/automated/vitest.config.ts`) runs a `globalSetup` that creates a kind cluster, builds/loads the Docker image, deploys AX via Helm, and starts a mock server on the host. Tests use an `AcceptanceClient` to send streaming chat completions, parse SSE events, and provide credentials. A `globalTeardown` destroys the cluster and stops the mock server. All external services (OpenRouter, GCS, ClawHub, Linear API) are mocked by a single Node.js HTTP server.
+**Architecture:** A single vitest config (`tests/e2e/vitest.config.ts`) runs a `globalSetup` that creates a kind cluster, builds/loads the Docker image, deploys AX via Helm, and starts a mock server on the host. Tests use an `AcceptanceClient` to send streaming chat completions, parse SSE events, and provide credentials. A `globalTeardown` destroys the cluster and stops the mock server. All external services (OpenRouter, GCS, ClawHub, Linear API) are mocked by a single Node.js HTTP server.
 
 **Tech Stack:** Vitest, Node.js `http.createServer`, kind, Helm, kubectl, Docker
 
@@ -29,7 +29,7 @@
 8. **Test sequence** — Single ordered vitest file walking through the full lifecycle
 9. **Global setup/teardown** — Kind cluster lifecycle + mock server + port-forward
 10. **Vitest config** — Separate config for acceptance tests with long timeouts
-11. **npm script** — `npm run test:acceptance`
+11. **npm script** — `npm run test:e2e`
 
 ---
 
@@ -292,8 +292,8 @@ git commit -m "feat: wire url_rewrites config to web proxy for acceptance testin
 ## Task 4: Create Mock Server — GCS Backend
 
 **Files:**
-- Create: `tests/acceptance/automated/mock-server/gcs.ts`
-- Create: `tests/acceptance/automated/mock-server/gcs.test.ts`
+- Create: `tests/e2e/mock-server/gcs.ts`
+- Create: `tests/e2e/mock-server/gcs.test.ts`
 
 Implement a minimal GCS-compatible HTTP handler backed by `/tmp/fake-gcs/`. The `@google-cloud/storage` SDK uses these endpoints when `STORAGE_EMULATOR_HOST` is set:
 
@@ -322,13 +322,13 @@ test('mock GCS: upload, list, download, delete cycle', async () => {
 ### Step 3: Run test
 
 ```bash
-npx vitest run tests/acceptance/automated/mock-server/gcs.test.ts
+npx vitest run tests/e2e/mock-server/gcs.test.ts
 ```
 
 ### Step 4: Commit
 
 ```bash
-git add tests/acceptance/automated/mock-server/gcs.ts tests/acceptance/automated/mock-server/gcs.test.ts
+git add tests/e2e/mock-server/gcs.ts tests/e2e/mock-server/gcs.test.ts
 git commit -m "feat: add mock GCS server for acceptance tests"
 ```
 
@@ -337,8 +337,8 @@ git commit -m "feat: add mock GCS server for acceptance tests"
 ## Task 5: Create Mock Server — OpenRouter Backend
 
 **Files:**
-- Create: `tests/acceptance/automated/mock-server/openrouter.ts`
-- Create: `tests/acceptance/automated/scripted-turns.ts`
+- Create: `tests/e2e/mock-server/openrouter.ts`
+- Create: `tests/e2e/scripted-turns.ts`
 
 The mock OpenRouter returns scripted responses in OpenAI streaming format. A turn queue matches incoming user messages to pre-defined responses.
 
@@ -443,7 +443,7 @@ For `tool_calls`, stream `delta.tool_calls` with index-based accumulation per Op
 ### Step 3: Commit
 
 ```bash
-git add tests/acceptance/automated/mock-server/openrouter.ts tests/acceptance/automated/scripted-turns.ts
+git add tests/e2e/mock-server/openrouter.ts tests/e2e/scripted-turns.ts
 git commit -m "feat: add mock OpenRouter with scripted turns for acceptance tests"
 ```
 
@@ -452,9 +452,9 @@ git commit -m "feat: add mock OpenRouter with scripted turns for acceptance test
 ## Task 6: Create Mock Server — ClawHub and Linear
 
 **Files:**
-- Create: `tests/acceptance/automated/mock-server/clawhub.ts`
-- Create: `tests/acceptance/automated/mock-server/linear.ts`
-- Create: `tests/acceptance/automated/fixtures/linear-skill.zip` (or build in-memory)
+- Create: `tests/e2e/mock-server/clawhub.ts`
+- Create: `tests/e2e/mock-server/linear.ts`
+- Create: `tests/e2e/fixtures/linear-skill.zip` (or build in-memory)
 
 ### Step 1: Mock ClawHub registry
 
@@ -478,7 +478,7 @@ The ZIP must contain a valid `SKILL.md` with `requires.env: [LINEAR_API_KEY]` in
 ### Step 3: Commit
 
 ```bash
-git add tests/acceptance/automated/mock-server/clawhub.ts tests/acceptance/automated/mock-server/linear.ts
+git add tests/e2e/mock-server/clawhub.ts tests/e2e/mock-server/linear.ts
 git commit -m "feat: add mock ClawHub and Linear API for acceptance tests"
 ```
 
@@ -487,7 +487,7 @@ git commit -m "feat: add mock ClawHub and Linear API for acceptance tests"
 ## Task 7: Create Mock Server — Router and Entry Point
 
 **Files:**
-- Create: `tests/acceptance/automated/mock-server/index.ts`
+- Create: `tests/e2e/mock-server/index.ts`
 
 Single HTTP server that dispatches to all mock handlers based on URL path:
 
@@ -507,7 +507,7 @@ Also exports `reset()` to clear all mock state (GCS files, turn queue position).
 ### Step 3: Commit
 
 ```bash
-git add tests/acceptance/automated/mock-server/index.ts
+git add tests/e2e/mock-server/index.ts
 git commit -m "feat: add mock server router for acceptance tests"
 ```
 
@@ -516,7 +516,7 @@ git commit -m "feat: add mock server router for acceptance tests"
 ## Task 8: Create Acceptance Client
 
 **Files:**
-- Create: `tests/acceptance/automated/client.ts`
+- Create: `tests/e2e/client.ts`
 
 HTTP client that sends chat completions to AX server and parses SSE responses.
 
@@ -559,7 +559,7 @@ SSE parsing must handle:
 ### Step 2: Commit
 
 ```bash
-git add tests/acceptance/automated/client.ts
+git add tests/e2e/client.ts
 git commit -m "feat: add AcceptanceClient for SSE-based acceptance tests"
 ```
 
@@ -568,9 +568,9 @@ git commit -m "feat: add AcceptanceClient for SSE-based acceptance tests"
 ## Task 9: Create Global Setup/Teardown — Kind Cluster Lifecycle
 
 **Files:**
-- Create: `tests/acceptance/automated/global-setup.ts`
-- Create: `tests/acceptance/automated/global-teardown.ts`
-- Create: `tests/acceptance/automated/kind-values.yaml`
+- Create: `tests/e2e/global-setup.ts`
+- Create: `tests/e2e/global-teardown.ts`
+- Create: `tests/e2e/kind-values.yaml`
 
 ### Global Setup Flow
 
@@ -623,7 +623,7 @@ Based on existing `tests/acceptance/fixtures/kind-values.yaml` with these additi
 ### Step 3: Commit
 
 ```bash
-git add tests/acceptance/automated/global-setup.ts tests/acceptance/automated/global-teardown.ts tests/acceptance/automated/kind-values.yaml
+git add tests/e2e/global-setup.ts tests/e2e/global-teardown.ts tests/e2e/kind-values.yaml
 git commit -m "feat: add kind cluster lifecycle for automated acceptance tests"
 ```
 
@@ -632,9 +632,9 @@ git commit -m "feat: add kind cluster lifecycle for automated acceptance tests"
 ## Task 10: Create Vitest Config and npm Script
 
 **Files:**
-- Create: `tests/acceptance/automated/vitest.config.ts`
-- Modify: `package.json` (add `test:acceptance` script)
-- Modify: `vitest.config.ts` (exclude `tests/acceptance/automated/**` from default run)
+- Create: `tests/e2e/vitest.config.ts`
+- Modify: `package.json` (add `test:e2e` script)
+- Modify: `vitest.config.ts` (exclude `tests/e2e/**` from default run)
 
 ### Acceptance vitest config:
 
@@ -647,9 +647,9 @@ export default defineConfig({
     testTimeout: 120_000,       // 2 min per test
     hookTimeout: 300_000,       // 5 min for globalSetup
     sequence: { concurrent: false },
-    include: ['tests/acceptance/automated/**/*.test.ts'],
+    include: ['tests/e2e/**/*.test.ts'],
     exclude: ['**/node_modules/**', '**/dist/**', '**/mock-server/*.test.ts'],
-    globalSetup: ['tests/acceptance/automated/global-setup.ts'],
+    globalSetup: ['tests/e2e/global-setup.ts'],
   },
 });
 ```
@@ -657,7 +657,7 @@ export default defineConfig({
 ### npm script:
 
 ```json
-"test:acceptance": "vitest run --config tests/acceptance/automated/vitest.config.ts"
+"test:e2e": "vitest run --config tests/e2e/vitest.config.ts"
 ```
 
 ### Step 1: Create config, add script, update exclude
@@ -671,7 +671,7 @@ npm test -- --run
 ### Step 3: Commit
 
 ```bash
-git add tests/acceptance/automated/vitest.config.ts package.json vitest.config.ts
+git add tests/e2e/vitest.config.ts package.json vitest.config.ts
 git commit -m "feat: add vitest config and npm script for acceptance tests"
 ```
 
@@ -680,7 +680,7 @@ git commit -m "feat: add vitest config and npm script for acceptance tests"
 ## Task 11: Create the Test Sequence
 
 **Files:**
-- Create: `tests/acceptance/automated/regression.test.ts`
+- Create: `tests/e2e/regression.test.ts`
 
 Single `describe` block with ordered `test` calls. Each test has a 60s timeout.
 
@@ -723,7 +723,7 @@ Single `describe` block with ordered `test` calls. Each test has a 60s timeout.
 ### Step 3: Commit
 
 ```bash
-git add tests/acceptance/automated/regression.test.ts
+git add tests/e2e/regression.test.ts
 git commit -m "feat: add regression test sequence for acceptance tests"
 ```
 
@@ -734,7 +734,7 @@ git commit -m "feat: add regression test sequence for acceptance tests"
 ### Step 1: Run the full acceptance test suite
 
 ```bash
-npm run test:acceptance
+npm run test:e2e
 ```
 
 This will: start mock server, create kind cluster, build/deploy AX, run all tests, tear down cluster.
@@ -743,7 +743,7 @@ This will: start mock server, create kind cluster, build/deploy AX, run all test
 
 ```bash
 # Start local server separately with mock env vars, then:
-AX_SERVER_URL=http://localhost:8080 npm run test:acceptance
+AX_SERVER_URL=http://localhost:8080 npm run test:e2e
 ```
 
 Should skip kind cluster creation, run tests against local server.
@@ -764,17 +764,17 @@ Should skip kind cluster creation, run tests against local server.
 | `src/host/host-process.ts` | Modify | Wire `url_rewrites` config (k8s) |
 | `src/types.ts` | Modify | `url_rewrites` config field |
 | `vitest.config.ts` | Modify | Exclude acceptance from default |
-| `package.json` | Modify | `test:acceptance` script |
-| `tests/acceptance/automated/vitest.config.ts` | Create | Acceptance test config |
-| `tests/acceptance/automated/global-setup.ts` | Create | Kind cluster + mock lifecycle |
-| `tests/acceptance/automated/global-teardown.ts` | Create | Cleanup |
-| `tests/acceptance/automated/kind-values.yaml` | Create | Helm overrides |
-| `tests/acceptance/automated/client.ts` | Create | SSE-aware HTTP client |
-| `tests/acceptance/automated/scripted-turns.ts` | Create | Mock LLM turn definitions |
-| `tests/acceptance/automated/regression.test.ts` | Create | The test sequence |
-| `tests/acceptance/automated/mock-server/index.ts` | Create | Mock server router |
-| `tests/acceptance/automated/mock-server/gcs.ts` | Create | Mock GCS |
-| `tests/acceptance/automated/mock-server/gcs.test.ts` | Create | Mock GCS self-test |
-| `tests/acceptance/automated/mock-server/openrouter.ts` | Create | Mock OpenRouter |
-| `tests/acceptance/automated/mock-server/clawhub.ts` | Create | Mock ClawHub |
-| `tests/acceptance/automated/mock-server/linear.ts` | Create | Mock Linear API |
+| `package.json` | Modify | `test:e2e` script |
+| `tests/e2e/vitest.config.ts` | Create | Acceptance test config |
+| `tests/e2e/global-setup.ts` | Create | Kind cluster + mock lifecycle |
+| `tests/e2e/global-teardown.ts` | Create | Cleanup |
+| `tests/e2e/kind-values.yaml` | Create | Helm overrides |
+| `tests/e2e/client.ts` | Create | SSE-aware HTTP client |
+| `tests/e2e/scripted-turns.ts` | Create | Mock LLM turn definitions |
+| `tests/e2e/regression.test.ts` | Create | The test sequence |
+| `tests/e2e/mock-server/index.ts` | Create | Mock server router |
+| `tests/e2e/mock-server/gcs.ts` | Create | Mock GCS |
+| `tests/e2e/mock-server/gcs.test.ts` | Create | Mock GCS self-test |
+| `tests/e2e/mock-server/openrouter.ts` | Create | Mock OpenRouter |
+| `tests/e2e/mock-server/clawhub.ts` | Create | Mock ClawHub |
+| `tests/e2e/mock-server/linear.ts` | Create | Mock Linear API |

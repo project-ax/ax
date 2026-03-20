@@ -10,7 +10,7 @@
 
 ---
 
-### Task 1: Update kind-values.yaml for K8s Sandbox
+## Task 1: Update kind-values.yaml for K8s Sandbox
 
 **Files:**
 - Modify: `tests/e2e/kind-values.yaml`
@@ -62,7 +62,7 @@ git commit -m "feat(e2e): switch sandbox from subprocess to k8s in kind-values"
 
 ---
 
-### Task 2: Add Dynamic url_rewrites to global-setup.ts
+## Task 2: Add Dynamic url_rewrites to global-setup.ts
 
 **Files:**
 - Modify: `tests/e2e/global-setup.ts`
@@ -100,7 +100,7 @@ git commit -m "feat(e2e): add url_rewrites and increase timeouts for k8s sandbox
 
 ---
 
-### Task 3: Increase Test Timeouts
+## Task 3: Increase Test Timeouts
 
 **Files:**
 - Modify: `tests/e2e/vitest.config.ts`
@@ -138,7 +138,7 @@ git commit -m "feat(e2e): increase timeouts for k8s sandbox pod cold-start laten
 
 ---
 
-### Task 4: Update E2E Comment Header
+## Task 4: Update E2E Comment Header
 
 **Files:**
 - Modify: `tests/e2e/kind-values.yaml` (update comment at top)
@@ -164,7 +164,7 @@ git commit -m "docs(e2e): update kind-values comment for k8s sandbox mode"
 
 ---
 
-### Task 5: Run E2E Tests and Verify
+## Task 5: Run E2E Tests and Verify
 
 **Step 1: Build**
 
