@@ -606,7 +606,7 @@ async function serveStaticDashboard(
   const resolvedPath = existsSync(fullPath) ? fullPath : join(adminDir, 'index.html');
 
   if (!existsSync(resolvedPath)) {
-    sendError(res, 404, 'Dashboard not built. Run: npm run build:dashboard');
+    sendError(res, 404, 'Dashboard not built. Run: npm run build:admin');
     return;
   }
 
