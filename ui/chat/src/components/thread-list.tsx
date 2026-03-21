@@ -7,17 +7,17 @@ import {
 import { PlusIcon } from 'lucide-react';
 
 export const ThreadList: FC = () => (
-  <ThreadListPrimitive.Root className="flex flex-col items-stretch gap-1.5">
+  <ThreadListPrimitive.Root className="flex flex-col items-stretch gap-0.5">
     <ThreadListNew />
     <ThreadListItems />
   </ThreadListPrimitive.Root>
 );
 
 const ThreadListNew: FC = () => (
-  <div className="flex justify-center px-2 py-4">
+  <div className="px-0 py-2">
     <ThreadListPrimitive.New asChild>
-      <button className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-foreground hover:bg-muted transition-colors">
-        <PlusIcon className="size-4" />
+      <button className="group flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium text-muted-foreground hover:bg-foreground/[0.03] hover:text-foreground/80 transition-all duration-150">
+        <PlusIcon className="size-4 text-amber" />
         New Chat
       </button>
     </ThreadListPrimitive.New>
@@ -31,8 +31,8 @@ const ThreadListItems: FC = () => {
     return (
       <>
         {Array.from({ length: 5 }, (_, i) => (
-          <div key={i} className="flex items-center gap-2 rounded-md px-3 py-2">
-            <div className="h-5 flex-grow animate-pulse rounded bg-muted" />
+          <div key={i} className="flex items-center gap-2 rounded-lg px-3 py-2.5">
+            <div className="h-4 flex-grow animate-pulse rounded bg-foreground/[0.04]" />
           </div>
         ))}
       </>
@@ -43,9 +43,9 @@ const ThreadListItems: FC = () => {
 };
 
 const ThreadListItem: FC = () => (
-  <ThreadListItemPrimitive.Root className="flex items-center gap-2 rounded-lg transition-all hover:bg-muted focus-visible:bg-muted data-active:bg-muted">
-    <ThreadListItemPrimitive.Trigger className="truncate grow px-3 py-2 text-start">
-      <span className="text-sm">
+  <ThreadListItemPrimitive.Root className="flex items-center gap-2 rounded-lg transition-all duration-150 hover:bg-foreground/[0.03] focus-visible:bg-foreground/[0.03] data-active:bg-foreground/[0.06]">
+    <ThreadListItemPrimitive.Trigger className="truncate grow px-3 py-2.5 text-start">
+      <span className="text-[13px] font-medium text-muted-foreground data-active:text-foreground">
         <ThreadListItemPrimitive.Title fallback="New Chat" />
       </span>
     </ThreadListItemPrimitive.Trigger>
