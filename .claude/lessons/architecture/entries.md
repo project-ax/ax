@@ -1,5 +1,23 @@
 # Architecture
 
+### assistant-ui useExternalHistory requires withFormat() — direct load() is never called
+**Date:** 2026-03-21
+**Context:** Thread history never loaded when clicking threads in the sidebar despite correct adapter setup
+**Lesson:** `useExternalHistory` in `@assistant-ui/react-ai-sdk` calls `historyAdapter.withFormat?.(storageFormatAdapter).load()`, NOT `historyAdapter.load()`. The optional chaining `?.` silently returns `undefined` when `withFormat` is missing, causing history to appear broken with zero errors. Always implement `withFormat()` on `ThreadHistoryAdapter` when using with `useAISDKRuntime`.
+**Tags:** assistant-ui, history, withFormat, thread-switching, silent-failure
+
+### assistant-ui RuntimeAdapterProvider context may not propagate to runtimeHook internals
+**Date:** 2026-03-21
+**Context:** Used `unstable_Provider` to wrap thread instances with `RuntimeAdapterProvider` for history, but `useRuntimeAdapters()` inside `useAISDKRuntime` returned null
+**Lesson:** Instead of using `RuntimeAdapterProvider` context via `unstable_Provider`, pass adapters directly to `useAISDKRuntime(chat, { adapters: { history } })`. This is more reliable and simpler.
+**Tags:** assistant-ui, adapters, context, useAISDKRuntime
+
+### assistant-ui tool call rendering uses tools.Fallback not ToolCall component key
+**Date:** 2026-03-21
+**Context:** Added `ToolCall` component to `MessagePrimitive.Parts` components but tool calls didn't render
+**Lesson:** `MessagePrimitive.Parts` components prop uses `tools: { Fallback: Component }` or `tools: { by_name: { toolName: Component } }` for tool calls. There is no `ToolCall` component key. The Fallback receives `{ toolName, args, status, addResult, resume }` props.
+**Tags:** assistant-ui, tool-calls, MessagePrimitive, Parts
+
 ### Chat UI requires custom ChatTransport for OpenAI SSE — DefaultChatTransport uses AI SDK data stream format
 **Date:** 2026-03-21
 **Context:** Debugging why chat messages sent from the UI produced no visible response despite 200 OK from server.

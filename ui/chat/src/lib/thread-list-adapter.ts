@@ -40,11 +40,30 @@ export const axThreadListAdapter: RemoteThreadListAdapter = {
     return { remoteId: threadId, externalId: undefined };
   },
 
-  async generateTitle() {
-    // Title is auto-generated server-side during processCompletion.
-    // Return a neutral placeholder — the real title will appear on next list() refresh.
+  async generateTitle(remoteId: string) {
+    // The server auto-generates the title during processCompletion.
+    // Fetch the session to get the real title (may need a short delay for async generation).
+    let title = 'New Chat';
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      try {
+        const res = await fetch('/v1/chat/sessions');
+        if (res.ok) {
+          const { sessions } = await res.json();
+          // Match by exact ID or suffix — the server prefixes session IDs
+          // (e.g., "main:http:chat-ui:__LOCALID_xxx" for local ID "__LOCALID_xxx")
+          const session = sessions.find((s: any) =>
+            s.id === remoteId || s.id.endsWith(`:${remoteId}`),
+          );
+          if (session?.title) {
+            title = session.title;
+            break;
+          }
+        }
+      } catch { /* retry */ }
+    }
     return createAssistantStream((controller) => {
-      controller.appendText('New Chat');
+      controller.appendText(title);
       controller.close();
     });
   },

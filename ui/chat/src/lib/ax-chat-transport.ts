@@ -136,6 +136,20 @@ export class AxChatTransport extends HttpChatTransport<UIMessage> {
                 });
               }
 
+              // Handle tool calls from the OpenAI SSE stream
+              if (delta?.tool_calls) {
+                for (const tc of delta.tool_calls) {
+                  if (tc.function?.name) {
+                    controller.enqueue({
+                      type: 'tool-input-available',
+                      toolCallId: tc.id ?? `call_${tc.index}`,
+                      toolName: tc.function.name,
+                      input: tc.function.arguments ? JSON.parse(tc.function.arguments) : {},
+                    });
+                  }
+                }
+              }
+
               if (finishReason && finishReason !== 'null') {
                 if (started) {
                   controller.enqueue({ type: 'text-end', id: textPartId });
@@ -143,9 +157,11 @@ export class AxChatTransport extends HttpChatTransport<UIMessage> {
                 const reason =
                   finishReason === 'stop'
                     ? 'stop'
-                    : finishReason === 'content_filter'
-                      ? 'content-filter'
-                      : 'stop';
+                    : finishReason === 'tool_calls'
+                      ? 'tool-calls'
+                      : finishReason === 'content_filter'
+                        ? 'content-filter'
+                        : 'stop';
                 controller.enqueue({ type: 'finish', finishReason: reason });
               }
             }

@@ -175,14 +175,15 @@ This is the core loop for iterating on chat UI changes:
 | File | What it controls |
 |------|-----------------|
 | `ui/chat/src/App.tsx` | Main layout — sidebar + thread area |
-| `ui/chat/src/components/thread.tsx` | Message display, composer, streaming |
+| `ui/chat/src/components/thread.tsx` | Message display, tool calls, loading spinner, composer |
 | `ui/chat/src/components/thread-list.tsx` | Sidebar thread list, "New Chat" button |
 | `ui/chat/src/components/markdown-text.tsx` | Markdown rendering in messages |
-| `ui/chat/src/lib/useAxChatRuntime.tsx` | Runtime hook — connects UI to AX backend |
-| `ui/chat/src/lib/thread-list-adapter.ts` | Fetches threads from `/v1/chat/sessions` |
-| `ui/chat/src/lib/history-adapter.ts` | Loads conversation history |
+| `ui/chat/src/lib/useAxChatRuntime.tsx` | Runtime hook — connects UI to AX backend, wires history adapter |
+| `ui/chat/src/lib/ax-chat-transport.ts` | Custom OpenAI SSE → UIMessageChunk parser (text + tool calls) |
+| `ui/chat/src/lib/thread-list-adapter.ts` | Fetches threads from `/v1/chat/sessions`, generates titles |
+| `ui/chat/src/lib/history-adapter.ts` | Loads conversation history via `withFormat()` |
 | `ui/chat/src/index.css` | Tailwind styles, theming |
-| `ui/chat/tailwind.config.js` | Tailwind theme configuration |
+| `ui/chat/vite.config.ts` | Vite config with `/v1` proxy (uses `VITE_AX_PORT` env var) |
 
 ### Server-side Changes
 
@@ -194,6 +195,59 @@ UI-only changes (components, styles) hot-reload instantly via Vite. Server-side 
 | `src/host/server-chat-api.ts` | Restart: `npm run dev:chat stop && npm run dev:chat start` |
 | `src/host/server-chat-ui.ts` | Not used in dev mode (Vite serves files directly) |
 | `src/host/server-completions.ts` | Restart server |
+
+### Manual K8s Mode (when chat-dev.sh --k8s doesn't match your cluster)
+
+The `--k8s` flag expects a cluster named `ax-dev`. If your cluster has a different name (e.g., `ax`), you can manually start Vite + port-forward:
+
+```bash
+# 1. Check your cluster name and host service port
+kind get clusters                                    # e.g., "ax"
+kubectl --context kind-ax get svc -n ax ax-host      # check port (usually 80)
+
+# 2. Port-forward to localhost:18080
+kubectl --context kind-ax port-forward -n ax svc/ax-host 18080:80 &
+
+# 3. Start Vite pointing at port 18080
+cd ui/chat && VITE_AX_PORT=18080 npx vite --host
+
+# 4. Open http://localhost:5173 in browser / Playwright
+```
+
+The Vite proxy reads `VITE_AX_PORT` (default: `8080`) to set the proxy target for `/v1/*` requests.
+
+### assistant-ui Integration Gotchas
+
+These are hard-won lessons from debugging the chat UI against assistant-ui internals:
+
+#### History adapter MUST implement `withFormat()`
+
+`useExternalHistory` (inside `useAISDKRuntime`) calls `historyAdapter.withFormat?.(storageFormatAdapter).load()`, **NOT** `historyAdapter.load()`. The optional chaining `?.` silently returns `undefined` when `withFormat` is missing — no error, just zero history loaded. Always implement `withFormat()` on `ThreadHistoryAdapter`.
+
+#### Pass adapters directly to `useAISDKRuntime`, not via context
+
+Using `RuntimeAdapterProvider` with `unstable_Provider` to inject adapters via React context may not propagate correctly to hooks inside `useAISDKRuntime`. The reliable approach: pass adapters directly as the second argument:
+
+```tsx
+const chat = useChat({ id, transport });
+return useAISDKRuntime(chat, { adapters: { history } });
+```
+
+#### Tool calls render via `tools.Fallback`, not `ToolCall`
+
+`MessagePrimitive.Parts` components prop uses `tools: { Fallback: Component }` or `tools: { by_name: { toolName: Component } }`. There is no `ToolCall` key. The Fallback component receives `{ toolName, args, status, addResult, resume }` props.
+
+#### OpenAI SSE tool_calls must emit `tool-input-available` UIMessageChunks
+
+The `AxChatTransport.processResponseStream()` must emit `tool-input-available` chunks (not `tool-call-start`/`tool-call-end`) for complete tool calls from the OpenAI SSE stream. The `finish_reason: 'tool_calls'` must map to `'tool-calls'` in the UIMessageChunk.
+
+#### Thread session ID mismatch
+
+The server prefixes session IDs (e.g., `main:http:chat-ui:__LOCALID_xxx`), but `RemoteThreadListAdapter.initialize()` returns the local thread ID as `remoteId`. When looking up sessions by `remoteId`, use suffix matching: `s.id === remoteId || s.id.endsWith(':' + remoteId)`.
+
+#### Title generation timing
+
+`generateTitle()` is called automatically after `runEnd` for new threads. The server generates titles asynchronously during `processCompletion`, so `generateTitle()` should poll the sessions API with a short delay to retrieve the real title.
 
 ### When NOT to use Tier 0
 
@@ -679,3 +733,8 @@ nats sub "sandbox.work"
 | Web proxy unreachable from sandbox | Proxy bound to 127.0.0.1 or service selector mismatch | Check `bindHost: '0.0.0.0'`, verify service selector matches host pod labels |
 | Warm pool pod missing per-request env vars | Env var only in cold-spawn pod spec, not in NATS payload | Add to stdinPayload in server-completions.ts AND parseStdinPayload()+applyPayload() in runner.ts |
 | E2E test fails with "no scripted turn" | Mock OpenRouter ran out of turns | Add missing `ScriptedTurn` entries in `tests/e2e/scripts/` |
+| Thread history never loads (no errors) | `ThreadHistoryAdapter` missing `withFormat()` | `useExternalHistory` calls `withFormat?.().load()`, not `load()` directly |
+| Tool calls not visible in chat UI | Transport not emitting `tool-input-available` chunks | Parse `delta.tool_calls` in `processResponseStream` and emit UIMessageChunks |
+| Thread title stays "New Chat" | `generateTitle()` returns hardcoded placeholder | Poll `/v1/chat/sessions` with suffix-match on remoteId |
+| `chat-dev.sh --k8s` fails "cluster not found" | Cluster name mismatch (`ax` vs `ax-dev`) | Use manual port-forward + `VITE_AX_PORT=18080` (see Manual K8s Mode) |
+| K8s host port-forward fails "no service port 8080" | Service uses port 80, not 8080 | `kubectl port-forward svc/ax-host 18080:80` |

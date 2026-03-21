@@ -3,9 +3,7 @@ import {
   type AssistantRuntime,
   useRemoteThreadListRuntime,
   useAui,
-  RuntimeAdapterProvider,
   useAuiState,
-  type ThreadHistoryAdapter,
 } from '@assistant-ui/react';
 import { useAISDKRuntime } from '@assistant-ui/react-ai-sdk';
 import { useChat } from '@ai-sdk/react';
@@ -15,34 +13,20 @@ import { AxChatTransport, type CredentialRequiredEvent } from './ax-chat-transpo
 
 /**
  * Thread-specific runtime using AI SDK.
+ * Passes the AX history adapter directly to useAISDKRuntime
+ * so thread history loads when switching threads.
  */
 const useChatThreadRuntime = (transport: AxChatTransport): AssistantRuntime => {
   const id = useAuiState(({ threadListItem }) => threadListItem.id);
-  const chat = useChat({ id, transport });
-  return useAISDKRuntime(chat);
-};
-
-/**
- * Provider that injects AX history adapter into the runtime context.
- */
-const AxHistoryProvider = ({ children }: { children?: React.ReactNode }) => {
   const aui = useAui();
 
-  const history = useMemo<ThreadHistoryAdapter>(
-    () =>
-      createAxHistoryAdapter(
-        () => aui.threadListItem().getState().remoteId,
-      ),
+  const history = useMemo(
+    () => createAxHistoryAdapter(() => aui.threadListItem().getState().remoteId),
     [aui],
   );
 
-  const adapters = useMemo(() => ({ history }), [history]);
-
-  return (
-    <RuntimeAdapterProvider adapters={adapters}>
-      {children}
-    </RuntimeAdapterProvider>
-  );
+  const chat = useChat({ id, transport });
+  return useAISDKRuntime(chat, { adapters: { history } });
 };
 
 /**
@@ -66,9 +50,6 @@ export const useAxChatRuntime = (
 
   return useRemoteThreadListRuntime({
     runtimeHook: () => useChatThreadRuntime(transport),
-    adapter: {
-      ...axThreadListAdapter,
-      unstable_Provider: AxHistoryProvider,
-    },
+    adapter: axThreadListAdapter,
   });
 };
