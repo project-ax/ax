@@ -1,14 +1,39 @@
-import { AssistantRuntimeProvider } from '@assistant-ui/react';
+import { useState, useCallback } from 'react';
+import { AssistantRuntimeProvider, useAui } from '@assistant-ui/react';
 import { useAxChatRuntime } from './lib/useAxChatRuntime';
+import type { CredentialRequiredEvent } from './lib/ax-chat-transport';
 import { Thread } from './components/thread';
 import { ThreadList } from './components/thread-list';
+import { CredentialModal } from './components/credential-modal';
 import { Hexagon } from 'lucide-react';
 
-export const App = () => {
-  const runtime = useAxChatRuntime();
+/** Inner component that has access to the runtime context for sending messages. */
+const AppContent = ({
+  credentialRequest,
+  onCredentialProvided,
+  onCredentialCancelled,
+}: {
+  credentialRequest: CredentialRequiredEvent | null;
+  onCredentialProvided: () => void;
+  onCredentialCancelled: () => void;
+}) => {
+  const aui = useAui();
+
+  const handleSubmit = useCallback(
+    () => {
+      onCredentialProvided();
+      // Auto-send a follow-up message so the agent retries
+      try {
+        const composer = aui.composer();
+        composer.setText('Credentials provided, please continue.');
+        composer.send();
+      } catch { /* thread may not be ready */ }
+    },
+    [aui, onCredentialProvided],
+  );
 
   return (
-    <AssistantRuntimeProvider runtime={runtime}>
+    <>
       <div className="flex h-screen bg-background">
         {/* Sidebar */}
         <aside className="flex h-screen w-[220px] flex-col border-r border-border/50 bg-sidebar">
@@ -40,6 +65,39 @@ export const App = () => {
           </div>
         </main>
       </div>
+
+      {/* Credential modal */}
+      {credentialRequest && (
+        <CredentialModal
+          request={credentialRequest}
+          onSubmit={handleSubmit}
+          onCancel={onCredentialCancelled}
+        />
+      )}
+    </>
+  );
+};
+
+export const App = () => {
+  const [credentialRequest, setCredentialRequest] =
+    useState<CredentialRequiredEvent | null>(null);
+
+  const handleCredentialRequired = useCallback(
+    (event: CredentialRequiredEvent) => {
+      setCredentialRequest(event);
+    },
+    [],
+  );
+
+  const runtime = useAxChatRuntime(handleCredentialRequired);
+
+  return (
+    <AssistantRuntimeProvider runtime={runtime}>
+      <AppContent
+        credentialRequest={credentialRequest}
+        onCredentialProvided={() => setCredentialRequest(null)}
+        onCredentialCancelled={() => setCredentialRequest(null)}
+      />
     </AssistantRuntimeProvider>
   );
 };

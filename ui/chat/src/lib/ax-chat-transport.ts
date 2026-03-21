@@ -17,10 +17,17 @@ import { HttpChatTransport, type UIMessage, type UIMessageChunk } from 'ai';
 
 const DEFAULT_USER = 'chat-ui';
 
+export interface CredentialRequiredEvent {
+  envName: string;
+  sessionId: string;
+  requestId: string;
+}
+
 interface AxChatTransportOptions {
   api?: string;
   user?: string;
   model?: string;
+  onCredentialRequired?: (event: CredentialRequiredEvent) => void;
 }
 
 /**
@@ -35,6 +42,8 @@ function extractText(msg: UIMessage): string {
 }
 
 export class AxChatTransport extends HttpChatTransport<UIMessage> {
+  private onCredentialRequired?: (event: CredentialRequiredEvent) => void;
+
   constructor(opts: AxChatTransportOptions = {}) {
     const user = opts.user ?? DEFAULT_USER;
     super({
@@ -52,6 +61,7 @@ export class AxChatTransport extends HttpChatTransport<UIMessage> {
         },
       }),
     });
+    this.onCredentialRequired = opts.onCredentialRequired;
   }
 
   /**
@@ -62,9 +72,12 @@ export class AxChatTransport extends HttpChatTransport<UIMessage> {
   ): ReadableStream<UIMessageChunk> {
     const textPartId = 'text-0';
     let started = false;
+    // Track named SSE events (event: line precedes data: line)
+    let pendingEventName: string | null = null;
+    const credentialCallback = this.onCredentialRequired;
 
     return stream
-      .pipeThrough(new TextDecoderStream())
+      .pipeThrough(new TextDecoderStream() as ReadableWritablePair<string, Uint8Array>)
       .pipeThrough(
         new TransformStream<string, UIMessageChunk>({
           transform(rawChunk, controller) {
@@ -73,7 +86,14 @@ export class AxChatTransport extends HttpChatTransport<UIMessage> {
               const trimmed = line.trim();
               if (!trimmed || trimmed.startsWith(':')) continue;
 
+              // Track named SSE event type
+              if (trimmed.startsWith('event: ')) {
+                pendingEventName = trimmed.slice(7).trim();
+                continue;
+              }
+
               if (trimmed === 'data: [DONE]') {
+                pendingEventName = null;
                 if (started) {
                   controller.enqueue({ type: 'text-end', id: textPartId });
                 }
@@ -82,6 +102,17 @@ export class AxChatTransport extends HttpChatTransport<UIMessage> {
               }
 
               if (!trimmed.startsWith('data: ')) continue;
+
+              // Handle named events
+              if (pendingEventName === 'credential_required' && credentialCallback) {
+                try {
+                  const payload = JSON.parse(trimmed.slice(6));
+                  credentialCallback(payload);
+                } catch { /* malformed event, skip */ }
+                pendingEventName = null;
+                continue;
+              }
+              pendingEventName = null;
 
               let parsed: any;
               try {

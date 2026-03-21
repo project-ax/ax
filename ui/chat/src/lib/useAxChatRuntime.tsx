@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import {
   type AssistantRuntime,
   useRemoteThreadListRuntime,
@@ -11,17 +11,14 @@ import { useAISDKRuntime } from '@assistant-ui/react-ai-sdk';
 import { useChat } from '@ai-sdk/react';
 import { axThreadListAdapter } from './thread-list-adapter';
 import { createAxHistoryAdapter } from './history-adapter';
-import { AxChatTransport } from './ax-chat-transport';
-
-/** Singleton transport — stateless, so safe to share across renders. */
-const axTransport = new AxChatTransport({ api: '/v1/chat/completions' });
+import { AxChatTransport, type CredentialRequiredEvent } from './ax-chat-transport';
 
 /**
  * Thread-specific runtime using AI SDK.
  */
-const useChatThreadRuntime = (): AssistantRuntime => {
+const useChatThreadRuntime = (transport: AxChatTransport): AssistantRuntime => {
   const id = useAuiState(({ threadListItem }) => threadListItem.id);
-  const chat = useChat({ id, transport: axTransport });
+  const chat = useChat({ id, transport });
   return useAISDKRuntime(chat);
 };
 
@@ -50,10 +47,25 @@ const AxHistoryProvider = ({ children }: { children?: React.ReactNode }) => {
 
 /**
  * Custom hook that creates a chat runtime with AX-backed thread persistence.
+ * Returns the runtime and a credential request handler for the modal.
  */
-export const useAxChatRuntime = (): AssistantRuntime => {
+export const useAxChatRuntime = (
+  onCredentialRequired?: (event: CredentialRequiredEvent) => void,
+): AssistantRuntime => {
+  const callbackRef = useRef(onCredentialRequired);
+  callbackRef.current = onCredentialRequired;
+
+  const transport = useMemo(
+    () =>
+      new AxChatTransport({
+        api: '/v1/chat/completions',
+        onCredentialRequired: (event) => callbackRef.current?.(event),
+      }),
+    [],
+  );
+
   return useRemoteThreadListRuntime({
-    runtimeHook: () => useChatThreadRuntime(),
+    runtimeHook: () => useChatThreadRuntime(transport),
     adapter: {
       ...axThreadListAdapter,
       unstable_Provider: AxHistoryProvider,
