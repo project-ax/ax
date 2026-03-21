@@ -1,17 +1,162 @@
 ---
 name: ax-debug
-description: Use when debugging k8s-related issues, NATS IPC problems, HTTP IPC problems, workspace release failures, or any issue in the sandbox/host/agent communication pipeline — starts with e2e test infrastructure for fast repro, falls back to full kind cluster or local process harnesses only when needed
+description: Use when debugging k8s-related issues, NATS IPC problems, HTTP IPC problems, workspace release failures, chat UI development iteration, or any issue in the sandbox/host/agent communication pipeline — starts with chat UI dev loop or e2e test infrastructure for fast repro, falls back to full kind cluster or local process harnesses only when needed
 ---
 
 ## Overview
 
-Three debugging tiers, in order of preference:
+Four debugging/development tiers, in order of preference:
 
-1. **E2E test infrastructure** (`tests/e2e/`) — Automated vitest suite with mock providers, scripted LLM responses, and a kind cluster managed by `global-setup.ts`. **Start here.** Fastest iteration, deterministic, CI-friendly.
-2. **Kind cluster dev loop** (`scripts/k8s-dev.sh`) — Real k8s pods with host volume mounts for ~5s iteration. Use this when you need production-parity pod behavior (network policies, PVCs, NATS bridge, multi-pod communication) that the e2e suite can't replicate.
-3. **Local process harnesses** (`run-http-local.ts` / `run-nats-local.ts`) — Spawns child processes with NATS env. Use this when you need to attach a debugger to individual processes or test IPC edge cases without k8s overhead.
+0. **Chat UI dev loop** (`scripts/chat-dev.sh`) — Vite HMR + local ax server + Playwright MCP for visual verification. **Start here for UI work.** Edit → hot-reload → screenshot → iterate in seconds.
+1. **E2E test infrastructure** (`tests/e2e/`) — Automated vitest suite with mock providers, scripted LLM responses, and a kind cluster managed by `global-setup.ts`. **Start here for backend bugs.** Fastest iteration, deterministic, CI-friendly.
+2. **Kind cluster dev loop** (`scripts/k8s-dev.sh`) — Real k8s pods with host volume mounts for ~5s iteration. Use this when you need production-parity pod behavior.
+3. **Local process harnesses** (`run-http-local.ts` / `run-nats-local.ts`) — Spawns child processes with NATS env. Use this for IPC debugging without k8s overhead.
 
-**Always try Tier 1 first.** Most bugs can be reproduced and fixed with a new scripted turn + test case in under a minute. Only escalate when the bug genuinely requires real k8s infrastructure or manual debugging.
+**For chat UI work, always use Tier 0.** For backend bugs, try Tier 1 first. Only escalate when the bug genuinely requires real k8s infrastructure or manual debugging.
+
+---
+
+## Tier 0: Chat UI Dev Loop
+
+Fast visual iteration on the chat UI using Vite HMR and Playwright MCP. Two modes: real LLM (uses OpenRouter + Gemini Flash, costs fractions of a cent) or mock LLM (free, deterministic).
+
+### Quick Start
+
+```bash
+# Real LLM mode (uses OPENROUTER_API_KEY from env / .env)
+npm run dev:chat start
+
+# Mock LLM mode (no API key needed, scripted responses)
+npm run dev:chat start --mock
+
+# Stop everything
+npm run dev:chat stop
+```
+
+This starts:
+- **Vite dev server** on `http://localhost:5173` — serves the chat UI with hot module replacement
+- **AX server** on `http://localhost:8080` — subprocess sandbox, handles `/v1/chat/completions` + session APIs
+- (Mock mode only) **Mock LLM server** on `http://localhost:9100` — scripted OpenRouter responses
+
+### Architecture
+
+```
+Browser (Playwright MCP)
+  ↓ http://localhost:5173
+Vite Dev Server (HMR, port 5173)
+  ├── Serves ui/chat/src/ with hot-reload
+  └── Proxies /v1/* → http://localhost:8080
+        ↓
+AX Server (subprocess sandbox, port 8080)
+  ├── /v1/chat/completions — completion endpoint
+  ├── /v1/chat/sessions — session CRUD
+  ├── /v1/chat/sessions/:id/history — conversation history
+  └── LLM calls → OpenRouter API (real) or localhost:9100 (mock)
+```
+
+### Visual Verification Workflow (Claude + Playwright MCP)
+
+This is the core loop for iterating on chat UI changes:
+
+```
+1. Start servers:    npm run dev:chat start
+2. Open browser:     playwright__browser_navigate → http://localhost:5173
+3. Take snapshot:    playwright__browser_snapshot (see current DOM state)
+   or screenshot:    playwright__browser_take_screenshot (visual capture)
+4. Edit code:        Modify files in ui/chat/src/ (Vite hot-reloads automatically)
+5. Verify change:    playwright__browser_snapshot or playwright__browser_take_screenshot
+6. If not right:     Go to step 4
+7. Test interaction: playwright__browser_click, playwright__browser_fill_form, etc.
+8. Done:             npm run dev:chat stop
+```
+
+### Key Playwright MCP Actions
+
+| Action | When to use |
+|--------|-------------|
+| `browser_navigate` | Open `http://localhost:5173` at start |
+| `browser_snapshot` | See current DOM structure (fast, text-based) |
+| `browser_take_screenshot` | Visual capture to verify styling/layout |
+| `browser_click` | Click buttons, thread items, etc. |
+| `browser_fill_form` | Type messages in the composer |
+| `browser_press_key` | Submit with Enter, keyboard shortcuts |
+| `browser_wait_for` | Wait for streaming response to complete |
+| `browser_console_messages` | Check for JS errors |
+
+### Typical Workflows
+
+#### Fixing a styling issue
+
+```
+1. npm run dev:chat start
+2. Navigate to http://localhost:5173
+3. Screenshot → identify the problem
+4. Edit ui/chat/src/components/thread.tsx (or index.css)
+5. Screenshot → verify fix (Vite HMR applied change)
+6. Stop servers
+```
+
+#### Testing chat interaction
+
+```
+1. npm run dev:chat start (real LLM mode)
+2. Navigate to http://localhost:5173
+3. Click "New Chat" button
+4. Type a message in composer, press Enter
+5. Wait for streaming response
+6. Screenshot to verify message rendering
+7. Check thread list shows new conversation
+```
+
+#### Testing with mock responses
+
+```
+1. npm run dev:chat start --mock
+2. Navigate to http://localhost:5173
+3. Send a message — gets scripted mock response
+4. Useful for testing UI with predictable content
+5. No API costs, no network dependency
+```
+
+### Chat UI File Map
+
+| File | What it controls |
+|------|-----------------|
+| `ui/chat/src/App.tsx` | Main layout — sidebar + thread area |
+| `ui/chat/src/components/thread.tsx` | Message display, composer, streaming |
+| `ui/chat/src/components/thread-list.tsx` | Sidebar thread list, "New Chat" button |
+| `ui/chat/src/components/markdown-text.tsx` | Markdown rendering in messages |
+| `ui/chat/src/lib/useAxChatRuntime.tsx` | Runtime hook — connects UI to AX backend |
+| `ui/chat/src/lib/thread-list-adapter.ts` | Fetches threads from `/v1/chat/sessions` |
+| `ui/chat/src/lib/history-adapter.ts` | Loads conversation history |
+| `ui/chat/src/index.css` | Tailwind styles, theming |
+| `ui/chat/tailwind.config.js` | Tailwind theme configuration |
+
+### Server-side Changes
+
+UI-only changes (components, styles) hot-reload instantly via Vite. Server-side changes require a restart:
+
+| Change type | Action needed |
+|---|---|
+| `ui/chat/src/**` | Nothing — Vite HMR handles it |
+| `src/host/server-chat-api.ts` | Restart: `npm run dev:chat stop && npm run dev:chat start` |
+| `src/host/server-chat-ui.ts` | Not used in dev mode (Vite serves files directly) |
+| `src/host/server-completions.ts` | Restart server |
+
+### When NOT to use Tier 0
+
+- Backend IPC bugs → use Tier 1 (e2e tests)
+- k8s-specific behavior → use Tier 2 (kind cluster)
+- Need to debug agent process → use Tier 3 (local harness with `--inspect`)
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `scripts/chat-dev.sh` | Start/stop/status for dev servers |
+| `ui/chat/ax-dev.yaml` | Minimal config for mock LLM mode |
+| `ui/chat/vite.config.ts` | Vite config with `/v1` proxy to port 8080 |
+| `ui/chat/src/` | Chat UI React source |
 
 ---
 

@@ -2,6 +2,14 @@
 
 Architecture analysis, gap analysis, design documents, implementation plans.
 
+## [2026-03-21 14:00] — Add Tier 0 Chat UI Dev Loop to ax-debug skill
+
+**Task:** Create a tight dev loop for chat UI iteration with Playwright MCP visual verification
+**What I did:** Created `scripts/chat-dev.sh` (start/stop/status for Vite + ax server), `ui/chat/ax-dev.yaml` (minimal mock config), updated `ui/chat/vite.config.ts` to support `VITE_AX_PORT` env var, added `dev:chat` npm script, updated ax-debug skill with full Tier 0 documentation covering Playwright MCP workflows, file maps, and architecture.
+**Files touched:** `scripts/chat-dev.sh`, `ui/chat/ax-dev.yaml`, `ui/chat/vite.config.ts`, `package.json`, `.gitignore`, `.claude/skills/ax-debug/SKILL.md`, `docs/plans/2026-03-21-chat-ui-dev-loop.md`
+**Outcome:** Success — smoke test verified AX health, Vite serving, and API proxy all working
+**Notes:** Memory/scanner/audit providers don't have `none` variants, so dev config uses real providers (cortex, patterns, database). The `--port` flag sets `VITE_AX_PORT` env var so Vite proxy target stays in sync.
+
 ## [2026-03-19 05:46] — Plan authenticated MITM HTTPS proxy for long-tail CLI tools
 
 **Task:** Create an implementation plan for HTTPS proxying that keeps credentials out of sandboxes while supporting the long tail of CLI tools

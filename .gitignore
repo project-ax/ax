@@ -29,6 +29,9 @@ Thumbs.db
 # Worktrees
 .worktrees/
 
+# Chat UI dev loop PID files
+.chat-dev/
+
 # Mutable identity files (live in ~/.ax/agents/ at runtime)
 # The repo templates/ directory only has default templates
 
