@@ -40,9 +40,10 @@ const AppContent = ({
       onCredentialProvided();
       // Auto-send a follow-up message so the agent retries
       try {
-        const composer = aui.composer();
-        composer.setText('Credentials provided, please continue.');
-        composer.send();
+        aui.thread().append({
+          role: 'user',
+          content: [{ type: 'text', text: 'Credentials provided, please continue.' }],
+        });
       } catch { /* thread may not be ready */ }
     },
     [aui, onCredentialProvided],

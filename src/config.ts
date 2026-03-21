@@ -220,7 +220,23 @@ export function loadConfig(path?: string): Config {
     // but providerEnum() builds enums from PROVIDER_MAP's loosely-typed keys
     // so TypeScript can't narrow the output to the literal union types Config
     // expects.  The assertion is safe — invalid names are caught by parse().
-    return ConfigSchema.parse(parsed) as unknown as Config;
+    const config = ConfigSchema.parse(parsed) as unknown as Config;
+
+    // Container sandboxes have no outbound network and no OS keychain.
+    // Default web_proxy to true (needed for HTTP access, credential injection,
+    // and skill installs) and credentials to database (keychain falls back to
+    // ephemeral plaintext files that are lost on pod restart).
+    const containerSandboxes = new Set(['docker', 'apple', 'k8s']);
+    if (containerSandboxes.has(config.providers.sandbox)) {
+      if (config.web_proxy === undefined) {
+        (config as { web_proxy: boolean }).web_proxy = true;
+      }
+      if (config.providers.credentials === 'keychain') {
+        (config.providers as { credentials: string }).credentials = 'database';
+      }
+    }
+
+    return config;
   } catch (err) {
     if (err instanceof ZodError) {
       throw new Error(formatConfigError(err, configPath, parsed));

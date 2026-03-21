@@ -284,6 +284,8 @@ export interface StdinPayload {
   agentReadOnly?: boolean;
   /** Web proxy URL for outbound HTTP/HTTPS (warm pool pods get this from payload, not pod env). */
   webProxyUrl?: string;
+  /** Credential placeholder env vars — warm pool pods get these from payload, not pod spec. */
+  credentialEnv?: Record<string, string>;
 }
 
 /**
@@ -336,6 +338,9 @@ export function parseStdinPayload(data: string): StdinPayload {
         sessionGcsPrefix: typeof parsed.sessionGcsPrefix === 'string' ? parsed.sessionGcsPrefix : undefined,
         agentReadOnly: parsed.agentReadOnly === true,
         webProxyUrl: typeof parsed.webProxyUrl === 'string' ? parsed.webProxyUrl : undefined,
+        credentialEnv: parsed.credentialEnv && typeof parsed.credentialEnv === 'object' && !Array.isArray(parsed.credentialEnv)
+          ? parsed.credentialEnv as Record<string, string>
+          : undefined,
       };
     }
   } catch {
@@ -531,6 +536,18 @@ function applyPayload(config: AgentConfig, payload: StdinPayload): void {
   } else {
     logger.debug('web_proxy_url_absent', { envSet: !!process.env.AX_WEB_PROXY_URL, payloadSet: !!payload.webProxyUrl });
   }
+  // Credential placeholder env vars — warm pool pods don't have these in their pod spec,
+  // so the host sends them in the payload. The MITM proxy replaces placeholders with real
+  // values in intercepted HTTPS traffic.
+  if (payload.credentialEnv) {
+    for (const [key, value] of Object.entries(payload.credentialEnv)) {
+      if (!process.env[key]) {
+        process.env[key] = value;
+      }
+    }
+    logger.info('credential_env_set', { count: Object.keys(payload.credentialEnv).length });
+  }
+
   // Enterprise fields — prefer canonical env vars (set by sandbox provider)
   // over payload (which carries host paths).
   config.agentId = payload.agentId;

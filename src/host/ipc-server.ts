@@ -103,6 +103,7 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
     ...createBrowserHandlers(providers),
     ...createSkillsHandlers(providers, {
       requestedCredentials: opts?.requestedCredentials,
+      eventBus: opts?.eventBus,
     }),
     ...createIdentityHandlers(providers, {
       agentName,

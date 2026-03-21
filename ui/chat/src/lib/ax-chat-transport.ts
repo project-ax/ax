@@ -147,21 +147,6 @@ export class AxChatTransport extends HttpChatTransport<UIMessage> {
                       toolName: tc.function.name,
                       input: args,
                     });
-
-                    // Trigger credential modal when the agent calls
-                    // skill({ type: "request_credential", envName: "..." })
-                    if (
-                      tc.function.name === 'skill' &&
-                      args.type === 'request_credential' &&
-                      args.envName &&
-                      credentialCallback
-                    ) {
-                      credentialCallback({
-                        envName: args.envName,
-                        sessionId: '',
-                        requestId: '',
-                      });
-                    }
                   }
                 }
               }

@@ -3,6 +3,7 @@
  */
 import type { ProviderRegistry } from '../../types.js';
 import type { IPCContext } from '../ipc-server.js';
+import type { EventBus } from '../event-bus.js';
 import * as clawhub from '../../clawhub/registry-client.js';
 import { resolveCredential } from '../credential-scopes.js';
 import { getLogger } from '../../logger.js';
@@ -11,6 +12,7 @@ const logger = getLogger().child({ component: 'ipc-skills' });
 
 export interface SkillsHandlerOptions {
   requestedCredentials?: Map<string, Set<string>>;
+  eventBus?: EventBus;
 }
 
 export function createSkillsHandlers(providers: ProviderRegistry, opts?: SkillsHandlerOptions) {
@@ -66,6 +68,16 @@ export function createSkillsHandlers(providers: ProviderRegistry, opts?: SkillsH
       // Check if credential is already available (user scope → agent scope)
       const agentName = ctx.agentId ?? 'main';
       const available = (await resolveCredential(providers.credentials, envName, agentName, ctx.userId)) !== null;
+
+      // Emit credential.required so the SSE stream notifies the client
+      if (!available && opts?.eventBus && ctx.requestId) {
+        opts.eventBus.emit({
+          type: 'credential.required',
+          requestId: ctx.requestId,
+          timestamp: Date.now(),
+          data: { envName, sessionId: ctx.sessionId, agentName, userId: ctx.userId },
+        });
+      }
 
       logger.info('credential_request_recorded', { envName, sessionId: ctx.sessionId, available });
       await providers.audit.log({
