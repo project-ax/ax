@@ -392,12 +392,21 @@ async function handleAdminAPI(
   if (pathname === '/admin/api/credentials/provide' && method === 'POST') {
     try {
       const body = JSON.parse(await readBody(req));
-      const { envName, value } = body;
+      const { envName, value, sessionId: credSessionId } = body;
       if (typeof envName !== 'string' || !envName || typeof value !== 'string') {
         sendError(res, 400, 'Missing required fields: envName, value');
         return;
       }
-      await deps.providers.credentials.set(envName, value);
+      const { credentialScope, getSessionCredentialContext } = await import('./credential-scopes.js');
+      const ctx = credSessionId ? getSessionCredentialContext(credSessionId) : undefined;
+      if (ctx) {
+        if (ctx.userId) {
+          await deps.providers.credentials.set(envName, value, credentialScope(ctx.agentName, ctx.userId));
+        }
+        await deps.providers.credentials.set(envName, value, credentialScope(ctx.agentName));
+      } else {
+        await deps.providers.credentials.set(envName, value);
+      }
       sendJSON(res, { ok: true });
     } catch (err) {
       sendError(res, 400, `Invalid request: ${(err as Error).message}`);

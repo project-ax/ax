@@ -543,12 +543,25 @@ export function createRequestHandler(opts: RequestHandlerOpts): (req: IncomingMe
     if (url === '/v1/credentials/provide' && req.method === 'POST') {
       try {
         const body = JSON.parse(await readBody(req));
-        const { envName, value } = body;
+        const { envName, value, sessionId: credSessionId } = body;
         if (typeof envName !== 'string' || !envName || typeof value !== 'string') {
           sendError(res, 400, 'Missing required fields: envName, value');
           return;
         }
-        await providers.credentials.set(envName, value);
+        const { credentialScope, getSessionCredentialContext } = await import('./credential-scopes.js');
+        // Resolve agentName/userId from session context (set during completion)
+        const ctx = credSessionId ? getSessionCredentialContext(credSessionId) : undefined;
+        if (ctx) {
+          // Store user-scoped if userId known
+          if (ctx.userId) {
+            await providers.credentials.set(envName, value, credentialScope(ctx.agentName, ctx.userId));
+          }
+          // Always store at agent scope
+          await providers.credentials.set(envName, value, credentialScope(ctx.agentName));
+        } else {
+          // No session context — store unscoped (backward compat)
+          await providers.credentials.set(envName, value);
+        }
         const responseBody = JSON.stringify({ ok: true });
         res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(responseBody)) });
         res.end(responseBody);

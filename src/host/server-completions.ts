@@ -36,6 +36,7 @@ import type { EventBus } from './event-bus.js';
 import { maybeSummarizeHistory, type SummarizationConfig } from './history-summarizer.js';
 import { recallMemoryForMessage, type MemoryRecallConfig } from './memory-recall.js';
 import { createEmbeddingClient } from '../utils/embedding-client.js';
+import { resolveCredential, credentialScope, setSessionCredentialContext, clearSessionCredentialContext } from './credential-scopes.js';
 
 // ── Agent spawn retry ──
 const MAX_AGENT_RETRIES = 2;
@@ -393,6 +394,11 @@ export async function processCompletion(
   let toolMountRoot: { mountRoot: string; cleanup: () => void } | undefined;
   const agentName = config.agent_name ?? 'main';
   const currentUserId = userId ?? process.env.USER ?? 'default';
+
+  // Register session context so the credential provide endpoint can resolve
+  // agentName/userId from just a sessionId (client doesn't send these).
+  setSessionCredentialContext(sessionId, { agentName, userId: currentUserId });
+
   try {
     if (persistentSessionId) {
       workspace = workspaceDir(persistentSessionId);
@@ -775,7 +781,7 @@ export async function processCompletion(
 
       for (const oauthReq of skillOAuthRequirements) {
         const credKey = `oauth:${oauthReq.name}`;
-        const stored = await providers.credentials.get(credKey);
+        const stored = await resolveCredential(providers.credentials, credKey, agentName, currentUserId);
 
         if (stored) {
           // Credential exists — refresh if expired
@@ -809,7 +815,7 @@ export async function processCompletion(
       for (const envName of skillEnvRequirements) {
         if (oauthHandledNames.has(envName)) continue;
 
-        let realValue = await providers.credentials.get(envName);
+        let realValue = await resolveCredential(providers.credentials, envName, agentName, currentUserId);
 
         if (!realValue) {
           reqLogger.info('credential_prompt_emitting', { envName });
@@ -817,7 +823,7 @@ export async function processCompletion(
             type: 'credential.required',
             requestId,
             timestamp: Date.now(),
-            data: { envName, sessionId },
+            data: { envName, sessionId, agentName, userId: currentUserId },
           });
           missingCredentials.push(envName);
         }
@@ -1232,7 +1238,7 @@ export async function processCompletion(
       for (const envName of newRequirements) {
         if (credentialMap.toEnvMap()[envName]) continue; // Already registered
 
-        let realValue = await providers.credentials.get(envName);
+        const realValue = await resolveCredential(providers.credentials, envName, agentName, currentUserId);
 
         if (!realValue) {
           reqLogger.info('post_agent_credential_prompt', { envName });
@@ -1240,7 +1246,7 @@ export async function processCompletion(
             type: 'credential.required',
             requestId,
             timestamp: Date.now(),
-            data: { envName, sessionId },
+            data: { envName, sessionId, agentName, userId: currentUserId },
           });
           postAgentMissing.push(envName);
         }
