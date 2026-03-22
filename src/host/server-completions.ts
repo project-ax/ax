@@ -555,6 +555,7 @@ export async function processCompletion(
     let webProxyPort: number | undefined;
     const credentialMap = new CredentialPlaceholderMap();
     const credentialEnv: Record<string, string> = {};
+    let caCertPem: string | undefined;
     // Register in the shared registry so k8s shared proxy can see this session's credentials
     if (deps.sharedCredentialRegistry) {
       deps.sharedCredentialRegistry.register(sessionId, credentialMap);
@@ -592,6 +593,7 @@ export async function processCompletion(
       // Credentials are registered later (after agentWsPath is set) by reference.
       const caDir = join(agentDir(agentName), 'ca');
       const ca = await getOrCreateCA(caDir);
+      caCertPem = ca.cert;
       const mitmConfig = {
         ca,
         credentials: credentialMap,
@@ -631,7 +633,7 @@ export async function processCompletion(
       }
 
       // Inject CA trust env vars so sandbox processes trust the proxy's certs
-      const isContainerSandbox = new Set(['docker', 'apple', 'k8s-pod']).has(config.providers.sandbox);
+      const isContainerSandbox = new Set(['docker', 'apple', 'k8s']).has(config.providers.sandbox);
       const caCertPath = join(caDir, 'ca.crt');
       const sandboxCaCertPath = isContainerSandbox ? '/etc/ax/ca.crt' : caCertPath;
       credentialEnv.NODE_EXTRA_CA_CERTS = sandboxCaCertPath;
@@ -832,6 +834,8 @@ export async function processCompletion(
       // Credential placeholders — warm pool pods don't have these in their pod spec,
       // so include them in the payload for the agent to set via process.env.
       credentialEnv: credentialMap.toEnvMap(),
+      // MITM CA cert — sandbox pods need this to trust the proxy's TLS certs.
+      caCert: caCertPem,
     });
 
     // Spawn, run, and collect agent output — with retry on transient crashes.

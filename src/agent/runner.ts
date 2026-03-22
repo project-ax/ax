@@ -8,7 +8,8 @@ import { IPCClient } from './ipc-client.js';
 import { getLogger, truncate } from '../logger.js';
 import type { ContentBlock } from '../types.js';
 import type { IdentityFiles, SkillSummary } from './prompt/types.js';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 const logger = getLogger().child({ component: 'runner' });
 
@@ -286,6 +287,8 @@ export interface StdinPayload {
   webProxyUrl?: string;
   /** Credential placeholder env vars — warm pool pods get these from payload, not pod spec. */
   credentialEnv?: Record<string, string>;
+  /** MITM CA cert PEM — written to disk so sandbox processes trust the proxy. */
+  caCert?: string;
 }
 
 /**
@@ -341,6 +344,7 @@ export function parseStdinPayload(data: string): StdinPayload {
         credentialEnv: parsed.credentialEnv && typeof parsed.credentialEnv === 'object' && !Array.isArray(parsed.credentialEnv)
           ? parsed.credentialEnv as Record<string, string>
           : undefined,
+        caCert: typeof parsed.caCert === 'string' ? parsed.caCert : undefined,
       };
     }
   } catch {
@@ -546,6 +550,18 @@ function applyPayload(config: AgentConfig, payload: StdinPayload): void {
       }
     }
     logger.info('credential_env_set', { count: Object.keys(payload.credentialEnv).length });
+  }
+
+  // MITM CA cert — write to disk so NODE_EXTRA_CA_CERTS can load it.
+  if (payload.caCert && process.env.NODE_EXTRA_CA_CERTS) {
+    try {
+      const certPath = process.env.NODE_EXTRA_CA_CERTS;
+      mkdirSync(dirname(certPath), { recursive: true });
+      writeFileSync(certPath, payload.caCert);
+      logger.info('ca_cert_written', { path: certPath });
+    } catch (err) {
+      logger.warn('ca_cert_write_failed', { error: (err as Error).message });
+    }
   }
 
   // Enterprise fields — prefer canonical env vars (set by sandbox provider)
