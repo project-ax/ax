@@ -37,34 +37,39 @@ export class ProxyDomainList {
   private adminApproved = new Set<string>();
   /** Domains pending admin review. Keyed by domain for dedup. */
   private pending = new Map<string, PendingDomain>();
+  /** Merged cache of all allowed domains — invalidated on changes, rebuilt lazily. */
+  private merged: Set<string> | null = null;
 
   isAllowed(domain: string): boolean {
-    if (BUILTIN_DOMAINS.has(domain)) return true;
-    if (this.adminApproved.has(domain)) return true;
-    for (const domains of this.skillDomains.values()) {
-      if (domains.has(domain)) return true;
-    }
-    return false;
+    if (!this.merged) this.rebuildMerged();
+    return this.merged!.has(domain);
   }
 
-  /** Get a Set snapshot of all currently allowed domains (for passing to proxy). */
-  getAllowedDomains(): Set<string> {
+  private rebuildMerged(): void {
     const all = new Set(BUILTIN_DOMAINS);
     for (const domains of this.skillDomains.values()) {
       for (const d of domains) all.add(d);
     }
     for (const d of this.adminApproved) all.add(d);
-    return all;
+    this.merged = all;
+  }
+
+  /** Get a Set snapshot of all currently allowed domains. */
+  getAllowedDomains(): Set<string> {
+    if (!this.merged) this.rebuildMerged();
+    return new Set(this.merged!);
   }
 
   addSkillDomains(skillName: string, domains: string[]): void {
     if (domains.length === 0) return;
     this.skillDomains.set(skillName, new Set(domains));
+    this.merged = null;
     logger.info('skill_domains_added', { skillName, domains });
   }
 
   removeSkillDomains(skillName: string): void {
     this.skillDomains.delete(skillName);
+    this.merged = null;
   }
 
   /** Queue a denied domain for admin review. No-op if already allowed or pending. */
@@ -79,6 +84,7 @@ export class ProxyDomainList {
   approvePending(domain: string): void {
     this.pending.delete(domain);
     this.adminApproved.add(domain);
+    this.merged = null;
     logger.info('domain_approved_by_admin', { domain });
   }
 

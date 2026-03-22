@@ -136,7 +136,7 @@ async function main(): Promise<void> {
           durationMs: entry.durationMs,
         }).catch(() => {});
       },
-      allowedDomains: domainList.getAllowedDomains(),
+      allowedDomains: { has: (d: string) => domainList.isAllowed(d) },
       onDenied: (domain) => domainList.addPending(domain, 'host-process'),
       mitm: {
         ca,

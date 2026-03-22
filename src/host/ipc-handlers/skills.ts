@@ -29,9 +29,17 @@ export interface SkillsHandlerOptions {
 export function createSkillsHandlers(providers: ProviderRegistry, opts?: SkillsHandlerOptions) {
   return {
     skill_install: async (req: any, ctx: IPCContext) => {
-      // 1. If query provided (not slug), search ClawHub first
+      // 1. Extract slug from ClawHub URL, query, or direct slug
       let slug = req.slug;
-      if (!slug && req.query) {
+
+      // Parse ClawHub URLs in either slug or query field
+      // e.g. "https://clawhub.ai/ManuelHettich/linear" → "ManuelHettich/linear"
+      const rawInput = slug || req.query || '';
+      const clawHubMatch = rawInput.match(/clawhub\.ai\/([^?#\s]+)/);
+      if (clawHubMatch) {
+        slug = clawHubMatch[1].replace(/\/+$/, ''); // strip trailing slashes
+      } else if (!slug && req.query) {
+        // No URL detected — fall back to search
         const results = await clawhub.search(req.query, 5);
         if (results.length === 0) return { installed: false, reason: 'No matching skills found' };
         slug = results[0].slug;

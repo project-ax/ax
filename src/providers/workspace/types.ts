@@ -127,4 +127,8 @@ export interface WorkspaceProvider {
   /** Download all files in a scope with content. Used by the provision HTTP endpoint
    *  so sandbox pods can fetch workspace files from the host (the pod has no GCS credentials). */
   downloadScope?(scope: WorkspaceScope, id: string): Promise<Array<{ path: string; content: Buffer }>>;
+
+  /** List all IDs (user IDs, agent names) that have files in a given scope.
+   *  Used at startup to enumerate all users whose skills need domain scanning. */
+  listScopeIds?(scope: WorkspaceScope): Promise<string[]>;
 }

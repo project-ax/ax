@@ -584,36 +584,27 @@ export async function processCompletion(
         credentials: credentialMap,
         bypassDomains: new Set(config.mitm_bypass_domains ?? []),
       };
+      const allowedDomains = deps.domainList ? { has: (d: string) => deps.domainList!.isAllowed(d) } : undefined;
+      const onDenied = (domain: string) => deps.domainList?.addPending(domain, sessionId);
+      const urlRewrites = config.url_rewrites
+        ? new Map(Object.entries(config.url_rewrites))
+        : undefined;
 
       if (isContainerSandboxForProxy) {
         // Unix socket mode — placed in same dir as IPC socket (already mounted)
         webProxySocketPath = join(ipcSocketDir, 'web-proxy.sock');
         const webProxy = await startWebProxy({
           listen: webProxySocketPath,
-          sessionId,
-          canaryToken,
-          onAudit: webProxyAudit,
-          allowedDomains: deps.domainList?.getAllowedDomains(),
-          onDenied: (domain) => deps.domainList?.addPending(domain, sessionId),
-          mitm: mitmConfig,
-          urlRewrites: config.url_rewrites
-            ? new Map(Object.entries(config.url_rewrites))
-            : undefined,
+          sessionId, canaryToken, onAudit: webProxyAudit,
+          allowedDomains, onDenied, mitm: mitmConfig, urlRewrites,
         });
         webProxyCleanup = webProxy.stop;
       } else {
         // TCP mode — subprocess or k8s (k8s uses separate port in host-process.ts)
         const webProxy = await startWebProxy({
           listen: 0,
-          sessionId,
-          canaryToken,
-          onAudit: webProxyAudit,
-          allowedDomains: deps.domainList?.getAllowedDomains(),
-          onDenied: (domain) => deps.domainList?.addPending(domain, sessionId),
-          mitm: mitmConfig,
-          urlRewrites: config.url_rewrites
-            ? new Map(Object.entries(config.url_rewrites))
-            : undefined,
+          sessionId, canaryToken, onAudit: webProxyAudit,
+          allowedDomains, onDenied, mitm: mitmConfig, urlRewrites,
         });
         webProxyPort = webProxy.address as number;
         webProxyCleanup = webProxy.stop;

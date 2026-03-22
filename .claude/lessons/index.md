@@ -97,6 +97,8 @@
 - Popular OpenClaw skills use clawdbot alias, not openclaw [providers/skills.md](providers/skills.md)
 - Many skills have no metadata block — static analysis is essential [providers/skills.md](providers/skills.md)
 - OpenClaw's security failures validate AX's zero-trust architecture [providers/skills.md](providers/skills.md)
+- ClawHub URL in query triggers search, returns wrong skill — always extract slug from URL [providers/skills.md](providers/skills.md)
+- Skill domains must be declared in frontmatter — body URL scanning is insufficient [providers/skills.md](providers/skills.md)
 - Tool filtering must align with prompt module shouldInclude() [providers/skills.md](providers/skills.md)
 - Skill install writes to host filesystem only — must also queue for GCS in k8s [providers/skills.md](providers/skills.md)
 - Kind cluster `ax` vs `ax-dev` — volume mount dev loop requires k8s-dev setup [providers/skills.md](providers/skills.md)

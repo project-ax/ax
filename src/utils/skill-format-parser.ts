@@ -187,6 +187,7 @@ export function parseAgentSkill(raw: string): ParsedAgentSkill {
     requires: {
       bins: toStringArray(requires?.bins),
       env: toStringArray(requires?.env),
+      domains: toStringArray(requires?.domains),
       oauth: toOAuthRequirements(requires?.oauth),
       anyBins: Array.isArray(requires?.anyBins)
         ? (requires.anyBins as unknown[]).filter(Array.isArray).map(a => a.map(String))

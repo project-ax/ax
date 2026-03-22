@@ -51,6 +51,8 @@ The `skill_install` handler writes files to **two** locations:
 
 ClawHub URLs use `author/name` format (e.g. `ManuelHettich/linear`) but the API download endpoint uses just the skill slug (`linear`). Both `fetchSkillPackage()` and `fetchSkill()` handle this: if the full slug 404s and contains a `/`, they retry with just the name part after `/`.
 
+The `skill_install` handler also parses ClawHub URLs from `slug` or `query` fields. If either field contains a `clawhub.ai/...` URL (e.g. `https://clawhub.ai/ManuelHettich/linear`), the handler extracts the path as the slug (`ManuelHettich/linear`) and bypasses search. This prevents search from returning an unrelated skill.
+
 The `skill_install` handler updates its local `slug` variable to `pkg.slug` (the resolved name) after download, so filesystem paths and GCS paths use the clean slug without the author prefix.
 
 ## Key Files
@@ -78,7 +80,7 @@ Types-only module -- re-exports screener types from `src/providers/screener/type
 
 Parsed representation of a SKILL.md file:
 - `name`, `description?`, `version?`, `license?`, `homepage?`
-- `requires` -- `bins` (required host binaries), `env` (required env vars), `oauth` (`OAuthRequirement[]`), `anyBins` (alternative binary options), `config` (config keys)
+- `requires` -- `bins` (required host binaries), `env` (required env vars), `domains` (required API domains for proxy allowlist), `oauth` (`OAuthRequirement[]`), `anyBins` (alternative binary options), `config` (config keys)
 - `install` -- `SkillInstallStep[]` (raw `run` shell commands, not structured kind/package taxonomy)
 - `os?` -- platform constraints
 - `permissions` -- mapped from OpenClaw terms to AX IPC actions

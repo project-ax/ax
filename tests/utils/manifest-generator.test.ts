@@ -148,6 +148,46 @@ Fetch data from https://api.example.com/v1/data and https://cdn.other.org/lib.js
       expect(m.capabilities.domains).toContain('api.example.com');
       expect(m.capabilities.domains).toContain('cdn.other.org');
     });
+
+    test('extracts bare domains with path (no protocol prefix)', () => {
+      const m = manifestFrom(`---
+name: linear
+---
+# Linear Skill
+
+## Notes
+
+- Uses GraphQL API (api.linear.app/graphql)`);
+
+      expect(m.capabilities.domains).toContain('api.linear.app');
+    });
+
+    test('extracts bare domains without path (no protocol prefix)', () => {
+      const m = manifestFrom(`---
+name: linear
+---
+# Linear Skill
+
+Connects to api.linear.app for issue tracking.`);
+
+      expect(m.capabilities.domains).toContain('api.linear.app');
+    });
+
+    test('does not false-positive on simple words or file paths', () => {
+      const m = manifestFrom(`---
+name: clean
+---
+# Clean Skill
+
+Use scripts/run.sh to process data.
+Check the README.md file.
+Edit config.yaml for settings.`);
+
+      // These should NOT be detected as domains (only 1 dot = not enough)
+      expect(m.capabilities.domains).not.toContain('scripts');
+      expect(m.capabilities.domains).not.toContain('README.md');
+      expect(m.capabilities.domains).not.toContain('config.yaml');
+    });
   });
 
   // ── Static analysis: script paths ─────────────────
@@ -268,6 +308,56 @@ Use \`mcporter\` to work with MCP servers directly.
       expect(m.capabilities.host_commands).toContain('mcporter');
       expect(m.install.steps[0].run).toBe('npm install -g mcporter');
       expect(m.install.steps[0].bin).toBe('mcporter');
+    });
+  });
+
+  // ── Declared domains (requires.domains) ──────────
+
+  describe('declared domains (requires.domains)', () => {
+    test('includes requires.domains in capabilities.domains', () => {
+      const m = manifestFrom(`---
+name: linear
+requires:
+  env:
+    - LINEAR_API_KEY
+  domains:
+    - api.linear.app
+---
+# Linear Skill
+
+Query and manage Linear issues.`);
+
+      expect(m.capabilities.domains).toContain('api.linear.app');
+    });
+
+    test('merges declared domains with auto-detected domains', () => {
+      const m = manifestFrom(`---
+name: linear
+requires:
+  domains:
+    - api.linear.app
+---
+# Linear Skill
+
+Also fetches from https://cdn.linear.app/assets.`);
+
+      expect(m.capabilities.domains).toContain('api.linear.app');
+      expect(m.capabilities.domains).toContain('cdn.linear.app');
+    });
+
+    test('deduplicates when declared domain also appears in body URL', () => {
+      const m = manifestFrom(`---
+name: linear
+requires:
+  domains:
+    - api.linear.app
+---
+# Linear Skill
+
+Fetch from https://api.linear.app/graphql.`);
+
+      const count = m.capabilities.domains.filter(d => d === 'api.linear.app').length;
+      expect(count).toBe(1);
     });
   });
 

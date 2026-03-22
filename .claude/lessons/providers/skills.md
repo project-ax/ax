@@ -48,6 +48,12 @@
 **Lesson:** The `parseAgentSkill()` function in `skill-format-parser.ts` reads `install` and `requires` from `resolveMetadata(fm)`, which looks for `fm.metadata.openclaw` (or `clawdbot`/`clawdis`). Placing `install:` or `requires:` at the top level of YAML frontmatter will be IGNORED — they must be nested under `metadata.openclaw:`. If skill_install returns empty steps, check the skill format first.
 **Tags:** skills, parser, metadata, install, frontmatter, acceptance-test
 
+### GCS downloadScope requires user IDs, not agent name — enumerate with listScopeIds
+**Date:** 2026-03-22
+**Context:** Startup domain scan called `downloadScope('user', agentName)` with `agentName='main'`, which queried GCS prefix `test/user/main/` — but skills are stored under user IDs like `test/user/chat-ui/`. No skills found, no domains added, proxy blocked api.linear.app.
+**Lesson:** The `downloadScope(scope, id)` method takes the actual scope ID (user ID for 'user' scope, agent name for 'agent' scope). When scanning all user skills at startup, you must enumerate user IDs first via `listScopeIds('user')` then iterate each. Don't assume `agentName` works as the ID for user-scoped GCS data. The local filesystem scan already iterates `users/*/skills/` — the GCS scan must do the equivalent.
+**Tags:** skills, workspace, gcs, k8s, proxy, domain-allowlist, startup
+
 ### Skill install writes to host filesystem only — must also queue for GCS in k8s
 **Date:** 2026-03-22
 **Context:** Debugging why installed skills didn't persist across sessions in k8s. The `skill_install` IPC handler wrote files to `~/.ax/agents/<id>/users/<userId>/skills/` on the host filesystem, but sandbox pods (separate containers) can't access that. Workspace provisions from GCS returned 0 files.
@@ -59,6 +65,18 @@
 **Context:** Debugging the skill persistence fix against a manually-created `ax` cluster that lacked dist/ volume mounts. The `k8s:dev cycle` command had no effect on host code.
 **Lesson:** The `npm run k8s:dev setup` command creates a cluster named `ax-dev` with kind extraMounts that share `dist/`, `templates/`, and `skills/` from the host into kind nodes. Manually-created clusters won't have these mounts — the host pod uses the Docker image's baked-in `dist/`. If `k8s:dev cycle` doesn't pick up code changes, verify the cluster was created with `k8s:dev setup` and check for hostPath volume mounts on the host pod.
 **Tags:** k8s, kind, dev-loop, volume-mounts, debugging
+
+### ClawHub URL in query triggers search, returns wrong skill — always extract slug from URL
+**Date:** 2026-03-22
+**Context:** When user provided `https://clawhub.ai/ManuelHettich/linear`, the LLM passed it as `query` which searched ClawHub and returned an unrelated skill ("virtually-us") as top result
+**Lesson:** The `skill_install` handler must parse ClawHub URLs from both `slug` and `query` fields before searching. Use regex `clawhub\.ai\/([^?#\s]+)` to extract the author/name path. The prompt must also instruct the LLM to pass ClawHub URLs as `slug`, not `query`, since search is unreliable for URL-based installs.
+**Tags:** skills, clawhub, url-parsing, slug-resolution, prompt
+
+### Skill domains must be declared in frontmatter — body URL scanning is insufficient
+**Date:** 2026-03-22
+**Context:** The Linear skill installed correctly but couldn't reach `api.linear.app` because the SKILL.md body didn't mention the URL, so `generateManifest()` extracted zero domains
+**Lesson:** The manifest generator's URL regex (`https?://...`) only catches domains explicitly written as URLs in body text. Many skills use API domains that aren't mentioned as URLs in docs. Add `requires.domains` to the SKILL.md frontmatter format and merge with auto-detected domains in `generateManifest()`. Skill authors should declare ALL required API domains in `requires.domains`.
+**Tags:** skills, proxy, domains, allowlist, manifest-generator, SKILL.md
 
 ### Tool filtering must align with prompt module shouldInclude()
 **Date:** 2026-02-26

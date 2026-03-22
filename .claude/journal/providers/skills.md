@@ -2,6 +2,24 @@
 
 Skills import pipeline, screener, manifest generator, ClawHub client, architecture comparison, install orchestration.
 
+## [2026-03-22 16:30] — Fix GCS domain loading at startup — wrong user ID
+
+**Task:** Debug why proxy blocks api.linear.app with 403 even though Linear skill is installed and persisted in GCS
+**What I did:** Traced the startup domain scan in `server-init.ts`. Found it calls `downloadScope('user', agentName)` where `agentName='main'`, which queries GCS prefix `test/user/main/` — but skills are stored under actual user IDs (`test/user/chat-ui/`, `test/user/default/`). Added `listScopeIds()` method to workspace provider types and GCS implementation to enumerate all user IDs in a scope. Updated `server-init.ts` to iterate each user ID when scanning for skills.
+**Files touched:** `src/providers/workspace/types.ts`, `src/providers/workspace/gcs.ts`, `src/host/server-init.ts`
+**Outcome:** Success — host now logs `skill_domains_added` with `api.linear.app` at startup. Domain allowlist shows `api.linear.app` as allowed instead of pending.
+**Notes:** The bug was subtle: the startup code mirrored the local filesystem scan pattern (iterate users dir), but the GCS equivalent used `agentName` as the ID for both scopes. The `listScopeIds` method enumerates unique first-level prefixes under `<prefix>/<scope>/` in GCS.
+
+## [2026-03-22 10:30] — Fix skill install slug resolution and proxy domain allowlist
+
+**Task:** Debug two bugs: (1) installing skill via ClawHub URL resolves wrong slug ("virtually-us" instead of "linear"), (2) installed skill can't reach api.linear.app (403 from proxy)
+**What I did:**
+- Bug 1: Added ClawHub URL parsing in `skill_install` handler — extracts `author/name` from `clawhub.ai/...` URLs in both `slug` and `query` fields. Updated prompt to instruct LLM to pass URLs as `slug` not `query`.
+- Bug 2: Added `requires.domains` to `ParsedAgentSkill` type, parser, and manifest generator. Skill authors can now declare domains in SKILL.md frontmatter. Also added bare domain regex (`BARE_DOMAIN_RE`) to detect domains referenced without protocol prefix (e.g. `api.linear.app/graphql`). Updated e2e mock SKILL.md.
+**Files touched:** `src/host/ipc-handlers/skills.ts`, `src/providers/skills/types.ts`, `src/utils/skill-format-parser.ts`, `src/utils/manifest-generator.ts`, `src/agent/prompt/modules/skills.ts`, `tests/e2e/mock-server/clawhub.ts`, `tests/host/skill-install.test.ts`, `tests/utils/skill-format-parser.test.ts`, `tests/utils/manifest-generator.test.ts`
+**Outcome:** Success — all 2552 tests pass
+**Notes:** Bug 2 had four layers: (1) no `requires.domains` frontmatter field, (2) body scanner only matched full URLs with protocol prefix — added `BARE_DOMAIN_RE` for `api.linear.app/graphql` style refs, (3) proxy received static `Set<string>` snapshot instead of live domain check — changed to `{ has() }` interface with live wrapper, (4) on restart, `server-init.ts` only read agent-level skills not user-level — added user skills dir scanning.
+
 ## [2026-03-22 09:45] — Fix skill install persistence in k8s (GCS workspace)
 
 **Task:** Debug why installed skills don't persist across sessions in k8s mode — agent re-installs on every turn

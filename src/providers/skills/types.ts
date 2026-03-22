@@ -39,6 +39,7 @@ export interface ParsedAgentSkill {
   requires: {
     bins: string[];
     env: string[];
+    domains: string[];
     oauth: OAuthRequirement[];
     anyBins?: string[][];
     config?: Record<string, string>;

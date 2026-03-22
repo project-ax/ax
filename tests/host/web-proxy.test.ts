@@ -654,6 +654,42 @@ describe('web-proxy', () => {
 
       expect(result.status).toBe(200);
     });
+
+    test('allowedDomains reflects live updates (not just a snapshot)', async () => {
+      const echo = await startEchoServer();
+      cleanups.push(() => echo.server.close());
+
+      // Create a live domain checker that can be updated after proxy starts
+      const allowed = new Set<string>();
+      const liveDomainChecker = { has: (d: string) => allowed.has(d) };
+
+      const entries: ProxyAuditEntry[] = [];
+      const proxy = await startWebProxy({
+        listen: 0,
+        sessionId: 'test-live-domains',
+        allowedIPs: ALLOW_LOCALHOST,
+        allowedDomains: liveDomainChecker,
+        onAudit: (e) => entries.push(e),
+      });
+      cleanups.push(proxy.stop);
+
+      // Request should be denied — domain not in allowlist yet
+      const denied = await proxyFetch(
+        proxy.address as number,
+        `http://127.0.0.1:${echo.port}/before`,
+      );
+      expect(denied.status).toBe(403);
+
+      // Now add the domain to the live allowlist (simulates skill_install mid-session)
+      allowed.add('127.0.0.1');
+
+      // Same domain should now be allowed
+      const approved = await proxyFetch(
+        proxy.address as number,
+        `http://127.0.0.1:${echo.port}/after`,
+      );
+      expect(approved.status).toBe(200);
+    });
   });
 
   describe('URL rewriting', () => {

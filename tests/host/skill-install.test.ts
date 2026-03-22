@@ -303,4 +303,42 @@ Do stuff.
     // name field is empty string from parser, so falls back to slug
     expect(result.name).toBe(slug);
   });
+
+  test('extracts slug from ClawHub URL in query field', async () => {
+    const resolvedSlug = 'linear';
+    vi.mocked(clawhub.fetchSkillPackage).mockResolvedValue(makeSkillPackage(resolvedSlug));
+
+    const providers = makeProviders();
+    const handlers = createSkillsHandlers(providers);
+    const ctx = makeCtx();
+
+    // When query is a ClawHub URL, it should extract the slug, NOT search
+    const result = await handlers.skill_install(
+      { query: 'https://clawhub.ai/ManuelHettich/linear' },
+      ctx,
+    );
+
+    expect(clawhub.search).not.toHaveBeenCalled();
+    expect(clawhub.fetchSkillPackage).toHaveBeenCalledWith('ManuelHettich/linear');
+    expect(result.installed).toBe(true);
+    expect(result.slug).toBe(resolvedSlug);
+  });
+
+  test('extracts slug from ClawHub URL in slug field', async () => {
+    const resolvedSlug = 'linear';
+    vi.mocked(clawhub.fetchSkillPackage).mockResolvedValue(makeSkillPackage(resolvedSlug));
+
+    const providers = makeProviders();
+    const handlers = createSkillsHandlers(providers);
+    const ctx = makeCtx();
+
+    const result = await handlers.skill_install(
+      { slug: 'https://clawhub.ai/ManuelHettich/linear' },
+      ctx,
+    );
+
+    expect(clawhub.fetchSkillPackage).toHaveBeenCalledWith('ManuelHettich/linear');
+    expect(result.installed).toBe(true);
+    expect(result.slug).toBe(resolvedSlug);
+  });
 });

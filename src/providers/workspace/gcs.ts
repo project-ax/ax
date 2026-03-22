@@ -83,6 +83,31 @@ async function takeSnapshot(baseDir: string): Promise<FileSnapshot> {
 }
 
 // ═══════════════════════════════════════════════════════
+// GCS key prefix helpers
+// ═══════════════════════════════════════════════════════
+
+/** Map scope to GCS folder name — 'session' → 'scratch', others pass through. */
+function scopeFolder(scope: WorkspaceScope): string {
+  return scope === 'session' ? 'scratch' : scope;
+}
+
+/** Normalize prefix to end with '/' (or empty string). */
+function normalizePrefix(prefix: string): string {
+  if (!prefix) return '';
+  return prefix.endsWith('/') ? prefix : `${prefix}/`;
+}
+
+/** Build the GCS key prefix for a scope/id pair: `<prefix><folder>/<id>/`. */
+function gcsKeyPrefix(prefix: string, scope: WorkspaceScope, id: string): string {
+  return `${normalizePrefix(prefix)}${scopeFolder(scope)}/${id}/`;
+}
+
+/** Build the GCS prefix for a scope (without trailing id): `<prefix><folder>/`. */
+function gcsScopePrefix(prefix: string, scope: WorkspaceScope): string {
+  return `${normalizePrefix(prefix)}${scopeFolder(scope)}/`;
+}
+
+// ═══════════════════════════════════════════════════════
 // Transport Abstraction
 // ═══════════════════════════════════════════════════════
 
@@ -115,26 +140,16 @@ function createLocalTransport(bucket: GcsBucketLike, basePath: string, prefix: s
     return `${scope}:${id}`;
   }
 
-  /** Build the GCS key prefix for a scope/id pair. */
-  function buildGcsPrefix(scope: WorkspaceScope, id: string): string {
-    const base = prefix.endsWith('/') ? prefix : prefix ? `${prefix}/` : '';
-    // 'session' scope backs the scratch workspace — use 'scratch' as the GCS folder name
-    // so the bucket structure matches what the LLM sees (agent/, user/, scratch/).
-    const folder = scope === 'session' ? 'scratch' : scope;
-    return `${base}${folder}/${id}/`;
-  }
-
   return {
     async provision(scope: WorkspaceScope, id: string): Promise<string> {
-      const folder = scope === 'session' ? 'scratch' : scope;
-      const localDir = safePath(basePath, folder, id);
+      const localDir = safePath(basePath, scopeFolder(scope), id);
       await mkdir(localDir, { recursive: true });
 
-      const keyPrefix = buildGcsPrefix(scope, id);
-      const [files] = await bucket.getFiles({ prefix: keyPrefix });
+      const kp = gcsKeyPrefix(prefix, scope, id);
+      const [files] = await bucket.getFiles({ prefix: kp });
 
       for (const file of files) {
-        const relPath = file.name.slice(keyPrefix.length);
+        const relPath = file.name.slice(kp.length);
         if (!relPath) continue;
 
         const localPath = safePath(localDir, ...relPath.split('/'));
@@ -189,10 +204,10 @@ function createLocalTransport(bucket: GcsBucketLike, basePath: string, prefix: s
       const state = mounts.get(key);
       if (!state) return;
 
-      const keyPrefix = buildGcsPrefix(scope, id);
+      const kp = gcsKeyPrefix(prefix, scope, id);
 
       for (const change of changes) {
-        const gcsKey = keyPrefix + change.path;
+        const gcsKey = kp + change.path;
 
         if (change.type === 'deleted') {
           try {
@@ -243,14 +258,6 @@ function createRemoteTransport(bucket: GcsBucketLike, prefix: string): RemoteWor
   // Pending changes keyed by scope name, accumulated from workspace_release IPC calls.
   const pendingChanges = new Map<string, FileChange[]>();
 
-  /** Build the GCS key prefix for a scope/id pair. */
-  function buildGcsPrefix(scope: WorkspaceScope, id: string): string {
-    const base = prefix.endsWith('/') ? prefix : prefix ? `${prefix}/` : '';
-    // 'session' scope backs the scratch workspace — use 'scratch' as the GCS folder name
-    const folder = scope === 'session' ? 'scratch' : scope;
-    return `${base}${folder}/${id}/`;
-  }
-
   return {
     async provision(): Promise<string> {
       // No-op — k8s sandbox pod handles provisioning via emptyDir volumes.
@@ -265,10 +272,10 @@ function createRemoteTransport(bucket: GcsBucketLike, prefix: string): RemoteWor
     },
 
     async commit(scope: WorkspaceScope, id: string, changes: FileChange[]): Promise<void> {
-      const keyPrefix = buildGcsPrefix(scope, id);
+      const kp = gcsKeyPrefix(prefix, scope, id);
 
       for (const change of changes) {
-        const gcsKey = keyPrefix + change.path;
+        const gcsKey = kp + change.path;
 
         if (change.type === 'deleted') {
           try {
@@ -313,7 +320,7 @@ export function createGcsBackend(bucket: GcsBucketLike, basePath: string, prefix
   const transport = createLocalTransport(bucket, basePath, prefix);
 
   return {
-    mount: (scope, id) => transport.provision(scope, id, `${prefix}${scope === 'session' ? 'scratch' : scope}/${id}/`),
+    mount: (scope, id) => transport.provision(scope, id, gcsKeyPrefix(prefix, scope, id)),
     diff: (scope, id) => transport.diff(scope, id),
     commit: (scope, id, changes) => transport.commit(scope, id, changes),
   };
@@ -373,7 +380,7 @@ export async function create(config: Config, _name?: string, deps?: { screenComm
     : createLocalTransport(bucket, basePath, prefix);
 
   const backend: WorkspaceBackend = {
-    mount: (scope, id) => transport.provision(scope, id, `${prefix}${scope === 'session' ? 'scratch' : scope}/${id}/`),
+    mount: (scope, id) => transport.provision(scope, id, gcsKeyPrefix(prefix, scope, id)),
     diff: (scope, id) => transport.diff(scope, id),
     commit: (scope, id, changes) => transport.commit(scope, id, changes),
   };
@@ -416,13 +423,11 @@ export async function create(config: Config, _name?: string, deps?: { screenComm
 
   // List files from GCS bucket for admin dashboard browsing.
   provider.listFiles = async (scope, id) => {
-    const folder = scope === 'session' ? 'scratch' : scope;
-    const base = prefix.endsWith('/') ? prefix : prefix ? `${prefix}/` : '';
-    const keyPrefix = `${base}${folder}/${id}/`;
-    const [files] = await bucket.getFiles({ prefix: keyPrefix });
+    const kp = gcsKeyPrefix(prefix, scope, id);
+    const [files] = await bucket.getFiles({ prefix: kp });
     return files
       .map(f => {
-        const path = f.name.slice(keyPrefix.length);
+        const path = f.name.slice(kp.length);
         return path ? { path, size: 0 } : null;
       })
       .filter((f): f is { path: string; size: number } => f !== null);
@@ -431,18 +436,30 @@ export async function create(config: Config, _name?: string, deps?: { screenComm
   // Download all files with content — used by the provision HTTP endpoint
   // so sandbox pods can fetch workspace files from the host (the pod has no GCS credentials).
   provider.downloadScope = async (scope, id) => {
-    const folder = scope === 'session' ? 'scratch' : scope;
-    const base = prefix.endsWith('/') ? prefix : prefix ? `${prefix}/` : '';
-    const keyPrefix = `${base}${folder}/${id}/`;
-    const [files] = await bucket.getFiles({ prefix: keyPrefix });
+    const kp = gcsKeyPrefix(prefix, scope, id);
+    const [files] = await bucket.getFiles({ prefix: kp });
     const results: Array<{ path: string; content: Buffer }> = [];
     for (const file of files) {
-      const path = file.name.slice(keyPrefix.length);
+      const path = file.name.slice(kp.length);
       if (!path) continue;
       const [content] = await file.download();
       results.push({ path, content });
     }
     return results;
+  };
+
+  // List all IDs that have files in a given scope.
+  // Used at startup to enumerate user IDs for domain scanning.
+  provider.listScopeIds = async (scope) => {
+    const sp = gcsScopePrefix(prefix, scope);
+    const [files] = await bucket.getFiles({ prefix: sp });
+    const ids = new Set<string>();
+    for (const file of files) {
+      const rel = file.name.slice(sp.length);
+      const firstSlash = rel.indexOf('/');
+      if (firstSlash > 0) ids.add(rel.slice(0, firstSlash));
+    }
+    return [...ids];
   };
 
   return provider;
