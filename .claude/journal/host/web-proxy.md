@@ -2,6 +2,23 @@
 
 HTTP forward proxy for sandboxed agent outbound HTTP/HTTPS access.
 
+## [2026-03-22 09:30] — Replace proxy approval system with domain allowlist + host-controlled skill install
+
+**Task:** Replace brittle event-bus domain approval (which caused deadlocks) with a synchronous allowlist from skill manifests. Move skill installation from agent to host.
+**What I did:**
+- Created `ProxyDomainList` class — in-memory allowlist with built-in domains (package managers), skill-declared domains, admin-approved domains, and pending queue for admin review
+- Replaced `skill_download` IPC handler with `skill_install` — host downloads, screens, generates manifest, writes files, adds domains to allowlist
+- Simplified agent skill tool from 3-step flow (search/download/write) to single `skill({ type: "install", query })` call
+- Made install instructions conditional — only shown when user message matches install intent patterns
+- Wired `ProxyDomainList` into proxy startup (both server-completions.ts and server-k8s.ts), replacing `onApprove` callbacks with `allowedDomains` set
+- Added `onDenied` callback to proxy for queuing unapproved domains
+- Added admin domain management endpoints (GET/POST /admin/api/proxy/domains)
+- Removed old approval system: web-proxy-approvals.ts, extractNetworkDomains, web_proxy_approve IPC, WebProxyApproveSchema
+- Updated ax-web-proxy skill documentation
+**Files touched:** 20+ files across host, agent, and tests
+**Outcome:** Success — all 2540 tests pass, no more deadlock class of bugs, host controls skill installation and domain access
+**Notes:** Key design decisions: (1) built-in domains always allowed (package managers); (2) agent-authored skills (written directly to user/skills/) don't get proxy domain access — only host-installed skills do; (3) the `onApprove` callback is kept in WebProxyOptions for backward compat but unused; (4) install intent detection uses regex patterns on user message (INSTALL_ACTIONS + SKILL_NOUNS)
+
 ## [2026-03-22 08:00] — Remove old approval event bus and domain pre-extraction
 
 **Task:** Clean up the old web proxy approval system (event bus coordination, regex domain extraction, web_proxy_approve IPC handler) now fully replaced by ProxyDomainList.

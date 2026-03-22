@@ -1,10 +1,10 @@
 # Host
 
-### extractNetworkDomains must handle complex curl flags and quoted URLs
+### Proxy domain approval must be synchronous, not blocking
 **Date:** 2026-03-22
-**Context:** `curl -X POST "https://api.linear.app/graphql"` wasn't matched by `extractNetworkDomains()`. The regex `(?:-[^\s]*\s+)*` only skipped flags starting with `-`, so the `-X POST` argument broke the pattern — `POST` doesn't start with `-`, so the regex stopped before reaching the URL.
-**Lesson:** Don't write strict positional regexes for command-line tools with complex flag syntax. Instead, detect the tool name (curl/wget/git clone), then extract ALL URL domains from the entire command string. This handles quoted URLs, flag arguments, multiline commands, etc. The simpler `ANY_URL_PATTERN` already exists for script content scanning — reuse it.
-**Tags:** host, web-proxy, regex, domain-extraction, deadlock
+**Context:** The old event-bus domain approval system caused deadlocks: agent blocked on bash (running curl), proxy blocked waiting for agent to approve the domain, agent can't approve because it's blocked. The `extractNetworkDomains` regex approach to pre-approve domains was brittle and failed on complex curl flags.
+**Lesson:** Don't design systems where the proxy blocks waiting for the same agent that's blocked on the proxy. Use a synchronous allowlist instead: domains from installed skills are pre-approved at install time via `ProxyDomainList`. Unknown domains are denied immediately (no waiting) and queued for admin review. The host controls skill installation (`skill_install` IPC) and adds domains to the allowlist when generating the manifest.
+**Tags:** host, web-proxy, deadlock, domain-allowlist, architecture
 
 ### Always handle socket errors on raw TCP before TLS wrapping
 **Date:** 2026-03-22
