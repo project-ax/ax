@@ -21,6 +21,7 @@ import { templatesDir as resolveTemplatesDir, seedSkillsDir as resolveSeedSkills
 import type { EventBus } from './event-bus.js';
 import type { MessageQueueStore, ConversationStoreProvider } from '../providers/storage/types.js';
 import { createAgentRegistry, type AgentRegistry } from './agent-registry.js';
+import { ProxyDomainList } from './proxy-domain-list.js';
 import type { Server as NetServer } from 'node:net';
 
 const logger = getLogger();
@@ -56,6 +57,7 @@ export interface HostCore {
   sessionCanaries: Map<string, string>;
   workspaceMap: Map<string, string>;
   requestedCredentials: Map<string, Set<string>>;
+  domainList: ProxyDomainList;
   defaultUserId: string;
   modelId: string;
 }
@@ -182,6 +184,35 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
   const workspaceMap = new Map<string, string>();
   const requestedCredentials = new Map<string, Set<string>>();
 
+  // ── Domain allowlist for proxy — populated from installed skills ──
+  const domainList = new ProxyDomainList();
+  {
+    const skillsDir = agentSkillsDir(agentName);
+    try {
+      const entries = readdirSync(skillsDir, { withFileTypes: true });
+      for (const entry of entries) {
+        try {
+          let raw: string | undefined;
+          if (entry.isFile() && entry.name.endsWith('.md')) {
+            raw = readFileSync(join(skillsDir, entry.name), 'utf-8');
+          } else if (entry.isDirectory()) {
+            const mdPath = join(skillsDir, entry.name, 'SKILL.md');
+            if (existsSync(mdPath)) raw = readFileSync(mdPath, 'utf-8');
+          }
+          if (raw) {
+            const { parseAgentSkill } = await import('../utils/skill-format-parser.js');
+            const { generateManifest } = await import('../utils/manifest-generator.js');
+            const parsed = parseAgentSkill(raw);
+            const manifest = generateManifest(parsed);
+            if (manifest.capabilities.domains.length > 0) {
+              domainList.addSkillDomains(parsed.name || entry.name, manifest.capabilities.domains);
+            }
+          }
+        } catch { /* skip unparseable skills */ }
+      }
+    } catch { /* skills dir doesn't exist yet */ }
+  }
+
   // ── CompletionDeps ──
   const completionDeps: CompletionDeps = {
     config,
@@ -199,6 +230,7 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     eventBus,
     workspaceMap,
     requestedCredentials,
+    domainList,
   };
 
   // ── Delegation ──
@@ -253,6 +285,7 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     agentRegistry,
     workspaceMap,
     requestedCredentials,
+    domainList,
   });
   completionDeps.ipcHandler = handleIPC;
 
@@ -285,6 +318,7 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     sessionCanaries,
     workspaceMap,
     requestedCredentials,
+    domainList,
     defaultUserId,
     modelId,
   };

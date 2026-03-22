@@ -2,6 +2,21 @@
 
 HTTP forward proxy for sandboxed agent outbound HTTP/HTTPS access.
 
+## [2026-03-22 07:30] — Wire ProxyDomainList into proxy startup
+
+**Task:** Replace the `onApprove` callback pattern (which caused deadlocks) with synchronous domain allowlist from `ProxyDomainList`, and add `onDenied` callback for queuing denied domains for admin review.
+**What I did:**
+- Added `onDenied` callback to `WebProxyOptions` in web-proxy.ts. Updated `checkDomainApproval()` to deny when `allowedDomains` is provided but domain isn't in it (no `onApprove` needed), calling `onDenied` to queue for admin review.
+- Added `domainList` field to `CompletionDeps` interface in server-completions.ts.
+- Removed the `requestApproval`/`webProxyApprove` callback from server-completions.ts, replacing `onApprove` with `allowedDomains: deps.domainList?.getAllowedDomains()` and `onDenied: (domain) => deps.domainList?.addPending(domain, sessionId)` in both startWebProxy calls.
+- Removed `cleanupSession` call for web proxy approvals (no longer needed without approval promises).
+- Same replacement in server-k8s.ts: removed `requestApproval` import and `onApprove` callback, using `domainList` from `initHostCore()`.
+- Created `ProxyDomainList` in server-init.ts, populated from installed skills at startup (scanning agentSkillsDir for SKILL.md files), passed to both `createIPCHandler` and `completionDeps`.
+- Exposed `domainList` in `HostCore` interface so both server-local.ts and server-k8s.ts can access it.
+**Files touched:** src/host/web-proxy.ts, src/host/server-completions.ts, src/host/server-k8s.ts, src/host/server-init.ts
+**Outcome:** Success — clean TypeScript build, all 226 test files pass (2550 tests)
+**Notes:** The `onApprove` option remains in `WebProxyOptions` for backward compat but is no longer used by server-completions or server-k8s. `web-proxy-approvals.ts` is NOT deleted (Task 6). `server-local.ts` needs no changes since `completionDeps` already gets `domainList` from `initHostCore()`.
+
 ## [2026-03-22 07:15] — Host-controlled skill_install IPC handler
 
 **Task:** Replace `skill_search` + `skill_download` IPC handlers (which returned raw files for the untrusted agent to write) with a single `skill_install` handler that downloads, screens, generates manifest, writes files, and adds domains to the proxy allowlist — all on the trusted host side.

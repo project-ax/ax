@@ -1,5 +1,11 @@
 # Architecture
 
+### Replace async approval callbacks with synchronous allowlists to avoid deadlocks
+**Date:** 2026-03-22
+**Context:** Wiring ProxyDomainList into proxy startup to replace onApprove callback that caused deadlocks (proxy blocked waiting for user approval while agent was blocked waiting for proxy).
+**Lesson:** When a synchronous decision boundary is needed (proxy must immediately allow/deny), replace async callback patterns (onApprove → await eventBus → user click) with pre-computed allowlists (Set<string>) plus a notification callback (onDenied) that queues for out-of-band review. The allowlist is a snapshot at proxy startup time; new domains from skill installs update the ProxyDomainList but the per-session proxy keeps its own Set copy. This trades "immediate interactive approval" for "never deadlocks" — the right trade when the proxy blocks agent execution.
+**Tags:** proxy, deadlock, allowlist, async-callback, domain-approval
+
 ### assistant-ui useExternalHistory requires withFormat() — direct load() is never called
 **Date:** 2026-03-21
 **Context:** Thread history never loaded when clicking threads in the sidebar despite correct adapter setup

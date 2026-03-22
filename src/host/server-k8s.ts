@@ -97,7 +97,7 @@ async function main(): Promise<void> {
     completionDeps, sessionStore, router, taintBudget, fileStore,
     handleIPC, ipcServer, ipcSocketPath, ipcSocketDir, orchestrator, disableAutoState,
     agentRegistry, agentName, agentDirVal, sessionCanaries,
-    defaultUserId, modelId,
+    domainList, defaultUserId, modelId,
   } = core;
 
   // ── Host-process-specific: shared credential registry for k8s MITM proxy ──
@@ -117,7 +117,6 @@ async function main(): Promise<void> {
   let webProxy: WebProxy | undefined;
   if (config.web_proxy) {
     const webProxyPort = parseInt(process.env.AX_PROXY_LISTEN_PORT ?? '3128', 10);
-    const { requestApproval } = await import('./web-proxy-approvals.js');
 
     // MITM config for credential injection — shared across all sessions.
     const { getOrCreateCA } = await import('./proxy-ca.js');
@@ -137,12 +136,8 @@ async function main(): Promise<void> {
           durationMs: entry.durationMs,
         }).catch(() => {});
       },
-      onApprove: async (domain, method, url) => {
-        logger.info('web_proxy_approval_required', { domain, method, url });
-        const proxyRequestId = `proxy-${randomUUID().slice(0, 8)}`;
-        const approved = await requestApproval('host-process', domain, eventBus, proxyRequestId);
-        return { approved, reason: approved ? undefined : `Network access to ${domain} requires user approval` };
-      },
+      allowedDomains: domainList.getAllowedDomains(),
+      onDenied: (domain) => domainList.addPending(domain, 'host-process'),
       mitm: {
         ca,
         credentials: sharedCredentialRegistry,

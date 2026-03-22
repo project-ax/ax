@@ -77,6 +77,8 @@ export interface WebProxyOptions {
   onApprove?: (domain: string, method: string, url: string) => Promise<{ approved: boolean; reason?: string }>;
   /** Domains pre-approved without calling onApprove (e.g. from config allowlist). */
   allowedDomains?: Set<string>;
+  /** Called when a request to an unapproved domain is denied. Use to queue for admin review. */
+  onDenied?: (domain: string) => void;
   /**
    * MITM TLS inspection config. When provided, CONNECT requests are intercepted:
    * the proxy terminates TLS with a dynamically-generated cert, inspects/modifies
@@ -153,7 +155,7 @@ function containsCanary(body: Buffer, canaryToken?: string): boolean {
 // ── Proxy implementation ─────────────────────────────────────────────
 
 export async function startWebProxy(options: WebProxyOptions): Promise<WebProxy> {
-  const { listen, bindHost = '127.0.0.1', sessionId, canaryToken, onAudit, allowedIPs, onApprove, allowedDomains, urlRewrites } = options;
+  const { listen, bindHost = '127.0.0.1', sessionId, canaryToken, onAudit, allowedIPs, onApprove, allowedDomains, onDenied, urlRewrites } = options;
   const activeSockets = new Set<net.Socket>();
   /** Per-domain decision cache — avoids repeated callbacks for the same domain. */
   const domainDecisions = new Map<string, boolean>();
@@ -182,9 +184,16 @@ export async function startWebProxy(options: WebProxyOptions): Promise<WebProxy>
     // Cached approval from a previous request in this session
     if (domainDecisions.get(domain) === true) return null;
 
-    // No governance gate configured — auto-approve (backward compat)
-    if (!onApprove) return null;
+    if (!onApprove) {
+      // No governance gate — deny if an allowlist was provided but domain isn't in it
+      if (allowedDomains) {
+        onDenied?.(domain);
+        return `Domain ${domain} is not in the approved domain list. Install a skill that declares this domain, or ask an admin to approve it.`;
+      }
+      return null; // No allowlist configured — auto-approve (backward compat)
+    }
 
+    // Existing onApprove path (kept for backward compat)
     const decision = await onApprove(domain, method, url);
     // Only cache approvals — denials may be overridden by preApproveDomain
     // (which updates web-proxy-approvals.ts cache but not this local one).

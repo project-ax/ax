@@ -74,6 +74,8 @@ export interface CompletionDeps {
    *  Per-session credential maps are registered/deregistered here so the
    *  shared proxy can replace placeholders from any active session. */
   sharedCredentialRegistry?: import('./credential-placeholders.js').SharedCredentialRegistry;
+  /** Domain allowlist for proxy — populated from installed skill manifests. */
+  domainList?: import('./proxy-domain-list.js').ProxyDomainList;
 }
 
 export interface ExtractedFile {
@@ -572,23 +574,6 @@ export async function processCompletion(
           durationMs: entry.durationMs,
         }).catch(() => {});
       };
-      // Governance gate — emits event and blocks until the user approves via
-      // the web_proxy_approve IPC action. Imported lazily to avoid circular deps.
-      const { requestApproval } = await import('./web-proxy-approvals.js');
-      const webProxyApprove = async (domain: string, method: string, url: string) => {
-        reqLogger.info('web_proxy_approval_required', { domain, method, url });
-        eventBus?.emit({
-          type: 'web_proxy.approval_required',
-          requestId,
-          timestamp: Date.now(),
-          data: { domain, method, url, sessionId },
-        });
-        const approved = eventBus
-          ? await requestApproval(sessionId, domain, eventBus, requestId)
-          : false;
-        return { approved, reason: approved ? undefined : `Network access to ${domain} requires user approval` };
-      };
-
       // Generate MITM CA — always create it upfront so we can pass it to the proxy.
       // Credentials are registered later (after agentWsPath is set) by reference.
       const caDir = join(agentDir(agentName), 'ca');
@@ -608,7 +593,8 @@ export async function processCompletion(
           sessionId,
           canaryToken,
           onAudit: webProxyAudit,
-          onApprove: webProxyApprove,
+          allowedDomains: deps.domainList?.getAllowedDomains(),
+          onDenied: (domain) => deps.domainList?.addPending(domain, sessionId),
           mitm: mitmConfig,
           urlRewrites: config.url_rewrites
             ? new Map(Object.entries(config.url_rewrites))
@@ -622,7 +608,8 @@ export async function processCompletion(
           sessionId,
           canaryToken,
           onAudit: webProxyAudit,
-          onApprove: webProxyApprove,
+          allowedDomains: deps.domainList?.getAllowedDomains(),
+          onDenied: (domain) => deps.domainList?.addPending(domain, sessionId),
           mitm: mitmConfig,
           urlRewrites: config.url_rewrites
             ? new Map(Object.entries(config.url_rewrites))
@@ -1320,11 +1307,6 @@ export async function processCompletion(
       try { webProxyCleanup(); } catch {
         reqLogger.debug('web_proxy_cleanup_failed');
       }
-    }
-    // Clean up pending web proxy approvals for this session
-    if (config.web_proxy) {
-      const { cleanupSession } = await import('./web-proxy-approvals.js');
-      cleanupSession(sessionId);
     }
     // Clean up pending OAuth flows for this session
     {
