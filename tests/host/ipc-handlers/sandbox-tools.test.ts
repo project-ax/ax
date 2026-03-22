@@ -356,10 +356,11 @@ describe('Sandbox tool IPC handlers', () => {
       expect(isDomainApproved('test-session', 'registry.npmjs.org')).toBe(true);
       // But NOT for other sessions (no cross-session leakage)
       expect(isDomainApproved('other-session', 'registry.npmjs.org')).toBe(false);
-      // And NOT in the global host-process scope
-      expect(isDomainApproved('host-process', 'registry.npmjs.org')).toBe(false);
+      // Also approved in host-process scope (k8s shared proxy needs this)
+      expect(isDomainApproved('host-process', 'registry.npmjs.org')).toBe(true);
 
       cleanupSession('test-session');
+      cleanupSession('host-process');
     });
 
     test('does not auto-approve for non-network commands', async () => {

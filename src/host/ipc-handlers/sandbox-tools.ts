@@ -210,13 +210,16 @@ export function createSandboxToolHandlers(providers: ProviderRegistry, opts: San
 
       // Auto-approve well-known network domains for bash commands to avoid
       // proxy governance deadlock (agent blocked on spawn while proxy waits
-      // for approval). Session-scoped only — no cross-session leakage.
+      // for approval). Pre-approve in both session scope and 'host-process'
+      // scope so the k8s shared proxy (which uses 'host-process' sessionId)
+      // also recognizes the pre-approval.
       if (req.operation === 'bash' && req.command) {
         const domains = extractNetworkDomains(req.command);
         if (domains.length > 0) {
           const { preApproveDomain } = await import('../web-proxy-approvals.js');
           for (const domain of domains) {
             preApproveDomain(ctx.sessionId, domain);
+            preApproveDomain('host-process', domain);
           }
           logger.debug('sandbox_approve_auto_domains', {
             sessionId: ctx.sessionId,
