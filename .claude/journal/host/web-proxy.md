@@ -2,6 +2,27 @@
 
 HTTP forward proxy for sandboxed agent outbound HTTP/HTTPS access.
 
+## [2026-03-22 08:00] — Remove old approval event bus and domain pre-extraction
+
+**Task:** Clean up the old web proxy approval system (event bus coordination, regex domain extraction, web_proxy_approve IPC handler) now fully replaced by ProxyDomainList.
+**What I did:**
+- Deleted `src/host/web-proxy-approvals.ts` and `tests/host/web-proxy-approvals.test.ts`
+- Removed `extractNetworkDomains` import and domain pre-approval block from sandbox_approve handler in sandbox-tools.ts
+- Removed entire `web_proxy_approve` handler from sandbox-tools.ts
+- Removed `NETWORK_COMMAND_DOMAINS`, `HAS_NETWORK_COMMAND`, `ANY_URL_PATTERN`, `extractNetworkDomains()`, `extractDomainsFromContent()`, `extractDomainsFromScript()` from local-sandbox.ts
+- Removed domain collection (`commandDomains`, `scriptDomains`, `allDomains`) from bash() method in local-sandbox.ts
+- Removed unused `existsSync` and `join` imports from local-sandbox.ts
+- Removed `WebProxyApproveSchema` from ipc-schemas.ts
+- Removed `web_approve` tool from tool-catalog.ts and mcp-server.ts
+- Removed `web_proxy_approve` from knownInternalActions in tool-catalog-sync.test.ts
+- Updated comment in web-proxy.ts (removed reference to web-proxy-approvals.ts)
+- Removed extractNetworkDomains tests from local-sandbox.test.ts
+- Removed auto-approve tests from sandbox-tools.test.ts
+- Updated tool counts from 16 to 15 in 4 test files (tool-catalog, ipc-tools, mcp-server, sandbox-isolation)
+**Files touched:** src/host/web-proxy-approvals.ts (deleted), tests/host/web-proxy-approvals.test.ts (deleted), src/host/ipc-handlers/sandbox-tools.ts, src/agent/local-sandbox.ts, src/ipc-schemas.ts, src/agent/tool-catalog.ts, src/agent/mcp-server.ts, src/host/web-proxy.ts, tests/agent/local-sandbox.test.ts, tests/host/ipc-handlers/sandbox-tools.test.ts, tests/agent/tool-catalog-sync.test.ts, tests/agent/tool-catalog.test.ts, tests/agent/ipc-tools.test.ts, tests/agent/mcp-server.test.ts, tests/sandbox-isolation.test.ts
+**Outcome:** Success — 225 test files pass (2540 tests), clean TypeScript build
+**Notes:** Kept `onApprove` in `WebProxyOptions` for backward compat. Kept the regression test verifying agents don't call `web_proxy_approve`.
+
 ## [2026-03-22 07:45] — Add admin domain management endpoints
 
 **Task:** Replace old `POST /admin/api/proxy/approve` endpoint with new domain management endpoints that work with the `ProxyDomainList` class.

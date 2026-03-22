@@ -195,8 +195,7 @@ export async function startWebProxy(options: WebProxyOptions): Promise<WebProxy>
 
     // Existing onApprove path (kept for backward compat)
     const decision = await onApprove(domain, method, url);
-    // Only cache approvals — denials may be overridden by preApproveDomain
-    // (which updates web-proxy-approvals.ts cache but not this local one).
+    // Only cache approvals — denials may be retried.
     if (decision.approved) domainDecisions.set(domain, true);
     if (!decision.approved) {
       return decision.reason ?? `Network access to ${domain} was denied`;

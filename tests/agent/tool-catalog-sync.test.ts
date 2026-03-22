@@ -200,8 +200,6 @@ describe('tool-catalog <-> IPC schemas sync', () => {
       'agent_response',
       // Workspace release (NATS mode — agent sends workspace file changes via IPC)
       'workspace_release',
-      // Web proxy domain governance (host-internal approval gate)
-      'web_proxy_approve',
     ]);
 
     for (const action of schemaActions) {

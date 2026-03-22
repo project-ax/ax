@@ -8,8 +8,8 @@
  * 3. sandbox_result → host logs outcome (best-effort)
  */
 import { spawn } from 'node:child_process';
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { dirname } from 'node:path';
 import type { IIPCClient } from './runner.js';
 import { safePath } from '../utils/safe-path.js';
 
@@ -17,69 +17,6 @@ export interface LocalSandboxOptions {
   client: IIPCClient;
   workspace: string;
   timeoutMs?: number;
-}
-
-/** Well-known package manager commands and their registry domains. */
-const NETWORK_COMMAND_DOMAINS: [RegExp, string[]][] = [
-  [/\bnpm\s+(install|i|ci|update|audit|pack|publish)\b/, ['registry.npmjs.org']],
-  [/\bnpx\s/, ['registry.npmjs.org']],
-  [/\byarn\s+(add|install|upgrade)\b/, ['registry.yarnpkg.com', 'registry.npmjs.org']],
-  [/\bpip\s+(install|download)\b/, ['pypi.org', 'files.pythonhosted.org']],
-  [/\bgem\s+install\b/, ['rubygems.org']],
-  [/\bcargo\s+(install|build|update)\b/, ['crates.io', 'static.crates.io']],
-  [/\bgo\s+(get|install|mod\s+download)\b/, ['proxy.golang.org', 'sum.golang.org']],
-];
-
-/** Detect commands that make network requests. */
-const HAS_NETWORK_COMMAND = /\b(?:curl|wget|git\s+clone)\b/;
-
-/** Extract any https:// domain from arbitrary text (for script content scanning). */
-const ANY_URL_PATTERN = /https?:\/\/([a-zA-Z0-9][-a-zA-Z0-9.]*[a-zA-Z0-9])(?:[:/\s"'\\]|$)/g;
-
-export function extractNetworkDomains(command: string): string[] {
-  const domains: string[] = [];
-  for (const [pattern, doms] of NETWORK_COMMAND_DOMAINS) {
-    if (pattern.test(command)) domains.push(...doms);
-  }
-  // Extract all URL domains from commands that use curl, wget, or git clone.
-  // Uses ANY_URL_PATTERN instead of a strict flag-skipping regex so that
-  // quoted URLs (curl -X POST "https://...") and complex flag combinations
-  // are handled correctly.
-  if (HAS_NETWORK_COMMAND.test(command)) {
-    for (const match of command.matchAll(ANY_URL_PATTERN)) {
-      if (match[1]) domains.push(match[1]);
-    }
-  }
-  return [...new Set(domains)];
-}
-
-/** Extract all HTTP/HTTPS domains from text content (e.g., script files). */
-export function extractDomainsFromContent(content: string): string[] {
-  const domains: string[] = [];
-  for (const match of content.matchAll(ANY_URL_PATTERN)) {
-    if (match[1]) domains.push(match[1]);
-  }
-  return [...new Set(domains)];
-}
-
-/**
- * If the command runs a script file, try to read it and extract domains.
- * Looks for patterns like `path/to/script.sh args` or `bash path/to/script.sh`.
- */
-function extractDomainsFromScript(command: string, workspace: string): string[] {
-  // Match script invocations: ./script.sh, path/script.sh, bash script.sh, sh script.sh
-  const scriptMatch = command.match(/(?:^|(?:bash|sh|zsh)\s+)([^\s;|&]+\.sh)\b/);
-  if (!scriptMatch) return [];
-  const scriptPath = scriptMatch[1];
-  try {
-    // Try workspace-relative first, then absolute
-    const fullPath = scriptPath.startsWith('/') ? scriptPath : join(workspace, scriptPath);
-    if (!existsSync(fullPath)) return [];
-    const content = readFileSync(fullPath, 'utf-8');
-    return extractDomainsFromContent(content);
-  } catch {
-    return [];
-  }
 }
 
 export function createLocalSandbox(opts: LocalSandboxOptions) {
@@ -100,17 +37,9 @@ export function createLocalSandbox(opts: LocalSandboxOptions) {
 
   return {
     async bash(command: string): Promise<{ output: string }> {
-      // Extract domains from both the command and any script files it invokes.
-      // Send to host so the proxy can pre-approve them before the command runs,
-      // avoiding deadlock (agent blocked on bash while proxy waits for approval).
-      const commandDomains = extractNetworkDomains(command);
-      const scriptDomains = extractDomainsFromScript(command, workspace);
-      const allDomains = [...new Set([...commandDomains, ...scriptDomains])];
-
       const approval = await approve({
         operation: 'bash',
         command,
-        ...(allDomains.length > 0 ? { domains: allDomains } : {}),
       });
       if (!approval.approved) {
         return { output: `Denied: ${approval.reason ?? 'denied by host policy'}` };
