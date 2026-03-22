@@ -33,8 +33,9 @@ export class SkillsModule extends BasePromptModule {
       const skillsWithWarnings = ctx.skills.filter(s => s.warnings?.length);
 
       lines.push(
-        '## Available Skills',
+        '## Available Skills (Already Installed)',
         '',
+        'These skills are already installed locally. Do NOT download or re-install them.',
         'Before replying, scan this list for a skill that matches the current task.',
         'If exactly one skill clearly applies: read the skill file from ./user/skills/ or',
         './agent/skills/ to load its full instructions, then follow them. If multiple could',
@@ -88,9 +89,13 @@ export class SkillsModule extends BasePromptModule {
 
     lines.push(
       '',
-      '### Installing Skills from ClawHub',
+      '### Installing NEW Skills from ClawHub',
       '',
-      'When the user asks to install a skill from ClawHub (e.g. a URL like clawhub.ai/Author/skill-name):',
+      'Skills listed in the Available Skills table above are ALREADY installed locally.',
+      'Do NOT download or re-install them — just read the file from ./user/skills/ or ./agent/skills/.',
+      '',
+      'Only use these steps when the user asks to install a NEW skill not already in your list',
+      '(e.g. a URL like clawhub.ai/Author/skill-name):',
       '1. Extract the slug from the URL (the last path segment, e.g. "linear-skill")',
       '2. Use `skill({ type: "download", slug: "linear-skill" })` to download the package',
       '3. The response includes all files and `requiresEnv` — a list of needed credentials',

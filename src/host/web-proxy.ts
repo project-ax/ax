@@ -390,6 +390,7 @@ export async function startWebProxy(options: WebProxyOptions): Promise<WebProxy>
         socket.on('error', () => {
           clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
         });
+        clientSocket.on('error', () => { socket.destroy(); });
         return;
       }
 
@@ -412,6 +413,7 @@ export async function startWebProxy(options: WebProxyOptions): Promise<WebProxy>
 
       // Check if MITM inspection should be used for this connection
       const shouldMitm = options.mitm && !options.mitm.bypassDomains?.has(hostname);
+      logger.debug('connect_mode', { hostname, shouldMitm, hasMitmConfig: !!options.mitm, isBypassed: options.mitm?.bypassDomains?.has(hostname) });
 
       if (shouldMitm) {
         await handleMITMConnect(clientSocket, hostname, port, resolvedIP, head, startTime, target);
@@ -496,12 +498,17 @@ export async function startWebProxy(options: WebProxyOptions): Promise<WebProxy>
     startTime: number,
     target: string,
   ): Promise<void> {
+    logger.debug('mitm_connect_start', { hostname, port, target });
     const { generateDomainCert } = await import('./proxy-ca.js');
     const domainCert = generateDomainCert(hostname, options.mitm!.ca);
     const credentials = options.mitm!.credentials;
 
     // Tell client the tunnel is established
     clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+
+    // Handle errors on the raw socket to prevent unhandled 'error' crashes
+    // (e.g. ECONNRESET when the client disconnects abruptly during MITM)
+    clientSocket.on('error', () => { /* handled by TLS wrapper cleanup */ });
 
     // Terminate TLS on the client side with our generated cert
     const clientTls = new tls.TLSSocket(clientSocket, {
@@ -559,7 +566,12 @@ export async function startWebProxy(options: WebProxyOptions): Promise<WebProxy>
       }
 
       const replaced = credentials.replaceAllBuffer(chunk);
-      if (replaced !== chunk) credentialInjected = true;
+      if (replaced !== chunk) {
+        credentialInjected = true;
+        logger.info('mitm_credential_replaced', { target, chunkLen: chunk.length });
+      } else if (chunk.toString('utf-8').includes('ax-cred:')) {
+        logger.warn('mitm_placeholder_not_replaced', { target, hasPlaceholders: credentials.hasPlaceholders(chunk.toString('utf-8')), chunkPreview: chunk.toString('utf-8').slice(0, 200) });
+      }
       targetTls.write(replaced);
     });
 

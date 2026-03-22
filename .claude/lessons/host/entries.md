@@ -1,5 +1,23 @@
 # Host
 
+### extractNetworkDomains must handle complex curl flags and quoted URLs
+**Date:** 2026-03-22
+**Context:** `curl -X POST "https://api.linear.app/graphql"` wasn't matched by `extractNetworkDomains()`. The regex `(?:-[^\s]*\s+)*` only skipped flags starting with `-`, so the `-X POST` argument broke the pattern — `POST` doesn't start with `-`, so the regex stopped before reaching the URL.
+**Lesson:** Don't write strict positional regexes for command-line tools with complex flag syntax. Instead, detect the tool name (curl/wget/git clone), then extract ALL URL domains from the entire command string. This handles quoted URLs, flag arguments, multiline commands, etc. The simpler `ANY_URL_PATTERN` already exists for script content scanning — reuse it.
+**Tags:** host, web-proxy, regex, domain-extraction, deadlock
+
+### Always handle socket errors on raw TCP before TLS wrapping
+**Date:** 2026-03-22
+**Context:** The MITM proxy wrapped `clientSocket` in a `tls.TLSSocket` but never added an error handler on the raw socket. When curl timed out (due to proxy approval deadlock), the TCP reset emitted an unhandled `error` event that crashed the host process.
+**Lesson:** Always add `clientSocket.on('error', ...)` before creating a `tls.TLSSocket` wrapper. The TLS socket's error handlers don't catch errors on the underlying raw socket. Same applies to any socket piping or wrapping pattern.
+**Tags:** host, web-proxy, socket, error-handling, crash
+
+### Node.js fetch does NOT respect HTTP_PROXY env vars
+**Date:** 2026-03-22
+**Context:** Skills using Node.js SDKs (e.g., `@linear/sdk` which uses `fetch`) failed in k8s because Node.js built-in `fetch` (undici) ignores `HTTP_PROXY`/`HTTPS_PROXY`. Only curl/wget respect these. The sandbox has no direct port 443 egress, so fetch hangs.
+**Lesson:** When testing web proxy credential injection, always test with curl first (respects proxy). Node.js fetch requires `--use-env-proxy` flag (Node 22+) or a custom global dispatcher. Skills that need API access should use curl, not Node.js SDKs, until Node proxy support is wired up.
+**Tags:** host, web-proxy, node-fetch, proxy, k8s
+
 ### Post-agent credential detection must not gate on agent behavior
 **Date:** 2026-03-20
 **Context:** The post-agent credential loop only ran if the agent explicitly called `credential_request` AND `config.web_proxy` was truthy. Both conditions failed in practice.

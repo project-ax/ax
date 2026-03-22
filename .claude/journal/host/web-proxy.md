@@ -2,6 +2,19 @@
 
 HTTP forward proxy for sandboxed agent outbound HTTP/HTTPS access.
 
+## [2026-03-22 06:15] — Fix proxy approval deadlock and ECONNRESET crash
+
+**Task:** Debug why MITM proxy wasn't replacing credential placeholders with real values when the agent uses curl to call the Linear API (401 Unauthorized with `ax-cred:` visible).
+**What I did:**
+- Diagnosed proxy approval deadlock: `extractNetworkDomains()` regex couldn't parse `curl -X POST "https://..."` (flag argument `POST` broke the strict `-flag` skipping pattern). Domains weren't extracted → no pre-approval → proxy blocked → curl timed out → agent stuck.
+- Fixed `extractNetworkDomains()`: replaced strict URL_COMMAND_PATTERN with simpler approach — detect `curl`/`wget`/`git clone` presence, then extract ALL URL domains via `ANY_URL_PATTERN`. Handles quoted URLs, complex flag combinations.
+- Fixed unhandled `ECONNRESET` crash: raw `clientSocket` in MITM path had no error handler. When curl timed out (from the deadlock), TCP reset crashed the host. Added `clientSocket.on('error')` in both MITM and URL-rewrite paths.
+- Created `ax-web-proxy` skill documenting the full MITM credential replacement flow, deadlock patterns, CA cert trust chain, and debugging checklist.
+- Verified end-to-end via chat UI: agent curls Linear API → proxy replaces placeholder → Linear returns real team data (SUP, DOC, PROD).
+**Files touched:** src/agent/local-sandbox.ts, src/host/web-proxy.ts, .claude/skills/ax-web-proxy/SKILL.md (new)
+**Outcome:** Success — credential replacement working end-to-end in k8s, host no longer crashes on ECONNRESET
+**Notes:** Key discoveries: (1) `URL_COMMAND_PATTERN` assumed URL is preceded only by `-flag` tokens — `curl -X POST` has a non-flag arg `POST` between flags and URL; (2) Node.js `fetch` does NOT respect HTTP_PROXY — only curl/wget work through the proxy; (3) "ax" kind cluster has no host volume mounts, so `npm run k8s:dev cycle` is a no-op — must rebuild Docker image; (4) SharedCredentialRegistry deregisters credentials at session_completed — test pods can't use placeholders from finished sessions
+
 ## [2026-03-19 23:45] — E2E credential collection verified in k8s
 
 **Task:** Verify end-to-end skill install with mid-request credential collection in k8s kind cluster

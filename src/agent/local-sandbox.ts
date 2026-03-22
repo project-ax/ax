@@ -30,8 +30,8 @@ const NETWORK_COMMAND_DOMAINS: [RegExp, string[]][] = [
   [/\bgo\s+(get|install|mod\s+download)\b/, ['proxy.golang.org', 'sum.golang.org']],
 ];
 
-/** Extract domains from URLs in commands that use network (git clone, curl, wget). */
-const URL_COMMAND_PATTERN = /\b(?:git\s+clone|curl|wget)\s+(?:-[^\s]*\s+)*https?:\/\/([^/\s]+)/g;
+/** Detect commands that make network requests. */
+const HAS_NETWORK_COMMAND = /\b(?:curl|wget|git\s+clone)\b/;
 
 /** Extract any https:// domain from arbitrary text (for script content scanning). */
 const ANY_URL_PATTERN = /https?:\/\/([a-zA-Z0-9][-a-zA-Z0-9.]*[a-zA-Z0-9])(?:[:/\s"'\\]|$)/g;
@@ -41,9 +41,14 @@ export function extractNetworkDomains(command: string): string[] {
   for (const [pattern, doms] of NETWORK_COMMAND_DOMAINS) {
     if (pattern.test(command)) domains.push(...doms);
   }
-  // Also extract explicit URL domains from git clone, curl, wget
-  for (const match of command.matchAll(URL_COMMAND_PATTERN)) {
-    if (match[1]) domains.push(match[1]);
+  // Extract all URL domains from commands that use curl, wget, or git clone.
+  // Uses ANY_URL_PATTERN instead of a strict flag-skipping regex so that
+  // quoted URLs (curl -X POST "https://...") and complex flag combinations
+  // are handled correctly.
+  if (HAS_NETWORK_COMMAND.test(command)) {
+    for (const match of command.matchAll(ANY_URL_PATTERN)) {
+      if (match[1]) domains.push(match[1]);
+    }
   }
   return [...new Set(domains)];
 }
