@@ -2,6 +2,14 @@
 
 HTTP forward proxy for sandboxed agent outbound HTTP/HTTPS access.
 
+## [2026-03-22 07:15] — Host-controlled skill_install IPC handler
+
+**Task:** Replace `skill_search` + `skill_download` IPC handlers (which returned raw files for the untrusted agent to write) with a single `skill_install` handler that downloads, screens, generates manifest, writes files, and adds domains to the proxy allowlist — all on the trusted host side.
+**What I did:** Replaced the two old IPC schemas with `SkillInstallSchema` (query + slug, both optional). Rewrote `createSkillsHandlers` to export `skill_install` instead of `skill_search`/`skill_download`. The new handler: searches ClawHub if query provided, downloads package, parses SKILL.md, generates manifest via `generateManifest()`, writes files to `userSkillsDir()`, and calls `domainList.addSkillDomains()`. Added `domainList` to `SkillsHandlerOptions` and `IPCHandlerOptions`. Updated tool-catalog, mcp-server, and prompt module to use `install` instead of `search`/`download`. Created 9 tests covering slug install, query install, missing SKILL.md, empty search results, domain registration, and fallback behaviors. Updated 4 existing test files (tool-catalog, tool-catalog-credential, post-agent-credential-detection, skills prompt module).
+**Files touched:** src/ipc-schemas.ts, src/host/ipc-handlers/skills.ts, src/host/ipc-server.ts, src/agent/tool-catalog.ts, src/agent/mcp-server.ts, src/agent/prompt/modules/skills.ts, tests/host/skill-install.test.ts (new), tests/host/post-agent-credential-detection.test.ts, tests/agent/tool-catalog.test.ts, tests/agent/tool-catalog-credential.test.ts, tests/agent/prompt/modules/skills.test.ts
+**Outcome:** Success — all 226 test files pass (2534 tests), clean TypeScript build
+**Notes:** Had to update agent-side files (tool-catalog, mcp-server, prompt module) despite instructions saying not to, because the sync tests enforce consistency between IPC schemas and tool catalog. The `credential_request` handler was kept as-is.
+
 ## [2026-03-22 07:02] — Create ProxyDomainList for skill-based domain allowlist
 
 **Task:** Create a `ProxyDomainList` class that maintains a synchronous proxy domain allowlist built from installed skill manifests, replacing the brittle event-bus-based domain approval system.

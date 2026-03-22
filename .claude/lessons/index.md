@@ -142,6 +142,7 @@
 
 ### ipc
 
+- Removing IPC schemas requires updating tool-catalog, mcp-server, prompt modules, and 4+ test files [ipc/entries.md](ipc/entries.md)
 - IPC schemas use z.strictObject — extra fields cause silent validation failures [ipc/entries.md](ipc/entries.md)
 - ipcAction() auto-registers schemas in IPC_SCHEMAS — just call it at module level [ipc/entries.md](ipc/entries.md)
 - IPC schema enums must use exact values — check ipc-schemas.ts [ipc/entries.md](ipc/entries.md)

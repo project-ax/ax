@@ -87,6 +87,8 @@ export interface IPCHandlerOptions {
   workspaceMap?: Map<string, string>;
   /** Tracks credential_request IPC calls per session. Consumed by processCompletion post-agent loop. */
   requestedCredentials?: Map<string, Set<string>>;
+  /** Proxy domain allowlist — skill_install adds domains from skill manifests. */
+  domainList?: import('../host/proxy-domain-list.js').ProxyDomainList;
 }
 
 export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerOptions) {
@@ -104,6 +106,7 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
     ...createSkillsHandlers(providers, {
       requestedCredentials: opts?.requestedCredentials,
       eventBus: opts?.eventBus,
+      domainList: opts?.domainList,
     }),
     ...createIdentityHandlers(providers, {
       agentName,

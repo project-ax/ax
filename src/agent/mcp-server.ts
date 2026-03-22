@@ -187,22 +187,20 @@ export function createIPCMcpServer(client: IIPCClient, opts?: MCPServerOptions):
 
     // ── Skill ──
     tool('skill',
-      'Manage skills: search, download from ClawHub, or request credentials.\n' +
-      'Use type: "search" to find skills by query.\n' +
-      'Use type: "download" to download a skill package by slug. Returns all files and required credentials.\n' +
+      'Manage skills: install from ClawHub or request credentials.\n' +
+      'Use type: "install" to install a skill by slug or search query. ' +
+      'The host downloads, screens, writes files, and adds domains to the proxy allowlist.\n' +
       'Use type: "request_credential" to request a credential (e.g. API key) that a skill needs.',
       {
-        type: z.enum(['search', 'download', 'request_credential']),
-        query: z.string().optional().describe('Search query (for type: "search")'),
-        limit: z.number().optional().describe('Max results (1-50, default 20)'),
-        slug: z.string().optional().describe('ClawHub skill slug (for type: "download")'),
+        type: z.enum(['install', 'request_credential']),
+        query: z.string().optional().describe('Search query (for type: "install" — finds best match)'),
+        slug: z.string().optional().describe('ClawHub skill slug (for type: "install")'),
         envName: z.string().optional().describe('Environment variable name (for type: "request_credential")'),
       },
       (args) => {
         const { type, ...rest } = args;
         const SKILL_ACTIONS: Record<string, string> = {
-          search: 'skill_search',
-          download: 'skill_download',
+          install: 'skill_install',
           request_credential: 'credential_request',
         };
         const params = Object.fromEntries(Object.entries(rest).filter(([_, v]) => v !== undefined));

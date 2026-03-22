@@ -39,8 +39,8 @@ describe('SkillsModule', () => {
     const mod = new SkillsModule();
     const text = mod.render(makeContext()).join('\n');
     expect(text).toContain('No skills are currently installed');
-    expect(text).toContain('Installing Skills from ClawHub');
-    expect(text).toContain('skill({ type: "download"');
+    expect(text).toContain('Installing NEW Skills from ClawHub');
+    expect(text).toContain('skill({ type: "install"');
     expect(text).toContain('request_credential');
   });
 

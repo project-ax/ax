@@ -38,29 +38,33 @@ describe('ClawHub skill package download', () => {
   });
 });
 
-describe('skill_download IPC schema', () => {
-  test('SkillDownloadSchema is registered', async () => {
+describe('skill_install IPC schema', () => {
+  test('SkillInstallSchema is registered', async () => {
     const { IPC_SCHEMAS } = await import('../../src/ipc-schemas.js');
-    expect(IPC_SCHEMAS).toHaveProperty('skill_download');
+    expect(IPC_SCHEMAS).toHaveProperty('skill_install');
   });
 
-  test('validates slug field', async () => {
+  test('validates slug and query fields', async () => {
     const { IPC_SCHEMAS } = await import('../../src/ipc-schemas.js');
-    const schema = IPC_SCHEMAS['skill_download'];
+    const schema = IPC_SCHEMAS['skill_install'];
 
-    const valid = schema.safeParse({ action: 'skill_download', slug: 'linear-skill' });
-    expect(valid.success).toBe(true);
+    const validSlug = schema.safeParse({ action: 'skill_install', slug: 'linear-skill' });
+    expect(validSlug.success).toBe(true);
 
-    const invalid = schema.safeParse({ action: 'skill_download' });
-    expect(invalid.success).toBe(false);
+    const validQuery = schema.safeParse({ action: 'skill_install', query: 'linear' });
+    expect(validQuery.success).toBe(true);
+
+    // Both optional — empty is valid
+    const validEmpty = schema.safeParse({ action: 'skill_install' });
+    expect(validEmpty.success).toBe(true);
   });
 });
 
-describe('skill tool catalog includes download action', () => {
-  test('skill tool actionMap has download', async () => {
+describe('skill tool catalog includes install action', () => {
+  test('skill tool actionMap has install', async () => {
     const { TOOL_CATALOG } = await import('../../src/agent/tool-catalog.js');
     const skill = TOOL_CATALOG.find(t => t.name === 'skill');
-    expect(skill?.actionMap).toHaveProperty('download', 'skill_download');
+    expect(skill?.actionMap).toHaveProperty('install', 'skill_install');
   });
 });
 

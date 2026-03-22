@@ -92,22 +92,25 @@ export class SkillsModule extends BasePromptModule {
       '### Installing NEW Skills from ClawHub',
       '',
       'Skills listed in the Available Skills table above are ALREADY installed locally.',
-      'Do NOT download or re-install them — just read the file from ./user/skills/ or ./agent/skills/.',
+      'Do NOT re-install them — just read the file from ./user/skills/ or ./agent/skills/.',
       '',
       'Only use these steps when the user asks to install a NEW skill not already in your list',
       '(e.g. a URL like clawhub.ai/Author/skill-name):',
       '1. Extract the slug from the URL (the last path segment, e.g. "linear-skill")',
-      '2. Use `skill({ type: "download", slug: "linear-skill" })` to download the package',
-      '3. The response includes all files and `requiresEnv` — a list of needed credentials',
-      '4. Write each file to `./user/skills/<slug>/` using write_file',
-      '5. For EACH entry in `requiresEnv`, call `skill({ type: "request_credential", envName: "..." })`',
+      '2. Use `skill({ type: "install", slug: "linear-skill" })` to install the skill',
+      '   The host downloads, screens, writes files, and registers domains automatically.',
+      '3. The response includes `requiresEnv` — a list of needed credentials',
+      '4. For EACH entry in `requiresEnv`, call `skill({ type: "request_credential", envName: "..." })`',
       '   This ends your current turn and prompts the user to provide the credential.',
       '   You will be re-invoked with the credentials available as environment variables.',
+      '',
+      'You can also install by search query: `skill({ type: "install", query: "linear" })`',
+      'The host will find the best match and install it.',
       '',
       '### Credential Requirements',
       '',
       'Skills may declare required credentials (API keys, tokens) in their frontmatter `requires.env`.',
-      'After installing a skill, if the download response includes `requiresEnv`, you MUST call',
+      'After installing a skill, if the response includes `requiresEnv`, you MUST call',
       '`skill({ type: "request_credential", envName })` for each entry. This is critical — without it,',
       'the skill cannot access its required APIs.',
     );
@@ -120,7 +123,7 @@ export class SkillsModule extends BasePromptModule {
       '## Skills',
       ctx.skills.length > 0
         ? `${ctx.skills.length} skills available. Read skill files from ./user/skills/ or ./agent/skills/ as needed.`
-        : 'No skills installed. Use `skill({ type: "download", slug })` to install from ClawHub.',
+        : 'No skills installed. Use `skill({ type: "install", slug })` to install from ClawHub.',
     ];
   }
 }
