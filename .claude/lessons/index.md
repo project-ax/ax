@@ -17,6 +17,7 @@
 
 ### infrastructure
 
+- agentResponsePromise timer must start AFTER work is published, not before processCompletion [infrastructure/entries.md](infrastructure/entries.md)
 - Queue-group work delivery only happens when the host does not preselect a pod [infrastructure/entries.md](infrastructure/entries.md)
 - NATS work delivery needs retry — agent subprocess takes seconds to subscribe [infrastructure/entries.md](infrastructure/entries.md)
 - server.ts createServer() lacks k8s HTTP IPC infrastructure [infrastructure/entries.md](infrastructure/entries.md)

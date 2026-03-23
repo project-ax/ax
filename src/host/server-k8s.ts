@@ -221,13 +221,6 @@ async function main(): Promise<void> {
         agentResponseReject = reject;
       });
 
-      // Safety timeout — if agent never sends agent_response, don't hang forever.
-      const agentTimeoutMs = ((config.sandbox.timeout_sec ?? 600) + 60) * 1000;
-      agentTimer = setTimeout(() => {
-        agentResponseReject?.(new Error('agent_response timeout'));
-      }, agentTimeoutMs);
-      if (agentTimer.unref) agentTimer.unref();
-
       // Prevent unhandled rejection crash if the promise rejects after
       // processCompletion has already returned (e.g. timer fires late).
       agentResponsePromise.catch(() => {});
@@ -338,6 +331,20 @@ async function main(): Promise<void> {
         }
       : undefined;
 
+    // Start the agent_response timeout timer. This is deferred to a callback so
+    // processCompletion can invoke it AFTER work is published — pre-processing
+    // (scanner LLM calls, workspace provisioning) must not eat into the timeout.
+    const startAgentResponseTimer = isK8s
+      ? () => {
+          if (agentTimer) return; // already started
+          const agentTimeoutMs = ((config.sandbox.timeout_sec ?? 600) + 60) * 1000;
+          agentTimer = setTimeout(() => {
+            agentResponseReject?.(new Error('agent_response timeout'));
+          }, agentTimeoutMs);
+          if (agentTimer.unref) agentTimer.unref();
+        }
+      : undefined;
+
     // Pass per-turn token + NATS helpers to sandbox via deps
     const turnDeps: CompletionDeps = {
       ...completionDeps,
@@ -349,6 +356,7 @@ async function main(): Promise<void> {
       },
       ...(agentResponsePromise ? { agentResponsePromise } : {}),
       ...(publishWork ? { publishWork } : {}),
+      ...(startAgentResponseTimer ? { startAgentResponseTimer } : {}),
     };
 
     const sessionStartTime = Date.now();

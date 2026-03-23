@@ -77,22 +77,37 @@ interface LLMClassification {
   reason: string;
 }
 
+/** Timeout for the scanner LLM classification call (seconds). */
+const CLASSIFY_TIMEOUT_MS = 15_000;
+
 async function classifyWithLLM(llm: LLMProvider, content: string): Promise<LLMClassification> {
   let responseText = '';
 
-  for await (const chunk of llm.chat({
-    model: '',
-    messages: [
-      { role: 'system', content: CLASSIFICATION_SYSTEM_PROMPT },
-      { role: 'user', content },
-    ],
-    taskType: 'fast',
-    maxTokens: 100,
-  })) {
-    if (chunk.type === 'text' && chunk.content) {
-      responseText += chunk.content;
-    }
-  }
+  // Race the LLM call against a timeout to prevent processCompletion from
+  // hanging when the upstream provider is slow or unresponsive.
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    const timer = setTimeout(() => reject(new Error('scanner LLM classification timed out')), CLASSIFY_TIMEOUT_MS);
+    if (timer.unref) timer.unref();
+  });
+
+  await Promise.race([
+    (async () => {
+      for await (const chunk of llm.chat({
+        model: '',
+        messages: [
+          { role: 'system', content: CLASSIFICATION_SYSTEM_PROMPT },
+          { role: 'user', content },
+        ],
+        taskType: 'fast',
+        maxTokens: 100,
+      })) {
+        if (chunk.type === 'text' && chunk.content) {
+          responseText += chunk.content;
+        }
+      }
+    })(),
+    timeoutPromise,
+  ]);
 
   // Parse verdict from response
   const verdictMatch = responseText.match(/VERDICT:\s*(PASS|FLAG|BLOCK)/i);

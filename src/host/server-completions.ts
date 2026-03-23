@@ -76,6 +76,10 @@ export interface CompletionDeps {
   sharedCredentialRegistry?: import('./credential-placeholders.js').SharedCredentialRegistry;
   /** Domain allowlist for proxy — populated from installed skill manifests. */
   domainList?: import('./proxy-domain-list.js').ProxyDomainList;
+  /** Callback to start the agent_response timeout timer (NATS mode).
+   *  Called after work is published so the timer doesn't include pre-processing time
+   *  (scanner LLM calls, workspace provisioning, etc.). */
+  startAgentResponseTimer?: () => void;
 }
 
 export interface ExtractedFile {
@@ -942,6 +946,11 @@ export async function processCompletion(
         reqLogger.debug('nats_work_publish', { podName: proc.podName, payloadBytes: stdinPayload.length });
         try {
           await deps.publishWork(proc.podName, stdinPayload);
+          // Start the agent_response timeout AFTER work is published, not before
+          // processCompletion runs. Pre-processing (scanner LLM calls, workspace
+          // provisioning, CA generation) can take minutes and must not eat into
+          // the agent's execution timeout budget.
+          deps.startAgentResponseTimer?.();
         } catch (err) {
           reqLogger.error('nats_work_publish_failed', { podName: proc.podName, error: (err as Error).message });
           agentSandbox.kill(proc.pid);
