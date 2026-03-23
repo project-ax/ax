@@ -63,11 +63,14 @@ export interface AdminSetupOpts {
   eventBus: EventBus;
   agentRegistry: AgentRegistry;
   startTime: number;
+  /** When true, skip token auth for localhost connections (local dev mode). */
+  localDevMode?: boolean;
+  domainList?: import('./proxy-domain-list.js').ProxyDomainList;
 }
 
 export function setupAdminHandler(opts: AdminSetupOpts) {
-  const { config, providers, eventBus, agentRegistry, startTime } = opts;
+  const { config, providers, eventBus, agentRegistry, startTime, localDevMode, domainList } = opts;
   return config.admin?.enabled
-    ? createAdminHandler({ config, providers, eventBus, agentRegistry, startTime })
+    ? createAdminHandler({ config, providers, eventBus, agentRegistry, startTime, localDevMode, domainList })
     : null;
 }

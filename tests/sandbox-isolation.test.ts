@@ -426,14 +426,14 @@ describe('spawn command construction', () => {
 // ── MCP Server Tool Registry ─────────────────────────────────────────
 
 describe('MCP server tool registry security', () => {
-  test('exposes exactly 16 IPC tools', () => {
+  test('exposes exactly 15 IPC tools', () => {
     const client = createMockClient();
     const server = createIPCMcpServer(client);
     const tools = getTools(server);
 
     const expected = [
       'memory', 'web', 'identity', 'scheduler', 'skill',
-      'audit', 'agent', 'image', 'web_approve',
+      'audit', 'agent', 'image',
       // Enterprise tools
       'workspace_write', 'workspace_mount', 'governance',
       // Sandbox tools
@@ -441,7 +441,7 @@ describe('MCP server tool registry security', () => {
     ];
 
     expect(Object.keys(tools).sort()).toEqual(expected.sort());
-    expect(Object.keys(tools).length).toBe(16);
+    expect(Object.keys(tools).length).toBe(15);
   });
 
   test('tool results are JSON strings, not raw objects with taint', () => {

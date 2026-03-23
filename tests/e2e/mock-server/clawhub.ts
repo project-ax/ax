@@ -10,11 +10,13 @@ description: Linear issue tracker integration
 requires:
   env:
     - LINEAR_API_KEY
+  domains:
+    - api.linear.app
 ---
 
 # Linear Skill
 
-Query and manage Linear issues.
+Query and manage Linear issues via https://api.linear.app/graphql.
 
 ## Tools
 

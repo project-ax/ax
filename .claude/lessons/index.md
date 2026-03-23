@@ -17,6 +17,7 @@
 
 ### infrastructure
 
+- agentResponsePromise timer must start AFTER work is published, not before processCompletion [infrastructure/entries.md](infrastructure/entries.md)
 - Queue-group work delivery only happens when the host does not preselect a pod [infrastructure/entries.md](infrastructure/entries.md)
 - NATS work delivery needs retry — agent subprocess takes seconds to subscribe [infrastructure/entries.md](infrastructure/entries.md)
 - server.ts createServer() lacks k8s HTTP IPC infrastructure [infrastructure/entries.md](infrastructure/entries.md)
@@ -67,6 +68,7 @@
 
 ### architecture
 
+- Chat UI requires custom ChatTransport for OpenAI SSE — DefaultChatTransport uses AI SDK data stream format [architecture/entries.md](architecture/entries.md)
 - NATS eventbus provider implements full EventBus interface — no separate NATS SSE needed [architecture/entries.md](architecture/entries.md)
 - In-memory promise maps create hidden session affinity requirements [architecture/entries.md](architecture/entries.md)
 - Post-agent credential loop pattern [architecture/entries.md](architecture/entries.md)
@@ -96,7 +98,11 @@
 - Popular OpenClaw skills use clawdbot alias, not openclaw [providers/skills.md](providers/skills.md)
 - Many skills have no metadata block — static analysis is essential [providers/skills.md](providers/skills.md)
 - OpenClaw's security failures validate AX's zero-trust architecture [providers/skills.md](providers/skills.md)
+- ClawHub URL in query triggers search, returns wrong skill — always extract slug from URL [providers/skills.md](providers/skills.md)
+- Skill domains must be declared in frontmatter — body URL scanning is insufficient [providers/skills.md](providers/skills.md)
 - Tool filtering must align with prompt module shouldInclude() [providers/skills.md](providers/skills.md)
+- Skill install writes to host filesystem only — must also queue for GCS in k8s [providers/skills.md](providers/skills.md)
+- Kind cluster `ax` vs `ax-dev` — volume mount dev loop requires k8s-dev setup [providers/skills.md](providers/skills.md)
 - Splitting a provider category has massive blast radius [providers/web.md](providers/web.md)
 - disabledProvider() proxy throws synchronously, not as rejected promise [providers/web.md](providers/web.md)
 - child.killed is true after ANY kill() call, not just after the process is dead [providers/sandbox.md](providers/sandbox.md)
@@ -141,6 +147,7 @@
 
 ### ipc
 
+- Removing IPC schemas requires updating tool-catalog, mcp-server, prompt modules, and 4+ test files [ipc/entries.md](ipc/entries.md)
 - IPC schemas use z.strictObject — extra fields cause silent validation failures [ipc/entries.md](ipc/entries.md)
 - ipcAction() auto-registers schemas in IPC_SCHEMAS — just call it at module level [ipc/entries.md](ipc/entries.md)
 - IPC schema enums must use exact values — check ipc-schemas.ts [ipc/entries.md](ipc/entries.md)

@@ -1,17 +1,268 @@
 ---
 name: ax-debug
-description: Use when debugging k8s-related issues, NATS IPC problems, HTTP IPC problems, workspace release failures, or any issue in the sandbox/host/agent communication pipeline — starts with e2e test infrastructure for fast repro, falls back to full kind cluster or local process harnesses only when needed
+description: Use when debugging k8s-related issues, NATS IPC problems, HTTP IPC problems, workspace release failures, chat UI development iteration, or any issue in the sandbox/host/agent communication pipeline — starts with chat UI dev loop or e2e test infrastructure for fast repro, falls back to full kind cluster or local process harnesses only when needed
 ---
 
 ## Overview
 
-Three debugging tiers, in order of preference:
+Four debugging/development tiers, in order of preference:
 
-1. **E2E test infrastructure** (`tests/e2e/`) — Automated vitest suite with mock providers, scripted LLM responses, and a kind cluster managed by `global-setup.ts`. **Start here.** Fastest iteration, deterministic, CI-friendly.
-2. **Kind cluster dev loop** (`scripts/k8s-dev.sh`) — Real k8s pods with host volume mounts for ~5s iteration. Use this when you need production-parity pod behavior (network policies, PVCs, NATS bridge, multi-pod communication) that the e2e suite can't replicate.
-3. **Local process harnesses** (`run-http-local.ts` / `run-nats-local.ts`) — Spawns child processes with NATS env. Use this when you need to attach a debugger to individual processes or test IPC edge cases without k8s overhead.
+0. **Chat UI dev loop** (`scripts/chat-dev.sh`) — Vite HMR + local ax server + Playwright MCP for visual verification. **Start here for UI work.** Edit → hot-reload → screenshot → iterate in seconds.
+1. **E2E test infrastructure** (`tests/e2e/`) — Automated vitest suite with mock providers, scripted LLM responses, and a kind cluster managed by `global-setup.ts`. **Start here for backend bugs.** Fastest iteration, deterministic, CI-friendly.
+2. **Kind cluster dev loop** (`scripts/k8s-dev.sh`) — Real k8s pods with host volume mounts for ~5s iteration. Use this when you need production-parity pod behavior.
+3. **Local process harnesses** (`run-http-local.ts` / `run-nats-local.ts`) — Spawns child processes with NATS env. Use this for IPC debugging without k8s overhead.
 
-**Always try Tier 1 first.** Most bugs can be reproduced and fixed with a new scripted turn + test case in under a minute. Only escalate when the bug genuinely requires real k8s infrastructure or manual debugging.
+**For chat UI work, always use Tier 0.** For backend bugs, try Tier 1 first. Only escalate when the bug genuinely requires real k8s infrastructure or manual debugging.
+
+---
+
+## Tier 0: Chat UI Dev Loop
+
+Fast visual iteration on the chat UI using Vite HMR and Playwright MCP. Three modes: real LLM (uses OpenRouter + Gemini Flash, costs fractions of a cent), mock LLM (free, deterministic), or k8s (port-forwards to kind cluster host).
+
+### Quick Start
+
+```bash
+# Real LLM mode (uses OPENROUTER_API_KEY from env / .env)
+npm run dev:chat start
+
+# Mock LLM mode (no API key needed, scripted responses)
+npm run dev:chat start --mock
+
+# K8s mode (port-forwards to kind cluster host on localhost:18080)
+npm run dev:chat start --k8s
+
+# Stop everything
+npm run dev:chat stop
+```
+
+This starts:
+- **Vite dev server** on `http://localhost:5173` — serves the chat UI with hot module replacement
+- **AX server** on `http://localhost:8080` — subprocess sandbox, handles `/v1/chat/completions` + session APIs
+- (Mock mode only) **Mock LLM server** on `http://localhost:9100` — scripted OpenRouter responses
+- (K8s mode only) **Port-forward** on `http://localhost:18080` — proxies to k8s host service
+
+### K8s Mode: Chat UI + Kind Cluster
+
+Use `--k8s` to point the chat UI at a kind k8s cluster instead of a local AX server. This gives you Vite HMR for the UI while testing against real k8s infrastructure (NATS, PostgreSQL, sandbox pods, warm pool).
+
+```bash
+# One-time setup (creates kind cluster + deploys AX)
+npm run k8s:dev setup
+
+# Start chat UI pointing at k8s
+npm run dev:chat start --k8s
+```
+
+Architecture in k8s mode:
+```
+Browser (Playwright MCP)
+  ↓ http://localhost:5173
+Vite Dev Server (HMR, port 5173)
+  ├── Serves ui/chat/src/ with hot-reload
+  └── Proxies /v1/* → http://localhost:18080
+        ↓ kubectl port-forward
+Kind Cluster (ax-dev namespace)
+  ├── ax-host pod → /v1/chat/completions, sessions, history
+  ├── ax-sandbox pods → agent execution
+  ├── NATS → IPC transport
+  └── PostgreSQL → persistence
+```
+
+#### Iteration workflow (k8s mode)
+
+```
+1. Start:     npm run dev:chat start --k8s
+2. Open:      http://localhost:5173 in browser
+3. Edit UI:   Modify ui/chat/src/ → Vite hot-reloads
+4. Edit host: Modify src/ → npm run k8s:dev cycle all (rebuilds + restarts host)
+5. Debug:     npm run k8s:dev debug host (attach debugger on port 9229)
+6. Logs:      npm run k8s:dev logs host / sandbox
+7. Stop:      npm run dev:chat stop
+```
+
+#### When to use k8s mode vs local mode
+
+| Use k8s mode when... | Use local mode when... |
+|---|---|
+| Debugging host behavior under real k8s sandbox (NATS, warm pool) | Iterating purely on UI components |
+| Testing with PostgreSQL instead of SQLite | Quick prototyping with mock LLM |
+| Reproducing k8s-specific bugs through the UI | No kind cluster set up |
+| Need to see sandbox pod lifecycle in action | Need fastest possible iteration |
+
+### Architecture
+
+```
+Browser (Playwright MCP)
+  ↓ http://localhost:5173
+Vite Dev Server (HMR, port 5173)
+  ├── Serves ui/chat/src/ with hot-reload
+  └── Proxies /v1/* → http://localhost:8080
+        ↓
+AX Server (subprocess sandbox, port 8080)
+  ├── /v1/chat/completions — completion endpoint
+  ├── /v1/chat/sessions — session CRUD
+  ├── /v1/chat/sessions/:id/history — conversation history
+  └── LLM calls → OpenRouter API (real) or localhost:9100 (mock)
+```
+
+### Visual Verification Workflow (Claude + Playwright MCP)
+
+This is the core loop for iterating on chat UI changes:
+
+```
+1. Start servers:    npm run dev:chat start
+2. Open browser:     playwright__browser_navigate → http://localhost:5173
+3. Take snapshot:    playwright__browser_snapshot (see current DOM state)
+   or screenshot:    playwright__browser_take_screenshot (visual capture)
+4. Edit code:        Modify files in ui/chat/src/ (Vite hot-reloads automatically)
+5. Verify change:    playwright__browser_snapshot or playwright__browser_take_screenshot
+6. If not right:     Go to step 4
+7. Test interaction: playwright__browser_click, playwright__browser_fill_form, etc.
+8. Done:             npm run dev:chat stop
+```
+
+### Key Playwright MCP Actions
+
+| Action | When to use |
+|--------|-------------|
+| `browser_navigate` | Open `http://localhost:5173` at start |
+| `browser_snapshot` | See current DOM structure (fast, text-based) |
+| `browser_take_screenshot` | Visual capture to verify styling/layout |
+| `browser_click` | Click buttons, thread items, etc. |
+| `browser_fill_form` | Type messages in the composer |
+| `browser_press_key` | Submit with Enter, keyboard shortcuts |
+| `browser_wait_for` | Wait for streaming response to complete |
+| `browser_console_messages` | Check for JS errors |
+
+### Typical Workflows
+
+#### Fixing a styling issue
+
+```
+1. npm run dev:chat start
+2. Navigate to http://localhost:5173
+3. Screenshot → identify the problem
+4. Edit ui/chat/src/components/thread.tsx (or index.css)
+5. Screenshot → verify fix (Vite HMR applied change)
+6. Stop servers
+```
+
+#### Testing chat interaction
+
+```
+1. npm run dev:chat start (real LLM mode)
+2. Navigate to http://localhost:5173
+3. Click "New Chat" button
+4. Type a message in composer, press Enter
+5. Wait for streaming response
+6. Screenshot to verify message rendering
+7. Check thread list shows new conversation
+```
+
+#### Testing with mock responses
+
+```
+1. npm run dev:chat start --mock
+2. Navigate to http://localhost:5173
+3. Send a message — gets scripted mock response
+4. Useful for testing UI with predictable content
+5. No API costs, no network dependency
+```
+
+### Chat UI File Map
+
+| File | What it controls |
+|------|-----------------|
+| `ui/chat/src/App.tsx` | Main layout — sidebar + thread area |
+| `ui/chat/src/components/thread.tsx` | Message display, tool calls, loading spinner, composer |
+| `ui/chat/src/components/thread-list.tsx` | Sidebar thread list, "New Chat" button |
+| `ui/chat/src/components/markdown-text.tsx` | Markdown rendering in messages |
+| `ui/chat/src/lib/useAxChatRuntime.tsx` | Runtime hook — connects UI to AX backend, wires history adapter |
+| `ui/chat/src/lib/ax-chat-transport.ts` | Custom OpenAI SSE → UIMessageChunk parser (text + tool calls) |
+| `ui/chat/src/lib/thread-list-adapter.ts` | Fetches threads from `/v1/chat/sessions`, generates titles |
+| `ui/chat/src/lib/history-adapter.ts` | Loads conversation history via `withFormat()` |
+| `ui/chat/src/index.css` | Tailwind styles, theming |
+| `ui/chat/vite.config.ts` | Vite config with `/v1` proxy (uses `VITE_AX_PORT` env var) |
+
+### Server-side Changes
+
+UI-only changes (components, styles) hot-reload instantly via Vite. Server-side changes require a restart:
+
+| Change type | Action needed |
+|---|---|
+| `ui/chat/src/**` | Nothing — Vite HMR handles it |
+| `src/host/server-chat-api.ts` | Restart: `npm run dev:chat stop && npm run dev:chat start` |
+| `src/host/server-chat-ui.ts` | Not used in dev mode (Vite serves files directly) |
+| `src/host/server-completions.ts` | Restart server |
+
+### Manual K8s Mode (when chat-dev.sh --k8s doesn't match your cluster)
+
+The `--k8s` flag expects a cluster named `ax-dev`. If your cluster has a different name (e.g., `ax`), you can manually start Vite + port-forward:
+
+```bash
+# 1. Check your cluster name and host service port
+kind get clusters                                    # e.g., "ax"
+kubectl --context kind-ax get svc -n ax ax-host      # check port (usually 80)
+
+# 2. Port-forward to localhost:18080
+kubectl --context kind-ax port-forward -n ax svc/ax-host 18080:80 &
+
+# 3. Start Vite pointing at port 18080
+cd ui/chat && VITE_AX_PORT=18080 npx vite --host
+
+# 4. Open http://localhost:5173 in browser / Playwright
+```
+
+The Vite proxy reads `VITE_AX_PORT` (default: `8080`) to set the proxy target for `/v1/*` requests.
+
+### assistant-ui Integration Gotchas
+
+These are hard-won lessons from debugging the chat UI against assistant-ui internals:
+
+#### History adapter MUST implement `withFormat()`
+
+`useExternalHistory` (inside `useAISDKRuntime`) calls `historyAdapter.withFormat?.(storageFormatAdapter).load()`, **NOT** `historyAdapter.load()`. The optional chaining `?.` silently returns `undefined` when `withFormat` is missing — no error, just zero history loaded. Always implement `withFormat()` on `ThreadHistoryAdapter`.
+
+#### Pass adapters directly to `useAISDKRuntime`, not via context
+
+Using `RuntimeAdapterProvider` with `unstable_Provider` to inject adapters via React context may not propagate correctly to hooks inside `useAISDKRuntime`. The reliable approach: pass adapters directly as the second argument:
+
+```tsx
+const chat = useChat({ id, transport });
+return useAISDKRuntime(chat, { adapters: { history } });
+```
+
+#### Tool calls render via `tools.Fallback`, not `ToolCall`
+
+`MessagePrimitive.Parts` components prop uses `tools: { Fallback: Component }` or `tools: { by_name: { toolName: Component } }`. There is no `ToolCall` key. The Fallback component receives `{ toolName, args, status, addResult, resume }` props.
+
+#### OpenAI SSE tool_calls must emit `tool-input-available` UIMessageChunks
+
+The `AxChatTransport.processResponseStream()` must emit `tool-input-available` chunks (not `tool-call-start`/`tool-call-end`) for complete tool calls from the OpenAI SSE stream. The `finish_reason: 'tool_calls'` must map to `'tool-calls'` in the UIMessageChunk.
+
+#### Thread session ID mismatch
+
+The server prefixes session IDs (e.g., `main:http:chat-ui:__LOCALID_xxx`), but `RemoteThreadListAdapter.initialize()` returns the local thread ID as `remoteId`. When looking up sessions by `remoteId`, use suffix matching: `s.id === remoteId || s.id.endsWith(':' + remoteId)`.
+
+#### Title generation timing
+
+`generateTitle()` is called automatically after `runEnd` for new threads. The server generates titles asynchronously during `processCompletion`, so `generateTitle()` should poll the sessions API with a short delay to retrieve the real title.
+
+### When NOT to use Tier 0
+
+- Backend IPC bugs → use Tier 1 (e2e tests)
+- k8s-specific behavior → use Tier 2 (kind cluster)
+- Need to debug agent process → use Tier 3 (local harness with `--inspect`)
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `scripts/chat-dev.sh` | Start/stop/status for dev servers |
+| `ui/chat/ax-dev.yaml` | Minimal config for mock LLM mode |
+| `ui/chat/vite.config.ts` | Vite config with `/v1` proxy to port 8080 |
+| `ui/chat/src/` | Chat UI React source |
 
 ---
 
@@ -459,6 +710,8 @@ nats sub "sandbox.work"
 3. Check if runner crashes: look for stack traces in agent stderr
 4. Use `AX_DEBUG_AGENT=1` (Tier 3) or `npm run k8s:dev debug sandbox` (Tier 2) to attach debugger
 
+**Note:** The `agentResponsePromise` timer now starts AFTER work is published (not before `processCompletion`), via the `startAgentResponseTimer` callback in `CompletionDeps`. If you see `nats_agent_response_error` at the exact same time as `nats_work_claimed`, it means pre-processing (scanner classification, workspace provisioning) took too long and the timer was still starting before work delivery — this is the old code path. In current code, the timer only begins once work is actually delivered to the agent.
+
 ---
 
 ## Common Issues
@@ -482,3 +735,10 @@ nats sub "sandbox.work"
 | Web proxy unreachable from sandbox | Proxy bound to 127.0.0.1 or service selector mismatch | Check `bindHost: '0.0.0.0'`, verify service selector matches host pod labels |
 | Warm pool pod missing per-request env vars | Env var only in cold-spawn pod spec, not in NATS payload | Add to stdinPayload in server-completions.ts AND parseStdinPayload()+applyPayload() in runner.ts |
 | E2E test fails with "no scripted turn" | Mock OpenRouter ran out of turns | Add missing `ScriptedTurn` entries in `tests/e2e/scripts/` |
+| Thread history never loads (no errors) | `ThreadHistoryAdapter` missing `withFormat()` | `useExternalHistory` calls `withFormat?.().load()`, not `load()` directly |
+| Tool calls not visible in chat UI | Transport not emitting `tool-input-available` chunks | Parse `delta.tool_calls` in `processResponseStream` and emit UIMessageChunks |
+| Thread title stays "New Chat" | `generateTitle()` returns hardcoded placeholder | Poll `/v1/chat/sessions` with suffix-match on remoteId |
+| `chat-dev.sh --k8s` fails "cluster not found" | Cluster name mismatch (`ax` vs `ax-dev`) | Use manual port-forward + `VITE_AX_PORT=18080` (see Manual K8s Mode) |
+| K8s host port-forward fails "no service port 8080" | Service uses port 80, not 8080 | `kubectl port-forward svc/ax-host 18080:80` |
+| `agent_response timeout` fires before sandbox spawn | Pre-processing (scanner LLM call, workspace provisioning) takes too long, eating into the agentResponsePromise timer | Timer is now deferred to after work is published via `startAgentResponseTimer` callback in CompletionDeps. Guardian scanner also has 15s timeout on LLM classification. |
+| Scanner LLM classification hangs for minutes | No timeout on guardian's `classifyWithLLM()` OpenRouter call | Added 15s timeout via `Promise.race` in `classifyWithLLM()`. Falls through to regex-only on timeout. |

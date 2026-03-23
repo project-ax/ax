@@ -1,5 +1,35 @@
 # Architecture
 
+### Replace async approval callbacks with synchronous allowlists to avoid deadlocks
+**Date:** 2026-03-22
+**Context:** Wiring ProxyDomainList into proxy startup to replace onApprove callback that caused deadlocks (proxy blocked waiting for user approval while agent was blocked waiting for proxy).
+**Lesson:** When a synchronous decision boundary is needed (proxy must immediately allow/deny), replace async callback patterns (onApprove → await eventBus → user click) with pre-computed allowlists (Set<string>) plus a notification callback (onDenied) that queues for out-of-band review. The allowlist is a snapshot at proxy startup time; new domains from skill installs update the ProxyDomainList but the per-session proxy keeps its own Set copy. This trades "immediate interactive approval" for "never deadlocks" — the right trade when the proxy blocks agent execution.
+**Tags:** proxy, deadlock, allowlist, async-callback, domain-approval
+
+### assistant-ui useExternalHistory requires withFormat() — direct load() is never called
+**Date:** 2026-03-21
+**Context:** Thread history never loaded when clicking threads in the sidebar despite correct adapter setup
+**Lesson:** `useExternalHistory` in `@assistant-ui/react-ai-sdk` calls `historyAdapter.withFormat?.(storageFormatAdapter).load()`, NOT `historyAdapter.load()`. The optional chaining `?.` silently returns `undefined` when `withFormat` is missing, causing history to appear broken with zero errors. Always implement `withFormat()` on `ThreadHistoryAdapter` when using with `useAISDKRuntime`.
+**Tags:** assistant-ui, history, withFormat, thread-switching, silent-failure
+
+### assistant-ui RuntimeAdapterProvider context may not propagate to runtimeHook internals
+**Date:** 2026-03-21
+**Context:** Used `unstable_Provider` to wrap thread instances with `RuntimeAdapterProvider` for history, but `useRuntimeAdapters()` inside `useAISDKRuntime` returned null
+**Lesson:** Instead of using `RuntimeAdapterProvider` context via `unstable_Provider`, pass adapters directly to `useAISDKRuntime(chat, { adapters: { history } })`. This is more reliable and simpler.
+**Tags:** assistant-ui, adapters, context, useAISDKRuntime
+
+### assistant-ui tool call rendering uses tools.Fallback not ToolCall component key
+**Date:** 2026-03-21
+**Context:** Added `ToolCall` component to `MessagePrimitive.Parts` components but tool calls didn't render
+**Lesson:** `MessagePrimitive.Parts` components prop uses `tools: { Fallback: Component }` or `tools: { by_name: { toolName: Component } }` for tool calls. There is no `ToolCall` component key. The Fallback receives `{ toolName, args, status, addResult, resume }` props.
+**Tags:** assistant-ui, tool-calls, MessagePrimitive, Parts
+
+### Chat UI requires custom ChatTransport for OpenAI SSE — DefaultChatTransport uses AI SDK data stream format
+**Date:** 2026-03-21
+**Context:** Debugging why chat messages sent from the UI produced no visible response despite 200 OK from server.
+**Lesson:** The AI SDK's `DefaultChatTransport` (extended by `AssistantChatTransport`) uses `parseJsonEventStream2` which expects AI SDK data stream format (JSON SSE with `UIMessageChunk` schema), NOT OpenAI-compatible SSE format (`data: {"choices":[{"delta":{"content":"..."}}]}`). Since AX returns OpenAI SSE, you must extend `HttpChatTransport` and override `processResponseStream` to parse OpenAI deltas and emit `text-start`/`text-delta`/`text-end`/`finish` chunks. Also: the `prepareSendMessagesRequest` callback's `options.id` comes from `options.chatId` (set by `useChat({ id })`), and the `user` field in the request body must follow `"userId/threadPart"` format for the server to derive valid session IDs via `main:http:{userId}:{threadPart}`.
+**Tags:** chat-ui, assistant-ui, ai-sdk, streaming, transport, openai-sse
+
 ### NATS eventbus provider implements full EventBus interface — no separate NATS SSE needed
 **Date:** 2026-03-20
 **Context:** Extracting shared HTTP route dispatch from server-k8s.ts. The k8s server had an inline NATS-based SSE handler that subscribed directly to NATS subjects and forwarded events to SSE clients.

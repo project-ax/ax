@@ -67,6 +67,10 @@ function looksLikeEnvVar(name: string): boolean {
 
 const URL_RE = /https?:\/\/([a-zA-Z0-9.-]+)/g;
 
+// Bare domain references like "api.linear.app" or "api.linear.app/graphql" (no protocol prefix).
+// Requires at least two dots (3+ segments) to avoid false positives on filenames like "config.yaml".
+const BARE_DOMAIN_RE = /(?<![a-zA-Z0-9/:.-])([a-zA-Z][a-zA-Z0-9-]*(?:\.[a-zA-Z][a-zA-Z0-9-]*){2,})\b/g;
+
 // ═══════════════════════════════════════════════════════
 // Script path detection
 // ═══════════════════════════════════════════════════════
@@ -125,9 +129,12 @@ export function generateManifest(skill: ParsedAgentSkill): GeneratedManifest {
   // Flag-style env hints (just note them, don't add as concrete env names)
   // This helps flag that env vars are needed even if the exact name isn't clear
 
-  // --- Domains ---
-  const domains = new Set<string>();
+  // --- Domains: from metadata + static analysis ---
+  const domains = new Set<string>(skill.requires.domains);
   while ((match = URL_RE.exec(allText)) !== null) {
+    domains.add(match[1]);
+  }
+  while ((match = BARE_DOMAIN_RE.exec(allText)) !== null) {
     domains.add(match[1]);
   }
 

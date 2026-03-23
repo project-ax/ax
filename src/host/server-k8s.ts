@@ -97,7 +97,7 @@ async function main(): Promise<void> {
     completionDeps, sessionStore, router, taintBudget, fileStore,
     handleIPC, ipcServer, ipcSocketPath, ipcSocketDir, orchestrator, disableAutoState,
     agentRegistry, agentName, agentDirVal, sessionCanaries,
-    defaultUserId, modelId,
+    domainList, defaultUserId, modelId,
   } = core;
 
   // ── Host-process-specific: shared credential registry for k8s MITM proxy ──
@@ -117,7 +117,6 @@ async function main(): Promise<void> {
   let webProxy: WebProxy | undefined;
   if (config.web_proxy) {
     const webProxyPort = parseInt(process.env.AX_PROXY_LISTEN_PORT ?? '3128', 10);
-    const { requestApproval } = await import('./web-proxy-approvals.js');
 
     // MITM config for credential injection — shared across all sessions.
     const { getOrCreateCA } = await import('./proxy-ca.js');
@@ -137,12 +136,8 @@ async function main(): Promise<void> {
           durationMs: entry.durationMs,
         }).catch(() => {});
       },
-      onApprove: async (domain, method, url) => {
-        logger.info('web_proxy_approval_required', { domain, method, url });
-        const proxyRequestId = `proxy-${randomUUID().slice(0, 8)}`;
-        const approved = await requestApproval('host-process', domain, eventBus, proxyRequestId);
-        return { approved, reason: approved ? undefined : `Network access to ${domain} requires user approval` };
-      },
+      allowedDomains: { has: (d: string) => domainList.isAllowed(d) },
+      onDenied: (domain) => domainList.addPending(domain, 'host-process'),
       mitm: {
         ca,
         credentials: sharedCredentialRegistry,
@@ -195,6 +190,7 @@ async function main(): Promise<void> {
     eventBus: providers.eventbus,
     agentRegistry,
     startTime,
+    domainList,
   });
 
   // ── processCompletion wrapper with per-turn NATS IPC ──
@@ -224,13 +220,6 @@ async function main(): Promise<void> {
         agentResponseResolve = resolve;
         agentResponseReject = reject;
       });
-
-      // Safety timeout — if agent never sends agent_response, don't hang forever.
-      const agentTimeoutMs = ((config.sandbox.timeout_sec ?? 600) + 60) * 1000;
-      agentTimer = setTimeout(() => {
-        agentResponseReject?.(new Error('agent_response timeout'));
-      }, agentTimeoutMs);
-      if (agentTimer.unref) agentTimer.unref();
 
       // Prevent unhandled rejection crash if the promise rejects after
       // processCompletion has already returned (e.g. timer fires late).
@@ -342,6 +331,20 @@ async function main(): Promise<void> {
         }
       : undefined;
 
+    // Start the agent_response timeout timer. This is deferred to a callback so
+    // processCompletion can invoke it AFTER work is published — pre-processing
+    // (scanner LLM calls, workspace provisioning) must not eat into the timeout.
+    const startAgentResponseTimer = isK8s
+      ? () => {
+          if (agentTimer) return; // already started
+          const agentTimeoutMs = ((config.sandbox.timeout_sec ?? 600) + 60) * 1000;
+          agentTimer = setTimeout(() => {
+            agentResponseReject?.(new Error('agent_response timeout'));
+          }, agentTimeoutMs);
+          if (agentTimer.unref) agentTimer.unref();
+        }
+      : undefined;
+
     // Pass per-turn token + NATS helpers to sandbox via deps
     const turnDeps: CompletionDeps = {
       ...completionDeps,
@@ -353,6 +356,7 @@ async function main(): Promise<void> {
       },
       ...(agentResponsePromise ? { agentResponsePromise } : {}),
       ...(publishWork ? { publishWork } : {}),
+      ...(startAgentResponseTimer ? { startAgentResponseTimer } : {}),
     };
 
     const sessionStartTime = Date.now();

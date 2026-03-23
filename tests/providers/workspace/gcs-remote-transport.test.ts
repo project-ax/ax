@@ -79,8 +79,8 @@ describe('GCS RemoteTransport (k8s NATS mode)', () => {
       const source = readFileSync('src/providers/workspace/gcs.ts', 'utf-8');
 
       // Both transports should build GCS keys with scope folders
-      // RemoteTransport commit uses buildGcsPrefix + change.path
-      expect(source).toContain('keyPrefix + change.path');
+      // RemoteTransport commit uses gcsKeyPrefix result + change.path
+      expect(source).toContain('kp + change.path');
     });
   });
 

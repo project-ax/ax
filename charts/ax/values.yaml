@@ -225,9 +225,9 @@ nats:
 # ─── Web Proxy ──────────────────────────────────────────────────
 # HTTP forward proxy for sandboxed agents. Allows outbound HTTP/HTTPS
 # requests (npm install, pip install, curl, git clone) through a
-# controlled proxy on the host pod. Disabled by default.
+# controlled proxy on the host pod. Required for k8s sandbox mode.
 webProxy:
-  enabled: false
+  enabled: true
   port: 3128
 
 # ─── Network Policies ────────────────────────────────────────────

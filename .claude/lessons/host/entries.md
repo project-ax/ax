@@ -1,5 +1,23 @@
 # Host
 
+### Proxy domain approval must be synchronous, not blocking
+**Date:** 2026-03-22
+**Context:** The old event-bus domain approval system caused deadlocks: agent blocked on bash (running curl), proxy blocked waiting for agent to approve the domain, agent can't approve because it's blocked. The `extractNetworkDomains` regex approach to pre-approve domains was brittle and failed on complex curl flags.
+**Lesson:** Don't design systems where the proxy blocks waiting for the same agent that's blocked on the proxy. Use a synchronous allowlist instead: domains from installed skills are pre-approved at install time via `ProxyDomainList`. Unknown domains are denied immediately (no waiting) and queued for admin review. The host controls skill installation (`skill_install` IPC) and adds domains to the allowlist when generating the manifest.
+**Tags:** host, web-proxy, deadlock, domain-allowlist, architecture
+
+### Always handle socket errors on raw TCP before TLS wrapping
+**Date:** 2026-03-22
+**Context:** The MITM proxy wrapped `clientSocket` in a `tls.TLSSocket` but never added an error handler on the raw socket. When curl timed out (due to proxy approval deadlock), the TCP reset emitted an unhandled `error` event that crashed the host process.
+**Lesson:** Always add `clientSocket.on('error', ...)` before creating a `tls.TLSSocket` wrapper. The TLS socket's error handlers don't catch errors on the underlying raw socket. Same applies to any socket piping or wrapping pattern.
+**Tags:** host, web-proxy, socket, error-handling, crash
+
+### Node.js fetch does NOT respect HTTP_PROXY env vars
+**Date:** 2026-03-22
+**Context:** Skills using Node.js SDKs (e.g., `@linear/sdk` which uses `fetch`) failed in k8s because Node.js built-in `fetch` (undici) ignores `HTTP_PROXY`/`HTTPS_PROXY`. Only curl/wget respect these. The sandbox has no direct port 443 egress, so fetch hangs.
+**Lesson:** When testing web proxy credential injection, always test with curl first (respects proxy). Node.js fetch requires `--use-env-proxy` flag (Node 22+) or a custom global dispatcher. Skills that need API access should use curl, not Node.js SDKs, until Node proxy support is wired up.
+**Tags:** host, web-proxy, node-fetch, proxy, k8s
+
 ### Post-agent credential detection must not gate on agent behavior
 **Date:** 2026-03-20
 **Context:** The post-agent credential loop only ran if the agent explicitly called `credential_request` AND `config.web_proxy` was truthy. Both conditions failed in practice.

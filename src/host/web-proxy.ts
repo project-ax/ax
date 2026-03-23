@@ -75,8 +75,13 @@ export interface WebProxyOptions {
    * When not provided, all public-IP requests are auto-approved (existing behavior).
    */
   onApprove?: (domain: string, method: string, url: string) => Promise<{ approved: boolean; reason?: string }>;
-  /** Domains pre-approved without calling onApprove (e.g. from config allowlist). */
-  allowedDomains?: Set<string>;
+  /** Domains pre-approved without calling onApprove (e.g. from config allowlist).
+   *  Accepts any object with a `has()` method — pass a live ProxyDomainList
+   *  wrapper so domains added mid-session (e.g. via skill_install) take effect
+   *  immediately without restarting the proxy. */
+  allowedDomains?: { has(domain: string): boolean };
+  /** Called when a request to an unapproved domain is denied. Use to queue for admin review. */
+  onDenied?: (domain: string) => void;
   /**
    * MITM TLS inspection config. When provided, CONNECT requests are intercepted:
    * the proxy terminates TLS with a dynamically-generated cert, inspects/modifies
@@ -153,7 +158,7 @@ function containsCanary(body: Buffer, canaryToken?: string): boolean {
 // ── Proxy implementation ─────────────────────────────────────────────
 
 export async function startWebProxy(options: WebProxyOptions): Promise<WebProxy> {
-  const { listen, bindHost = '127.0.0.1', sessionId, canaryToken, onAudit, allowedIPs, onApprove, allowedDomains, urlRewrites } = options;
+  const { listen, bindHost = '127.0.0.1', sessionId, canaryToken, onAudit, allowedIPs, onApprove, allowedDomains, onDenied, urlRewrites } = options;
   const activeSockets = new Set<net.Socket>();
   /** Per-domain decision cache — avoids repeated callbacks for the same domain. */
   const domainDecisions = new Map<string, boolean>();
@@ -179,16 +184,22 @@ export async function startWebProxy(options: WebProxyOptions): Promise<WebProxy>
     // Pre-approved via config allowlist
     if (allowedDomains?.has(domain)) return null;
 
-    // Cached from a previous request in this session
-    const cached = domainDecisions.get(domain);
-    if (cached === true) return null;
-    if (cached === false) return `Network access to ${domain} was denied`;
+    // Cached approval from a previous request in this session
+    if (domainDecisions.get(domain) === true) return null;
 
-    // No governance gate configured — auto-approve (backward compat)
-    if (!onApprove) return null;
+    if (!onApprove) {
+      // No governance gate — deny if an allowlist was provided but domain isn't in it
+      if (allowedDomains) {
+        onDenied?.(domain);
+        return `Domain ${domain} is not in the approved domain list. Install a skill that declares this domain, or ask an admin to approve it.`;
+      }
+      return null; // No allowlist configured — auto-approve (backward compat)
+    }
 
+    // Existing onApprove path (kept for backward compat)
     const decision = await onApprove(domain, method, url);
-    domainDecisions.set(domain, decision.approved);
+    // Only cache approvals — denials may be retried.
+    if (decision.approved) domainDecisions.set(domain, true);
     if (!decision.approved) {
       return decision.reason ?? `Network access to ${domain} was denied`;
     }
@@ -390,6 +401,7 @@ export async function startWebProxy(options: WebProxyOptions): Promise<WebProxy>
         socket.on('error', () => {
           clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
         });
+        clientSocket.on('error', () => { socket.destroy(); });
         return;
       }
 
@@ -502,6 +514,10 @@ export async function startWebProxy(options: WebProxyOptions): Promise<WebProxy>
 
     // Tell client the tunnel is established
     clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+
+    // Handle errors on the raw socket to prevent unhandled 'error' crashes
+    // (e.g. ECONNRESET when the client disconnects abruptly during MITM)
+    clientSocket.on('error', () => { /* handled by TLS wrapper cleanup */ });
 
     // Terminate TLS on the client side with our generated cert
     const clientTls = new tls.TLSSocket(clientSocket, {

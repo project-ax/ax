@@ -1,3 +1,9 @@
+### agentResponsePromise timer must start AFTER work is published, not before processCompletion
+**Date:** 2026-03-22
+**Context:** In k8s NATS mode, the `agentResponsePromise` timeout timer was started in `processCompletionWithNATS` before calling `processCompletion`. The guardian scanner's LLM classification call took ~5 minutes, causing the timer to fire before the sandbox was even spawned.
+**Lesson:** Never start timeout timers that guard agent execution time before all pre-processing (scanning, workspace provisioning, CA generation, history loading) completes. Pass a `startAgentResponseTimer` callback through `CompletionDeps` and invoke it in `processCompletion` after `publishWork` succeeds. Pre-processing time is variable and must not eat into the agent's execution timeout budget.
+**Tags:** k8s, nats, timeout, scanner, guardian, processCompletion
+
 ### macOS Docker Desktop: use host.docker.internal, not bridge gateway
 **Date:** 2026-03-20
 **Context:** E2e tests with K8s sandbox got ECONNREFUSED when accessing mock server at Docker bridge gateway IP (172.19.0.1) from inside kind containers.

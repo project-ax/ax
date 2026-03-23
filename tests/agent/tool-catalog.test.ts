@@ -3,8 +3,8 @@ import { TOOL_CATALOG, TOOL_NAMES, getToolParamKeys, normalizeOrigin, normalizeI
 import type { ToolFilterContext, ToolCategory } from '../../src/agent/tool-catalog.js';
 
 describe('tool-catalog', () => {
-  test('exports exactly 16 tools', () => {
-    expect(TOOL_CATALOG.length).toBe(16);
+  test('exports exactly 15 tools', () => {
+    expect(TOOL_CATALOG.length).toBe(15);
   });
 
   test('TOOL_NAMES matches TOOL_CATALOG names', () => {
@@ -54,7 +54,7 @@ describe('tool-catalog', () => {
     const expected = [
       'memory', 'web', 'identity', 'scheduler', 'skill',
       'workspace_write', 'workspace_mount', 'governance', 'audit', 'agent', 'image',
-      'web_approve', 'bash', 'read_file', 'write_file', 'edit_file',
+      'bash', 'read_file', 'write_file', 'edit_file',
     ];
     expect(TOOL_NAMES).toEqual(expected);
   });
@@ -71,13 +71,13 @@ describe('tool-catalog', () => {
     expect(skillTool).toBeDefined();
     expect(skillTool!.actionMap).toBeDefined();
     expect(Object.keys(skillTool!.actionMap!).sort()).toEqual([
-      'download', 'request_credential', 'search',
+      'install', 'request_credential',
     ]);
   });
 
   test('skill tool has correct param keys', () => {
     const keys = getToolParamKeys('skill');
-    expect(keys.sort()).toEqual(['envName', 'limit', 'query', 'slug']);
+    expect(keys.sort()).toEqual(['envName', 'query', 'slug']);
   });
 
   test('scheduler tool has correct param keys (union of all members)', () => {

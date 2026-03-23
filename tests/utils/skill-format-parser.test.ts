@@ -271,6 +271,54 @@ Just text, no code.`);
     });
   });
 
+  // ── requires.domains ─────────────────────────────
+
+  describe('requires.domains', () => {
+    test('parses domains from requires block', () => {
+      const skill = parseAgentSkill(`---
+name: linear
+description: Linear issue tracker
+requires:
+  env:
+    - LINEAR_API_KEY
+  domains:
+    - api.linear.app
+---
+# Linear Skill`);
+
+      expect(skill.requires.domains).toEqual(['api.linear.app']);
+    });
+
+    test('parses domains from metadata.openclaw.requires', () => {
+      const skill = parseAgentSkill(`---
+name: linear
+metadata:
+  openclaw:
+    requires:
+      env:
+        - LINEAR_API_KEY
+      domains:
+        - api.linear.app
+        - uploads.linear.app
+---
+# Linear Skill`);
+
+      expect(skill.requires.domains).toEqual(['api.linear.app', 'uploads.linear.app']);
+    });
+
+    test('defaults to empty array when no domains specified', () => {
+      const skill = parseAgentSkill(`---
+name: no-domains
+requires:
+  env:
+    - SOME_KEY
+---
+# Skill`);
+
+      expect(skill.requires.domains).toEqual([]);
+    });
+  });
+
   // ── Edge cases ────────────────────────────────────
 
   describe('edge cases', () => {

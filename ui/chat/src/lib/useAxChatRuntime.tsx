@@ -1,94 +1,55 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import {
   type AssistantRuntime,
   useRemoteThreadListRuntime,
   useAui,
-  RuntimeAdapterProvider,
   useAuiState,
-  type ThreadHistoryAdapter,
 } from '@assistant-ui/react';
-import {
-  useAISDKRuntime,
-  AssistantChatTransport,
-} from '@assistant-ui/react-ai-sdk';
-import { useChat, type UIMessage } from '@ai-sdk/react';
-import type { ChatTransport } from 'ai';
+import { useAISDKRuntime } from '@assistant-ui/react-ai-sdk';
+import { useChat } from '@ai-sdk/react';
 import { axThreadListAdapter } from './thread-list-adapter';
 import { createAxHistoryAdapter } from './history-adapter';
-
-/**
- * Create a dynamic transport proxy that can be updated without recreating the hook.
- */
-const useDynamicChatTransport = <UI_MESSAGE extends UIMessage = UIMessage>(
-  transport: ChatTransport<UI_MESSAGE>,
-): ChatTransport<UI_MESSAGE> => {
-  const transportRef = useRef<ChatTransport<UI_MESSAGE>>(transport);
-  useEffect(() => {
-    transportRef.current = transport;
-  });
-  return useMemo(
-    () =>
-      new Proxy(transportRef.current, {
-        get(_, prop) {
-          const res = transportRef.current[prop as keyof ChatTransport<UI_MESSAGE>];
-          return typeof res === 'function' ? res.bind(transportRef.current) : res;
-        },
-      }),
-    [],
-  );
-};
+import { AxChatTransport, type CredentialRequiredEvent } from './ax-chat-transport';
 
 /**
  * Thread-specific runtime using AI SDK.
+ * Passes the AX history adapter directly to useAISDKRuntime
+ * so thread history loads when switching threads.
  */
-const useChatThreadRuntime = (): AssistantRuntime => {
-  const transport = useDynamicChatTransport(
-    new AssistantChatTransport({ api: '/v1/chat/completions' }),
-  );
-
+const useChatThreadRuntime = (transport: AxChatTransport): AssistantRuntime => {
   const id = useAuiState(({ threadListItem }) => threadListItem.id);
-  const chat = useChat({ id, transport });
-  const runtime = useAISDKRuntime(chat);
-
-  if (transport instanceof AssistantChatTransport) {
-    (transport as any).setRuntime?.(runtime);
-  }
-
-  return runtime;
-};
-
-/**
- * Provider that injects AX history adapter into the runtime context.
- */
-const AxHistoryProvider = ({ children }: { children?: React.ReactNode }) => {
   const aui = useAui();
 
-  const history = useMemo<ThreadHistoryAdapter>(
-    () =>
-      createAxHistoryAdapter(
-        () => aui.threadListItem().getState().remoteId,
-      ),
+  const history = useMemo(
+    () => createAxHistoryAdapter(() => aui.threadListItem().getState().remoteId),
     [aui],
   );
 
-  const adapters = useMemo(() => ({ history }), [history]);
-
-  return (
-    <RuntimeAdapterProvider adapters={adapters}>
-      {children}
-    </RuntimeAdapterProvider>
-  );
+  const chat = useChat({ id, transport });
+  return useAISDKRuntime(chat, { adapters: { history } });
 };
 
 /**
  * Custom hook that creates a chat runtime with AX-backed thread persistence.
+ * Returns the runtime and a credential request handler for the modal.
  */
-export const useAxChatRuntime = (): AssistantRuntime => {
+export const useAxChatRuntime = (
+  onCredentialRequired?: (event: CredentialRequiredEvent) => void,
+): AssistantRuntime => {
+  const callbackRef = useRef(onCredentialRequired);
+  callbackRef.current = onCredentialRequired;
+
+  const transport = useMemo(
+    () =>
+      new AxChatTransport({
+        api: '/v1/chat/completions',
+        onCredentialRequired: (event) => callbackRef.current?.(event),
+      }),
+    [],
+  );
+
   return useRemoteThreadListRuntime({
-    runtimeHook: () => useChatThreadRuntime(),
-    adapter: {
-      ...axThreadListAdapter,
-      unstable_Provider: AxHistoryProvider,
-    },
+    runtimeHook: () => useChatThreadRuntime(transport),
+    adapter: axThreadListAdapter,
   });
 };

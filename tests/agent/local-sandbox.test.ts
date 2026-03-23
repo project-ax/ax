@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createLocalSandbox, extractNetworkDomains } from '../../src/agent/local-sandbox.js';
+import { createLocalSandbox } from '../../src/agent/local-sandbox.js';
 import type { IPCClient } from '../../src/agent/ipc-client.js';
 
 function mockClient(approveResult: Record<string, unknown> = { approved: true }): IPCClient {
@@ -184,31 +184,4 @@ describe('Local sandbox executor', () => {
     });
   });
 
-  // ── extractNetworkDomains ──
-
-  describe('extractNetworkDomains', () => {
-    test('extracts npm registry for npm install', () => {
-      expect(extractNetworkDomains('npm install express')).toEqual(['registry.npmjs.org']);
-    });
-
-    test('extracts npm registry for npx', () => {
-      expect(extractNetworkDomains('npx create-react-app myapp')).toEqual(['registry.npmjs.org']);
-    });
-
-    test('extracts pip domains', () => {
-      const domains = extractNetworkDomains('pip install requests');
-      expect(domains).toContain('pypi.org');
-      expect(domains).toContain('files.pythonhosted.org');
-    });
-
-    test('returns empty for non-network commands', () => {
-      expect(extractNetworkDomains('echo hello')).toEqual([]);
-      expect(extractNetworkDomains('ls -la')).toEqual([]);
-    });
-
-    test('deduplicates domains', () => {
-      const domains = extractNetworkDomains('npm install foo && npm ci');
-      expect(domains).toEqual(['registry.npmjs.org']);
-    });
-  });
 });

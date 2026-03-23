@@ -8,7 +8,7 @@ import { IPCClient } from './ipc-client.js';
 import { getLogger, truncate } from '../logger.js';
 import type { ContentBlock } from '../types.js';
 import type { IdentityFiles, SkillSummary } from './prompt/types.js';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 
 const logger = getLogger().child({ component: 'runner' });
 
@@ -284,6 +284,10 @@ export interface StdinPayload {
   agentReadOnly?: boolean;
   /** Web proxy URL for outbound HTTP/HTTPS (warm pool pods get this from payload, not pod env). */
   webProxyUrl?: string;
+  /** Credential placeholder env vars — warm pool pods get these from payload, not pod spec. */
+  credentialEnv?: Record<string, string>;
+  /** MITM CA cert PEM — written to disk so sandbox processes trust the proxy. */
+  caCert?: string;
 }
 
 /**
@@ -336,6 +340,10 @@ export function parseStdinPayload(data: string): StdinPayload {
         sessionGcsPrefix: typeof parsed.sessionGcsPrefix === 'string' ? parsed.sessionGcsPrefix : undefined,
         agentReadOnly: parsed.agentReadOnly === true,
         webProxyUrl: typeof parsed.webProxyUrl === 'string' ? parsed.webProxyUrl : undefined,
+        credentialEnv: parsed.credentialEnv && typeof parsed.credentialEnv === 'object' && !Array.isArray(parsed.credentialEnv)
+          ? parsed.credentialEnv as Record<string, string>
+          : undefined,
+        caCert: typeof parsed.caCert === 'string' ? parsed.caCert : undefined,
       };
     }
   } catch {
@@ -531,6 +539,47 @@ function applyPayload(config: AgentConfig, payload: StdinPayload): void {
   } else {
     logger.debug('web_proxy_url_absent', { envSet: !!process.env.AX_WEB_PROXY_URL, payloadSet: !!payload.webProxyUrl });
   }
+  // Credential placeholder env vars — warm pool pods don't have these in their pod spec,
+  // so the host sends them in the payload. The MITM proxy replaces placeholders with real
+  // values in intercepted HTTPS traffic.
+  if (payload.credentialEnv) {
+    for (const [key, value] of Object.entries(payload.credentialEnv)) {
+      if (!process.env[key]) {
+        process.env[key] = value;
+      }
+    }
+    logger.info('credential_env_set', { count: Object.keys(payload.credentialEnv).length });
+  }
+
+  // MITM CA cert — write to disk so tools trust the proxy's TLS certs.
+  // Node.js uses NODE_EXTRA_CA_CERTS (MITM CA only — appended to built-in bundle).
+  // curl/wget/openssl use SSL_CERT_FILE (must be a complete bundle: system CAs + MITM CA).
+  // These MUST be separate files since NODE_EXTRA_CA_CERTS is additive but SSL_CERT_FILE replaces.
+  if (payload.caCert) {
+    try {
+      // Write MITM CA for Node.js — always use /tmp to avoid permission issues
+      const mitmCaPath = '/tmp/ax-mitm-ca.pem';
+      writeFileSync(mitmCaPath, payload.caCert);
+      process.env.NODE_EXTRA_CA_CERTS = mitmCaPath;
+
+      // Build combined CA bundle for curl/wget/openssl/etc.
+      const combinedPath = '/tmp/ax-ca-bundle.pem';
+      const systemBundle = '/etc/ssl/certs/ca-certificates.crt';
+      if (existsSync(systemBundle)) {
+        const combined = readFileSync(systemBundle, 'utf-8') + '\n' + payload.caCert;
+        writeFileSync(combinedPath, combined);
+      } else {
+        writeFileSync(combinedPath, payload.caCert);
+      }
+      process.env.SSL_CERT_FILE = combinedPath;
+      process.env.REQUESTS_CA_BUNDLE = combinedPath;
+      process.env.CURL_CA_BUNDLE = combinedPath;
+      logger.info('ca_cert_written', { nodeCa: mitmCaPath, sslCertFile: combinedPath });
+    } catch (err) {
+      logger.warn('ca_cert_write_failed', { error: (err as Error).message });
+    }
+  }
+
   // Enterprise fields — prefer canonical env vars (set by sandbox provider)
   // over payload (which carries host paths).
   config.agentId = payload.agentId;

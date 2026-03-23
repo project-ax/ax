@@ -154,13 +154,9 @@ export const BrowserCloseSchema = ipcAction('browser_close', { session: browserS
 
 // ── Skills ───────────────────────────────────────────
 
-export const SkillSearchSchema = ipcAction('skill_search', {
-  query: safeString(500),
-  limit: z.number().int().min(1).max(50).optional(),
-});
-
-export const SkillDownloadSchema = ipcAction('skill_download', {
-  slug: safeString(200),
+export const SkillInstallSchema = ipcAction('skill_install', {
+  query: safeString(500).optional(),
+  slug: safeString(200).optional(),
 });
 
 export const CredentialRequestSchema = ipcAction('credential_request', {
@@ -417,15 +413,6 @@ export const SandboxResultSchema = ipcAction('sandbox_result', {
   exitCode: z.number().int().optional(),
   success: z.boolean().optional(),
   error: safeString(10_000).optional(),
-});
-
-// ── Web Proxy Governance ───────────────────────────────
-
-export const WebProxyApproveSchema = ipcAction('web_proxy_approve', {
-  /** Domain to approve/deny (e.g. "registry.npmjs.org"). */
-  domain: safeString(256),
-  /** Whether to approve (true) or deny (false) access. */
-  approved: z.boolean(),
 });
 
 // ── Plugin Management ────────────────────────────────

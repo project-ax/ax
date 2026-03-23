@@ -1,5 +1,11 @@
 # IPC
 
+### Removing IPC schemas requires updating tool-catalog, mcp-server, prompt modules, and 4+ test files
+**Date:** 2026-03-22
+**Context:** Replaced `skill_search` + `skill_download` IPC schemas with `skill_install`. The sync test (`tool-catalog-sync.test.ts`) enforces bidirectional consistency: every IPC schema must map to a catalog tool or be in `knownInternalActions`, and every catalog action must have an IPC schema. The skills prompt module and its test also reference the old action names.
+**Lesson:** Renaming or removing an IPC action has blast radius across: (1) `ipc-schemas.ts`, (2) the handler in `ipc-handlers/*.ts`, (3) `tool-catalog.ts` actionMap, (4) `mcp-server.ts` action dispatch, (5) the prompt module referencing the tool, (6) `tool-catalog-sync.test.ts`, (7) `tool-catalog-credential.test.ts`, (8) `tool-catalog.test.ts`, and (9) the prompt module test. Always search for the old action name across the entire codebase before committing.
+**Tags:** ipc, schema, blast-radius, refactoring, sync-tests
+
 ### IPC schema enums are the real gatekeeper, not the handler
 **Date:** 2026-03-17
 **Context:** workspace_write with tier='session' silently failed in K8s e2e tests. Debug logs in the handler never fired. The Zod strict schema in ipc-schemas.ts rejected the request before the handler was called, returning a generic validation error to the agent.

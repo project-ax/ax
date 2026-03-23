@@ -1,5 +1,5 @@
 import { describe, test, expect, afterEach } from 'vitest';
-import { rmSync, readFileSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 
 describe('collectSkillEnvRequirements', () => {
   const dirs: string[] = [];
@@ -8,21 +8,6 @@ describe('collectSkillEnvRequirements', () => {
       try { rmSync(d, { recursive: true, force: true }); } catch { /* ok */ }
     }
     dirs.length = 0;
-  });
-
-  test('source handles both file-based and directory-based skills', () => {
-    // Verify the implementation pattern in server-completions.ts
-    const source = readFileSync(
-      new URL('../../src/host/server-completions.ts', import.meta.url), 'utf-8',
-    );
-    // Must use withFileTypes to distinguish files from directories
-    expect(source).toContain("readdirSync(dir, { withFileTypes: true })");
-    // Must check for directory-based skills (SKILL.md inside subdirectory)
-    expect(source).toContain("entry.isDirectory()");
-    expect(source).toContain("SKILL.md");
-    // Must handle OAuth requirements
-    expect(source).toContain("requires.oauth");
-    expect(source).toContain("oauth.required");
   });
 
   test('parseAgentSkill extracts requires.oauth from skill frontmatter', async () => {

@@ -3,12 +3,15 @@ import {
   ArrowUpIcon,
   CheckIcon,
   CopyIcon,
+  LoaderIcon,
   PencilIcon,
   RefreshCwIcon,
   Square,
+  WrenchIcon,
 } from 'lucide-react';
 import {
   ActionBarPrimitive,
+  AuiIf,
   ComposerPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
@@ -84,12 +87,42 @@ const Composer: FC = () => (
   </div>
 );
 
+const ToolCallFallback: FC<{ toolName: string; args: unknown; status: { type: string } }> = ({ toolName, args, status }) => (
+  <div className="my-2 rounded-lg border border-border/40 bg-card/60 px-4 py-3 backdrop-blur-sm">
+    <div className="flex items-center gap-2 text-[13px] font-medium text-muted-foreground">
+      <WrenchIcon className="size-3.5 text-amber" strokeWidth={1.8} />
+      <span className="text-foreground">{toolName}</span>
+      {status.type === 'running' && (
+        <LoaderIcon className="size-3 animate-spin text-muted-foreground" strokeWidth={1.8} />
+      )}
+    </div>
+    {args != null && typeof args === 'object' && Object.keys(args as Record<string, unknown>).length > 0 && (
+      <pre className="mt-2 overflow-x-auto rounded-md bg-background/60 px-3 py-2 text-[11px] font-mono text-muted-foreground">
+        {JSON.stringify(args, null, 2)}
+      </pre>
+    )}
+  </div>
+);
+
 const AssistantMessage: FC = () => (
   <MessagePrimitive.Root asChild>
     <div className="relative mx-auto w-full max-w-[var(--thread-max-width)] py-4 animate-fade-in-up" data-role="assistant">
       <div className="mx-2 leading-7 break-words text-foreground">
-        <MessagePrimitive.Parts components={{ Text: MarkdownText }} />
+        <MessagePrimitive.Parts
+          components={{
+            Text: MarkdownText,
+            tools: {
+              Fallback: ToolCallFallback,
+            },
+          }}
+        />
       </div>
+      <AuiIf condition={({ message, thread }) => message.isLast && thread.isRunning}>
+        <div className="mx-2 mt-1 flex items-center gap-2 text-[13px] text-muted-foreground">
+          <LoaderIcon className="size-3.5 animate-spin" strokeWidth={1.8} />
+          <span>Thinking...</span>
+        </div>
+      </AuiIf>
       <div className="mt-2 ml-2 flex">
         <ActionBarPrimitive.Root
           hideWhenRunning

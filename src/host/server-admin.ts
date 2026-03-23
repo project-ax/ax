@@ -16,7 +16,7 @@ import { sendError, readBody } from './server-http.js';
 import type { Config, ProviderRegistry } from '../types.js';
 import type { EventBus, StreamEvent } from './event-bus.js';
 import type { AgentRegistry } from './agent-registry.js';
-import { resolveApproval, preApproveDomain } from './web-proxy-approvals.js';
+import type { ProxyDomainList } from './proxy-domain-list.js';
 import { parseAgentSkill } from '../utils/skill-format-parser.js';
 import { getLogger } from '../logger.js';
 import { configPath as getConfigPath } from '../paths.js';
@@ -126,6 +126,14 @@ function resolveAdminUIDir(): string {
   return siblingDir; // Will show "not built" error
 }
 
+// ── Localhost detection ──
+
+const LOOPBACK_ADDRS = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
+function isLoopback(ip: string): boolean {
+  return LOOPBACK_ADDRS.has(ip);
+}
+
 // ── Types ──
 
 export interface AdminDeps {
@@ -134,18 +142,27 @@ export interface AdminDeps {
   eventBus: EventBus;
   agentRegistry: AgentRegistry;
   startTime: number;
+  /** When true, skip token auth for localhost connections (local dev mode). */
+  localDevMode?: boolean;
+  domainList?: ProxyDomainList;
 }
 
 // ── Factory ──
 
 export function createAdminHandler(deps: AdminDeps) {
-  // Auto-generate token if not configured
-  if (!deps.config.admin.token) {
+  const authDisabled = deps.config.admin.disable_auth === true;
+
+  if (authDisabled) {
+    logger.warn('admin_auth_disabled', { message: 'Admin dashboard auth is disabled — do not use in production' });
+  }
+
+  // Auto-generate token if not configured (skip if auth disabled)
+  if (!authDisabled && !deps.config.admin.token) {
     deps.config.admin.token = randomBytes(32).toString('hex');
     logger.info('admin_token_generated', { token: deps.config.admin.token });
   }
 
-  const token = deps.config.admin.token!;
+  const token = deps.config.admin.token ?? '';
 
   return async function handleAdmin(
     req: IncomingMessage,
@@ -158,24 +175,28 @@ export function createAdminHandler(deps: AdminDeps) {
       return;
     }
 
-    // API routes require auth
+    // API routes require auth (unless local dev mode + localhost connection)
     if (pathname.startsWith('/admin/api/')) {
       const clientIp = req.socket?.remoteAddress ?? 'unknown';
+      const skipAuth = authDisabled || (deps.localDevMode && isLoopback(clientIp));
 
-      if (isRateLimited(clientIp)) {
-        res.writeHead(429, { 'Retry-After': '60' });
-        res.end('Too Many Requests');
-        return;
-      }
+      if (!skipAuth) {
+        if (isRateLimited(clientIp)) {
+          res.writeHead(429, { 'Retry-After': '60' });
+          res.end('Too Many Requests');
+          return;
+        }
 
-      // Accept token from header or query param (needed for EventSource SSE)
-      const provided = extractToken(req) ?? extractQueryToken(req.url ?? '/');
-      if (!provided || !safeEqual(provided, token)) {
-        recordFailure(clientIp);
-        sendError(res, 401, 'Unauthorized');
-        return;
+        // Accept token from query param only for the SSE endpoint (EventSource can't set headers)
+        const isSseEndpoint = pathname === '/admin/api/events' && req.method === 'GET';
+        const provided = extractToken(req) ?? (isSseEndpoint ? extractQueryToken(req.url ?? '/') : undefined);
+        if (!provided || !safeEqual(provided, token)) {
+          recordFailure(clientIp);
+          sendError(res, 401, 'Unauthorized');
+          return;
+        }
+        resetLimit(clientIp);
       }
-      resetLimit(clientIp);
 
       await handleAdminAPI(req, res, pathname, deps);
       return;
@@ -366,22 +387,55 @@ async function handleAdminAPI(
     return;
   }
 
-  // POST /admin/api/proxy/approve — approve or deny a pending web proxy domain
-  if (pathname === '/admin/api/proxy/approve' && method === 'POST') {
+  // GET /admin/api/proxy/domains — list allowed + pending domains
+  if (pathname === '/admin/api/proxy/domains' && method === 'GET') {
+    if (!deps.domainList) {
+      sendJSON(res, { allowed: [], pending: [] });
+      return;
+    }
+    sendJSON(res, {
+      allowed: [...deps.domainList.getAllowedDomains()],
+      pending: deps.domainList.getPending(),
+    });
+    return;
+  }
+
+  // POST /admin/api/proxy/domains/approve — approve a pending domain
+  if (pathname === '/admin/api/proxy/domains/approve' && method === 'POST') {
     try {
       const body = JSON.parse(await readBody(req));
-      const { sessionId, domain, approved, requestId: proxyRequestId } = body;
-      if (!sessionId || !domain || typeof approved !== 'boolean') {
-        sendError(res, 400, 'Missing required fields: sessionId, domain, approved');
+      const { domain } = body;
+      if (typeof domain !== 'string' || !domain) {
+        sendError(res, 400, 'Missing required field: domain');
         return;
       }
-      if (proxyRequestId) {
-        resolveApproval(sessionId, domain, approved, deps.eventBus, proxyRequestId);
+      if (!deps.domainList) {
+        sendError(res, 500, 'Domain list not configured');
+        return;
       }
-      if (approved) {
-        preApproveDomain(sessionId, domain);
+      deps.domainList.approvePending(domain);
+      sendJSON(res, { ok: true, domain });
+    } catch (err) {
+      sendError(res, 400, `Invalid request: ${(err as Error).message}`);
+    }
+    return;
+  }
+
+  // POST /admin/api/proxy/domains/deny — deny a pending domain
+  if (pathname === '/admin/api/proxy/domains/deny' && method === 'POST') {
+    try {
+      const body = JSON.parse(await readBody(req));
+      const { domain } = body;
+      if (typeof domain !== 'string' || !domain) {
+        sendError(res, 400, 'Missing required field: domain');
+        return;
       }
-      sendJSON(res, { ok: true });
+      if (!deps.domainList) {
+        sendError(res, 500, 'Domain list not configured');
+        return;
+      }
+      deps.domainList.denyPending(domain);
+      sendJSON(res, { ok: true, domain });
     } catch (err) {
       sendError(res, 400, `Invalid request: ${(err as Error).message}`);
     }

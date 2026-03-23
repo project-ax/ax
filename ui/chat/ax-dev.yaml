@@ -1,0 +1,38 @@
+# Minimal ax config for chat UI development with mock LLM.
+# Used by: npm run dev:chat -- start --mock
+#
+# This config uses url_rewrites to redirect OpenRouter API calls
+# to the local mock server (localhost:9100). All non-essential
+# providers use their lightest variant.
+agent: pi-coding-agent
+models:
+  default:
+    - openrouter/google/gemini-3-flash-preview
+profile: yolo
+providers:
+  memory: cortex
+  scanner: patterns
+  database: sqlite
+  channels: []
+  web:
+    extract: none
+    search: none
+  browser: none
+  credentials: keychain
+  audit: database
+  sandbox: subprocess
+  scheduler: none
+  screener: none
+  workspace: none
+sandbox:
+  timeout_sec: 300
+  memory_mb: 1024
+scheduler:
+  active_hours:
+    start: "07:00"
+    end: "23:00"
+    timezone: America/New_York
+  max_token_budget: 4096
+  heartbeat_interval_min: 30
+url_rewrites:
+  "https://openrouter.ai": "http://localhost:9100"

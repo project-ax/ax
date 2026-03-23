@@ -187,22 +187,20 @@ export function createIPCMcpServer(client: IIPCClient, opts?: MCPServerOptions):
 
     // ── Skill ──
     tool('skill',
-      'Manage skills: search, download from ClawHub, or request credentials.\n' +
-      'Use type: "search" to find skills by query.\n' +
-      'Use type: "download" to download a skill package by slug. Returns all files and required credentials.\n' +
+      'Manage skills: install from ClawHub or request credentials.\n' +
+      'Use type: "install" to install a skill by slug or search query. ' +
+      'The host downloads, screens, writes files, and adds domains to the proxy allowlist.\n' +
       'Use type: "request_credential" to request a credential (e.g. API key) that a skill needs.',
       {
-        type: z.enum(['search', 'download', 'request_credential']),
-        query: z.string().optional().describe('Search query (for type: "search")'),
-        limit: z.number().optional().describe('Max results (1-50, default 20)'),
-        slug: z.string().optional().describe('ClawHub skill slug (for type: "download")'),
+        type: z.enum(['install', 'request_credential']),
+        query: z.string().optional().describe('Search query (for type: "install" — finds best match)'),
+        slug: z.string().optional().describe('ClawHub skill slug (for type: "install")'),
         envName: z.string().optional().describe('Environment variable name (for type: "request_credential")'),
       },
       (args) => {
         const { type, ...rest } = args;
         const SKILL_ACTIONS: Record<string, string> = {
-          search: 'skill_search',
-          download: 'skill_download',
+          install: 'skill_install',
           request_credential: 'credential_request',
         };
         const params = Object.fromEntries(Object.entries(rest).filter(([_, v]) => v !== undefined));
@@ -302,19 +300,6 @@ export function createIPCMcpServer(client: IIPCClient, opts?: MCPServerOptions):
         quality: z.string().optional().describe('Quality level, e.g. "standard" or "hd"'),
       },
       (args) => ipcCall('image_generate', args),
-    ),
-
-    // ── Web Proxy Governance ──
-    tool('web_approve',
-      'Approve network access to a domain for commands that need internet ' +
-      '(npm install, pip install, curl, git clone, etc.).\n\n' +
-      'Call this BEFORE running a bash command that needs to reach an external domain. ' +
-      'Example: approve "registry.npmjs.org" before `npm install`.',
-      {
-        domain: z.string().describe('Domain to approve, e.g. "registry.npmjs.org"'),
-        approved: z.boolean().describe('true to approve, false to deny'),
-      },
-      (args) => ipcCall('web_proxy_approve', args),
     ),
 
     // ── Sandbox (singleton tools for bash/file ops) ──

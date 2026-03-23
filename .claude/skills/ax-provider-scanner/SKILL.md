@@ -22,7 +22,7 @@ Scanners check inbound/outbound messages for prompt injection, data leakage, and
 | Name | File | Detection Method |
 |---|---|---|
 | patterns | `src/providers/scanner/patterns.ts` | Structured `Pattern[]` with `{ regex, category, severity }`. Worst-severity-wins logic. Categories: `injection:direct`, `injection:persona`, `injection:extraction`, `injection:code`, `injection:shell`, `exfiltration`, `pii:*`, `credential:*`. |
-| guardian | `src/providers/scanner/guardian.ts` | Two-layer detection. Layer 1: regex patterns (same structure as patterns.ts). Layer 2: LLM-based classification using the configured fast model. Regex BLOCK skips LLM; LLM can escalate PASS to FLAG/BLOCK. Falls back to regex-only when LLM is unavailable. Accepts `CreateOptions { llm?: LLMProvider }`. |
+| guardian | `src/providers/scanner/guardian.ts` | Two-layer detection. Layer 1: regex patterns (same structure as patterns.ts). Layer 2: LLM-based classification using the configured fast model with a 15-second timeout (`CLASSIFY_TIMEOUT_MS = 15_000`) via `Promise.race`. Regex BLOCK skips LLM; LLM can escalate PASS to FLAG/BLOCK. Falls back to regex-only when LLM is unavailable or the call times out. Accepts `CreateOptions { llm?: LLMProvider }`. |
 
 Note: The `basic` scanner was removed. Use `patterns` for regex-only or `guardian` for regex + LLM.
 
@@ -56,4 +56,6 @@ Generated via `randomBytes(16).toString('hex')` prefixed with `CANARY-`. The rou
 - **Strip punctuation before keyword matching**: Words like `"system:"` or `"instructions?"` won't match keyword lists. Use `w.replace(/[^a-z0-9]/g, '')`.
 - **`''.includes('')` is always true**: Empty canary tokens cause universal redaction. Always guard `token.length > 0`.
 - **Guardian LLM fallback**: If no LLM is passed or the LLM call fails, guardian silently falls back to regex-only. Always test both paths.
+- **Guardian LLM classification has a 15s timeout**: The `classifyWithLLM()` call is raced against a 15-second `Promise.race` timeout (`CLASSIFY_TIMEOUT_MS`). If the upstream LLM provider (e.g. OpenRouter from inside k8s) is slow or unresponsive, scanning falls through to regex-only. The timeout exists because the LLM streaming call has no built-in timeout and previously caused indefinite hangs that blocked `processCompletion` and triggered `agent_response` timeouts. Check for `guardian_llm_error` in host logs.
 - **Output scanning is regex-only**: Even in guardian, output scanning doesn't use the LLM — credential/PII patterns are deterministic.
+- **Identity mutation exemption**: Guardian skips injection regex patterns for identity mutations (SOUL.md, IDENTITY.md writes). These files contain instructions that legitimately resemble injection patterns. The exemption is applied when `source` contains identity mutation indicators.

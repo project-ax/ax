@@ -19,32 +19,6 @@ export interface LocalSandboxOptions {
   timeoutMs?: number;
 }
 
-/** Well-known package manager commands and their registry domains. */
-const NETWORK_COMMAND_DOMAINS: [RegExp, string[]][] = [
-  [/\bnpm\s+(install|i|ci|update|audit|pack|publish)\b/, ['registry.npmjs.org']],
-  [/\bnpx\s/, ['registry.npmjs.org']],
-  [/\byarn\s+(add|install|upgrade)\b/, ['registry.yarnpkg.com', 'registry.npmjs.org']],
-  [/\bpip\s+(install|download)\b/, ['pypi.org', 'files.pythonhosted.org']],
-  [/\bgem\s+install\b/, ['rubygems.org']],
-  [/\bcargo\s+(install|build|update)\b/, ['crates.io', 'static.crates.io']],
-  [/\bgo\s+(get|install|mod\s+download)\b/, ['proxy.golang.org', 'sum.golang.org']],
-];
-
-/** Extract domains from URLs in commands that use network (git clone, curl, wget). */
-const URL_COMMAND_PATTERN = /\b(?:git\s+clone|curl|wget)\s+(?:-[^\s]*\s+)*https?:\/\/([^/\s]+)/g;
-
-export function extractNetworkDomains(command: string): string[] {
-  const domains: string[] = [];
-  for (const [pattern, doms] of NETWORK_COMMAND_DOMAINS) {
-    if (pattern.test(command)) domains.push(...doms);
-  }
-  // Also extract explicit URL domains from git clone, curl, wget
-  for (const match of command.matchAll(URL_COMMAND_PATTERN)) {
-    if (match[1]) domains.push(match[1]);
-  }
-  return [...new Set(domains)];
-}
-
 export function createLocalSandbox(opts: LocalSandboxOptions) {
   const { client, workspace, timeoutMs = 120_000 } = opts;
 
@@ -63,13 +37,13 @@ export function createLocalSandbox(opts: LocalSandboxOptions) {
 
   return {
     async bash(command: string): Promise<{ output: string }> {
-      const approval = await approve({ operation: 'bash', command });
+      const approval = await approve({
+        operation: 'bash',
+        command,
+      });
       if (!approval.approved) {
         return { output: `Denied: ${approval.reason ?? 'denied by host policy'}` };
       }
-
-      // Network domain auto-approval is handled host-side in sandbox_approve
-      // handler (session-scoped only, no cross-session leakage).
 
       const MAX_BUFFER = 1024 * 1024;
       return new Promise<{ output: string }>((resolve) => {

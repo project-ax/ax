@@ -17,11 +17,11 @@ Invoke this skill BEFORE:
 
 | File | Purpose |
 |------|---------|
-| `dashboard/src/index.css` | All CSS custom properties, component classes, animations |
-| `dashboard/src/main.tsx` | App entry point, router, layout shell |
-| `dashboard/src/components/` | Reusable React components |
-| `dashboard/src/pages/` | Page-level components (Overview, Agents, Security, Logs, Settings) |
-| `src/admin-ui/` | Built output (do NOT edit directly) |
+| `ui/admin/src/index.css` | All CSS custom properties, component classes, animations |
+| `ui/admin/src/main.tsx` | App entry point, router, layout shell |
+| `ui/admin/src/components/` | Reusable React components |
+| `ui/admin/src/pages/` | Page-level components (Overview, Agents, Security, Logs, Settings) |
+| `dashboard/` | Legacy location — admin dashboard source is now at `ui/admin/` |
 
 ## Reference Screenshot
 
@@ -329,8 +329,8 @@ When adding a new UI element to the dashboard:
 - [ ] Cards must use `backdrop-blur-sm` and transparent backgrounds (`bg-card/80`)
 - [ ] Use `color-mix(in srgb, color %, transparent)` for opacity blending — not hex alpha
 - [ ] Test at mobile, sm, and lg breakpoints
-- [ ] Place component in `dashboard/src/components/` or `dashboard/src/pages/`
-- [ ] Run `npm run build` to verify the built output in `src/admin-ui/`
+- [ ] Place component in `ui/admin/src/components/` or `ui/admin/src/pages/`
+- [ ] Run `npm run build` and verify the current admin dashboard build output path
 
 ## Common Mistakes to Avoid
 
