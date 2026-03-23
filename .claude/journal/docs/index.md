@@ -4,6 +4,7 @@ Documentation, plans, architecture docs, website updates, GitHub Pages.
 
 ## Entries
 
+- 2026-03-22 12:00 — Update ax-debug skill with agent_response timer and scanner timeout learnings [plans.md](plans.md)
 - 2026-03-21 14:00 — Add Tier 0 Chat UI Dev Loop to ax-debug skill [plans.md](plans.md)
 - 2026-03-19 05:46 — Plan authenticated MITM HTTPS proxy for long-tail CLI tools [plans.md](plans.md)
 - 2026-03-17 11:02 — Outline safe unified lifecycle for container sandboxes [plans.md](plans.md)

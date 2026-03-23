@@ -2,6 +2,14 @@
 
 Architecture analysis, gap analysis, design documents, implementation plans.
 
+## [2026-03-22 12:00] — Update ax-debug skill with agent_response timer and scanner timeout learnings
+
+**Task:** Add debugging learnings from kind-ax cluster session to ax-debug skill
+**What I did:** Added two new rows to the Common Issues table (agent_response timeout firing before sandbox spawn due to pre-processing eating into the timer; scanner LLM classification hanging due to no timeout on classifyWithLLM). Added a note to the "Agent never responds (timeout)" section explaining the deferred timer via startAgentResponseTimer callback and how to diagnose old-code behavior.
+**Files touched:** .claude/skills/ax-debug/SKILL.md
+**Outcome:** Success — three targeted edits, no full rewrite.
+**Notes:** These document the fix where agentResponsePromise timer was moved to after work publish, and guardian scanner got a 15s Promise.race timeout.
+
 ## [2026-03-21 14:00] — Add Tier 0 Chat UI Dev Loop to ax-debug skill
 
 **Task:** Create a tight dev loop for chat UI iteration with Playwright MCP visual verification

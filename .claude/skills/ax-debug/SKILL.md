@@ -710,6 +710,8 @@ nats sub "sandbox.work"
 3. Check if runner crashes: look for stack traces in agent stderr
 4. Use `AX_DEBUG_AGENT=1` (Tier 3) or `npm run k8s:dev debug sandbox` (Tier 2) to attach debugger
 
+**Note:** The `agentResponsePromise` timer now starts AFTER work is published (not before `processCompletion`), via the `startAgentResponseTimer` callback in `CompletionDeps`. If you see `nats_agent_response_error` at the exact same time as `nats_work_claimed`, it means pre-processing (scanner classification, workspace provisioning) took too long and the timer was still starting before work delivery — this is the old code path. In current code, the timer only begins once work is actually delivered to the agent.
+
 ---
 
 ## Common Issues
@@ -738,3 +740,5 @@ nats sub "sandbox.work"
 | Thread title stays "New Chat" | `generateTitle()` returns hardcoded placeholder | Poll `/v1/chat/sessions` with suffix-match on remoteId |
 | `chat-dev.sh --k8s` fails "cluster not found" | Cluster name mismatch (`ax` vs `ax-dev`) | Use manual port-forward + `VITE_AX_PORT=18080` (see Manual K8s Mode) |
 | K8s host port-forward fails "no service port 8080" | Service uses port 80, not 8080 | `kubectl port-forward svc/ax-host 18080:80` |
+| `agent_response timeout` fires before sandbox spawn | Pre-processing (scanner LLM call, workspace provisioning) takes too long, eating into the agentResponsePromise timer | Timer is now deferred to after work is published via `startAgentResponseTimer` callback in CompletionDeps. Guardian scanner also has 15s timeout on LLM classification. |
+| Scanner LLM classification hangs for minutes | No timeout on guardian's `classifyWithLLM()` OpenRouter call | Added 15s timeout via `Promise.race` in `classifyWithLLM()`. Falls through to regex-only on timeout. |

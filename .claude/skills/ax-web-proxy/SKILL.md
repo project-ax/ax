@@ -36,7 +36,7 @@ MITM Proxy (host pod, port 3128)
 | `src/host/proxy-ca.ts` | CA key generation, domain cert signing |
 | `src/host/server-init.ts` | Creates `ProxyDomainList`, populates from installed skills at startup |
 | `src/host/server-k8s.ts` | Shared proxy startup for k8s |
-| `src/host/server-completions.ts` | Per-session proxy startup, credential registration |
+| `src/host/server-completions.ts` | Per-session proxy startup, credential registration, `startAgentResponseTimer` in `CompletionDeps` (defers agent_response timeout until after work is published so pre-processing time doesn't eat the timeout budget) |
 | `src/host/ipc-handlers/skills.ts` | `skill_install` handler — adds domains to allowlist on install |
 | `src/host/server-admin.ts` | Admin endpoints for domain management (GET/POST /admin/api/proxy/domains) |
 | `src/agent/runner.ts` | CA cert writing, `CURL_CA_BUNDLE`/`SSL_CERT_FILE` setup |
@@ -127,6 +127,7 @@ Node.js 22+ has `--use-env-proxy` flag but it's not currently wired up.
 5. **Are credentials registered?** Look for `credential_injected` in host logs
 6. **Did replacement happen?** Check if `credentialMap` has placeholders for the session
 7. **Is the session still active?** Credentials deregistered at `session_completed`
+8. **Is the agentResponsePromise timer starting after work delivery?** The timer is deferred via `startAgentResponseTimer` callback — it starts after `publishWork` succeeds, not before `processCompletion` runs. If you see `nats_agent_response_error` simultaneous with `nats_work_claimed`, something is wrong with timer deferral.
 
 ## Gotchas
 
