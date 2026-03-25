@@ -47,6 +47,10 @@ NATS callers use `natsConnectOptions()` from `src/utils/nats.ts` for consistent 
 
 The workspace provider (`src/providers/workspace/`) manages persistent file workspaces for agent sessions across three scopes: agent, user, and session. Backends: `none` (no-op), `local` (filesystem), `gcs` (Google Cloud Storage). In k8s mode, workspace changes are synced back to GCS via the HTTP staging + workspace_release IPC flow (see ax-provider-sandbox skill for details). Loaded as part of the standard registry chain in `src/host/registry.ts`.
 
+### MCP Fast Path (In-Process Agent)
+
+The MCP fast path (`src/host/inprocess.ts`) runs the LLM orchestration loop directly in the host process — no pods, no IPC, no proxy, no GCS sync. Used for lightweight tool-calling tasks via MCP providers (e.g., Activepieces). Key files: `inprocess.ts` (LLM loop), `tool-router.ts` (tool routing with per-turn limits), `sandbox-manager.ts` (cross-turn sandbox escalation). See `src/providers/mcp/` for the MCP provider interface (`McpProvider`: `listTools`, `callTool`, `credentialStatus`, `storeCredential`, `listApps`).
+
 ### Provider Categories
 
-There are 17 provider categories in the static allowlist (`src/host/provider-map.ts`): llm, image, memory, scanner, channel, web_extract, web_search, browser, credentials, audit, sandbox, scheduler, screener, database, storage, eventbus, workspace.
+There are 18 provider categories in the static allowlist (`src/host/provider-map.ts`): llm, image, memory, scanner, channel, web_extract, web_search, browser, credentials, audit, sandbox, scheduler, screener, database, storage, eventbus, workspace, mcp.
