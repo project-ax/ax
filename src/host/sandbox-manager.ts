@@ -123,7 +123,7 @@ export async function provisionSandbox(
   sessionId: string,
   ttl?: number,
 ): Promise<SandboxSession> {
-  const { documents, config } = deps;
+  const { documents } = deps;
 
   logger.info('sandbox_provision_start', { sessionId, ttl });
 

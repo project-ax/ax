@@ -134,11 +134,11 @@ function buildFastPathSystemPrompt(
 
   if (canRequestSandbox) {
     parts.push(
-      '\nIf you need capabilities beyond these — such as running shell commands, ' +
-      'accessing the filesystem, cloning repositories, or installing packages — ' +
-      'use the request_sandbox tool. The user will be asked to approve. ' +
-      'A dedicated environment will be provisioned for your next turn.\n\n' +
-      'Do not request sandbox access unless you genuinely need it.',
+      `\nIf you need capabilities beyond these — such as running shell commands, ` +
+      `accessing the filesystem, cloning repositories, or installing packages — ` +
+      `use the request_sandbox tool. The user will be asked to approve. ` +
+      `A dedicated environment will be provisioned for your next turn.\n\n` +
+      `Do not request sandbox access unless you genuinely need it.`,
     );
   }
 
@@ -151,8 +151,10 @@ function buildFastPathSystemPrompt(
 
 export function extractAppHints(message: string, installedApps: string[]): string[] {
   if (!message) return [];
-  const lower = message.toLowerCase();
-  return installedApps.filter(app => lower.includes(app));
+  return installedApps.filter(app => {
+    const escaped = app.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b${escaped}\\b`, 'i').test(message);
+  });
 }
 
 async function discoverTools(
@@ -243,6 +245,7 @@ export async function runFastPath(
 
     // 7. Tool router context
     const routerCtx: ToolRouterContext = {
+      requestId: request.requestId,
       agentId: request.agentId,
       userId: request.userId,
       sessionId: request.sessionId,
@@ -276,12 +279,25 @@ export async function runFastPath(
         sessionId: request.sessionId,
       })) {
         chunks.push(chunk);
+        // Enforce timeout during streaming
+        if (Date.now() - turnCtx.startTime > FAST_PATH_LIMITS.maxTurnDurationMs) {
+          break;
+        }
+      }
+
+      // Check timeout after stream completes
+      if (Date.now() - turnCtx.startTime > FAST_PATH_LIMITS.maxTurnDurationMs) {
+        responseText = 'Turn timed out after 5 minutes.';
+        break;
       }
 
       // Collect response
       const textChunks = chunks.filter(c => c.type === 'text' && c.content);
       const toolCalls = chunks.filter(c => c.type === 'tool_use' && c.toolCall);
       const doneChunk = chunks.find(c => c.type === 'done');
+      if (doneChunk && (doneChunk as any).reason === 'content_filter') {
+        finishReason = 'content_filter';
+      }
 
       // Accumulate assistant text
       const assistantText = textChunks.map(c => c.content!).join('');
@@ -309,14 +325,33 @@ export async function runFastPath(
       }
       messages.push({ role: 'assistant', content: assistantBlocks });
 
-      // Process tool calls
+      // Process tool calls (with per-call timeout enforcement)
       const toolResults: ToolResult[] = [];
+      let toolTimedOut = false;
       for (const tc of toolCalls) {
-        const result = await routeToolCall(
-          { id: tc.toolCall!.id, name: tc.toolCall!.name, args: tc.toolCall!.args },
-          routerCtx,
-        );
+        const toolRemainingMs = FAST_PATH_LIMITS.maxTurnDurationMs - (Date.now() - turnCtx.startTime);
+        if (toolRemainingMs <= 0) {
+          toolTimedOut = true;
+          break;
+        }
+        const result = await Promise.race([
+          routeToolCall(
+            { id: tc.toolCall!.id, name: tc.toolCall!.name, args: tc.toolCall!.args },
+            routerCtx,
+          ),
+          new Promise<ToolResult>((resolve) =>
+            setTimeout(() => resolve({
+              toolUseId: tc.toolCall!.id,
+              content: 'Tool call timed out.',
+              isError: true,
+            }), toolRemainingMs),
+          ),
+        ]);
         toolResults.push(result);
+      }
+      if (toolTimedOut) {
+        responseText = 'Turn timed out after 5 minutes.';
+        break;
       }
 
       // Add tool results as user message with tool_result blocks
@@ -327,11 +362,14 @@ export async function runFastPath(
       }));
       messages.push({ role: 'user', content: resultBlocks });
 
-      // Reset response text for next iteration (tool loop continues)
+      // Intentional: reset response text so only the final iteration's text
+      // is returned. Intermediate assistant text (alongside tool calls) is
+      // captured in the messages array for the LLM context, not for the user.
       responseText = '';
     }
 
-    // 9. Persist conversation
+    // 9. Persist conversation (final text only — tool-use blocks are omitted
+    //    to keep history compact; full message exchange lives in the LLM context)
     if (request.persistentSessionId) {
       await conversationStore.append(request.persistentSessionId, 'user', request.message);
       if (responseText) {

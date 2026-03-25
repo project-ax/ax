@@ -355,6 +355,14 @@ export async function runK8sInit(args: string[]): Promise<void> {
       mcpUrl = await ask(rl, '\nActivepieces URL for MCP tools (leave empty to skip): ');
       if (mcpUrl === '') mcpUrl = undefined;
     }
+    if (mcpUrl !== undefined) {
+      try {
+        new URL(mcpUrl);
+      } catch {
+        console.error(`Invalid MCP URL: "${mcpUrl}". Must be an absolute URL (e.g. http://activepieces.ax.svc:8080).`);
+        process.exit(1);
+      }
+    }
 
     // 8. Namespace + output
     const namespace = opts.namespace ?? 'ax';

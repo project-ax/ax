@@ -93,7 +93,9 @@ async function apFetch(
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(`Activepieces API ${res.status}: ${text}`);
+      const err = new Error(`Activepieces API ${res.status}: ${text}`);
+      (err as any).status = res.status;
+      throw err;
     }
     return res.json();
   } finally {
@@ -142,6 +144,15 @@ class ActivepiecesMcpProvider implements McpProvider {
     }
   }
 
+  // -- Breaker helpers ------------------------------------------------------
+
+  /** Only record failure for transport errors and 5xx — not client 4xx. */
+  private maybeRecordFailure(err: unknown): void {
+    const status = (err as any)?.status;
+    if (typeof status === 'number' && status >= 400 && status < 500) return;
+    this.breaker.recordFailure();
+  }
+
   // -- Guard ----------------------------------------------------------------
 
   private guardCircuit(): void {
@@ -167,7 +178,7 @@ class ActivepiecesMcpProvider implements McpProvider {
       this.breaker.reset();
       return data;
     } catch (err) {
-      this.breaker.recordFailure();
+      this.maybeRecordFailure(err);
       throw err;
     }
   }
@@ -206,7 +217,7 @@ class ActivepiecesMcpProvider implements McpProvider {
       };
     } catch (err) {
       if (err instanceof McpAuthRequiredError) throw err;
-      this.breaker.recordFailure();
+      this.maybeRecordFailure(err);
       throw err;
     }
   }
@@ -222,7 +233,7 @@ class ActivepiecesMcpProvider implements McpProvider {
       this.breaker.reset();
       return data;
     } catch (err) {
-      this.breaker.recordFailure();
+      this.maybeRecordFailure(err);
       throw err;
     }
   }
@@ -237,7 +248,7 @@ class ActivepiecesMcpProvider implements McpProvider {
       });
       this.breaker.reset();
     } catch (err) {
-      this.breaker.recordFailure();
+      this.maybeRecordFailure(err);
       throw err;
     }
   }
@@ -251,7 +262,7 @@ class ActivepiecesMcpProvider implements McpProvider {
       this.breaker.reset();
       return data;
     } catch (err) {
-      this.breaker.recordFailure();
+      this.maybeRecordFailure(err);
       throw err;
     }
   }

@@ -105,17 +105,26 @@ export function createSkillsHandlers(providers: ProviderRegistry, opts?: SkillsH
         opts.domainList.addSkillDomains(slug, manifest.capabilities.domains);
       }
 
-      // 6b. Store skill in DB for fast-path access (instruction-only model)
+      // 6b. Store skill in DB for fast-path access (best-effort — install
+      //     side effects above already succeeded, so don't fail the handler)
       if (providers.storage?.documents) {
-        const mcpApps = inferMcpApps(skillMd.content);
-        await upsertSkill(providers.storage.documents, {
-          id: slug,
-          agentId: agentName,
-          version: '1.0.0',
-          instructions: skillMd.content,
-          mcpApps,
-        });
-        logger.info('skill_stored_in_db', { slug, agentId: agentName, mcpApps });
+        try {
+          const mcpApps = inferMcpApps(skillMd.content);
+          await upsertSkill(providers.storage.documents, {
+            id: slug,
+            agentId: agentName,
+            version: '1.0.0',
+            instructions: skillMd.content,
+            mcpApps,
+          });
+          logger.info('skill_stored_in_db', { slug, agentId: agentName, mcpApps });
+        } catch (err) {
+          logger.warn('skill_store_db_failed', {
+            slug,
+            agentId: agentName,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       }
 
       await providers.audit.log({

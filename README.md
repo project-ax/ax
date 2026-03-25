@@ -841,7 +841,7 @@ If the agent has a Linear skill installed and Activepieces has a Linear connecti
 
 ### How Credentials Stay Secure
 
-```
+```text
 LLM loop (in host process, no credentials)
   │
   ├─ tool_call("linear_get_issues", { query: "bugs" })
@@ -864,7 +864,7 @@ The LLM never sees credentials. Activepieces manages them. The host just routes 
 
 If the agent calls a tool and the credential isn't configured in Activepieces, the tool call fails immediately — no blocking, no mid-conversation OAuth popups. The agent tells the user, and an admin notification goes out:
 
-```
+```text
 ⚠️ Agent "engineering-bot" tried to use Linear but no credential is configured.
    Triggered by: @alice in #engineering
    → Connect Linear in the Activepieces UI

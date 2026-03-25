@@ -40,6 +40,7 @@ export interface ToolResult {
 }
 
 export interface ToolRouterContext {
+  requestId: string;
   agentId: string;
   userId: string;
   sessionId: string;
@@ -140,7 +141,7 @@ async function handleMcpToolCall(
       // Notify admin asynchronously — do NOT block the turn
       ctx.eventBus?.emit({
         type: 'credential.missing',
-        requestId: ctx.sessionId,
+        requestId: ctx.requestId,
         timestamp: Date.now(),
         data: {
           agentId: ctx.agentId,
@@ -167,11 +168,14 @@ async function handleMcpToolCall(
 // File I/O (lazy GCS access via safePath)
 // ---------------------------------------------------------------------------
 
-const SCOPE_SUBDIRS: Record<string, string> = {
-  agent: 'agent',
-  user: 'user',
-  session: 'session',
-};
+function scopeSubdir(scope: string, ctx: ToolRouterContext): string | undefined {
+  switch (scope) {
+    case 'agent':   return `agent/${ctx.agentId}`;
+    case 'user':    return `user/${ctx.userId}`;
+    case 'session': return `session/${ctx.sessionId}`;
+    default:        return undefined;
+  }
+}
 
 async function handleFileRead(
   call: ToolCall,
@@ -180,12 +184,13 @@ async function handleFileRead(
   const path = call.args.path as string | undefined;
   const scope = call.args.scope as string | undefined;
 
-  if (!path || !scope || !SCOPE_SUBDIRS[scope]) {
+  const subdir = scope ? scopeSubdir(scope, ctx) : undefined;
+  if (!path || !scope || !subdir) {
     return { toolUseId: call.id, content: 'Invalid arguments: path and scope (agent|user|session) required.', isError: true };
   }
 
   try {
-    const resolvedPath = safePath(ctx.workspaceBasePath, SCOPE_SUBDIRS[scope], path);
+    const resolvedPath = safePath(ctx.workspaceBasePath, subdir, path);
     const { readFile } = await import('node:fs/promises');
     const data = await readFile(resolvedPath, 'utf-8');
 
@@ -193,7 +198,15 @@ async function handleFileRead(
       return { toolUseId: call.id, content: 'File too large to read in fast path. Request sandbox for large files.', isError: true };
     }
 
-    ctx.totalBytes += Buffer.byteLength(data);
+    const nextTotalBytes = ctx.totalBytes + Buffer.byteLength(data);
+    if (nextTotalBytes > FAST_PATH_LIMITS.maxTotalContextBytes) {
+      return {
+        toolUseId: call.id,
+        content: `Total context size limit exceeded (>${FAST_PATH_LIMITS.maxTotalContextBytes} bytes). Request sandbox for large files.`,
+        isError: true,
+      };
+    }
+    ctx.totalBytes = nextTotalBytes;
     return {
       toolUseId: call.id,
       content: data,
@@ -212,12 +225,13 @@ async function handleFileWrite(
   const scope = call.args.scope as string | undefined;
   const content = call.args.content as string | undefined;
 
-  if (!path || !scope || !SCOPE_SUBDIRS[scope] || content === undefined) {
+  const writeSubdir = scope ? scopeSubdir(scope, ctx) : undefined;
+  if (!path || !scope || !writeSubdir || content === undefined) {
     return { toolUseId: call.id, content: 'Invalid arguments: path, scope, and content required.', isError: true };
   }
 
   try {
-    const resolvedPath = safePath(ctx.workspaceBasePath, SCOPE_SUBDIRS[scope], path);
+    const resolvedPath = safePath(ctx.workspaceBasePath, writeSubdir, path);
     const { writeFile, mkdir } = await import('node:fs/promises');
     const { dirname } = await import('node:path');
     await mkdir(dirname(resolvedPath), { recursive: true });

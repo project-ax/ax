@@ -28,7 +28,10 @@ function mockLLM(responses: ChatChunk[][]): LLMProvider {
   return {
     name: 'mock',
     async *chat(_req: ChatRequest): AsyncIterable<ChatChunk> {
-      const chunks = responses[callIdx++] ?? responses[responses.length - 1];
+      const chunks = responses[callIdx++];
+      if (!chunks) {
+        throw new Error(`Unexpected llm.chat() call #${callIdx}`);
+      }
       for (const c of chunks) yield c;
     },
     async models() { return ['mock-model']; },
@@ -173,13 +176,11 @@ describe('runFastPath', () => {
 
     const mockMcp = {
       async listTools() { return []; },
-      async callTool() {
-        return {
-          content: '[{"id":1},{"id":2},{"id":3}]',
-          isError: false,
-          taint: { source: 'mcp:linear_get_issues', trust: 'external' as const, timestamp: new Date() },
-        };
-      },
+      callTool: vi.fn().mockResolvedValue({
+        content: '[{"id":1},{"id":2},{"id":3}]',
+        isError: false,
+        taint: { source: 'mcp:linear_get_issues', trust: 'external' as const, timestamp: new Date() },
+      }),
       async credentialStatus() { return { available: true, app: 'linear', authType: 'api_key' as const }; },
       async storeCredential() {},
       async listApps() { return []; },
@@ -207,6 +208,10 @@ describe('runFastPath', () => {
     );
 
     expect(result.responseContent).toBe('Found 3 issues.');
+    expect(mockMcp.callTool).toHaveBeenCalledOnce();
+    expect(mockMcp.callTool).toHaveBeenCalledWith(
+      expect.objectContaining({ tool: 'linear_get_issues' }),
+    );
   });
 
   it('persists conversation to store for persistent sessions', async () => {

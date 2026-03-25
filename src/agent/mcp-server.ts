@@ -202,7 +202,7 @@ export function createIPCMcpServer(client: IIPCClient, opts?: MCPServerOptions):
       'The host will prompt the user to provide it. This ends the current turn; you will be\n' +
       're-invoked with the credential available as an environment variable.',
       {
-        envName: z.string().describe('Environment variable name needed (e.g. LINEAR_API_KEY)'),
+        envName: z.string().regex(/^[A-Z][A-Z0-9_]{1,63}$/).describe('Environment variable name needed (e.g. LINEAR_API_KEY). Must be uppercase with underscores only.'),
       },
       (args) => ipcCall('credential_request', args),
     ),

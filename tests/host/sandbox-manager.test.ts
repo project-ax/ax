@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   getSandboxSession, createSandboxSession, updateSandboxSession,
   deleteSandboxSession, provisionSandbox, teardownSandbox,
@@ -76,6 +76,8 @@ describe('sandbox session CRUD', () => {
     }));
 
     expect(await getSandboxSession(docs, 'expired')).toBeNull();
+    // Verify the expired document was actually deleted from the backing store
+    expect(await docs.get('sandbox_sessions', 'expired')).toBeUndefined();
   });
 
   it('updateSandboxSession updates fields', async () => {

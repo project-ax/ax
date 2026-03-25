@@ -64,6 +64,8 @@ export async function getSkill(
   }
 }
 
+/** List all skills for an agent. N+1 fetch pattern — acceptable for typical
+ *  skill counts (<100). If DocumentStore grows a batch-get API, use it here. */
 export async function listSkills(
   documents: DocumentStore,
   agentId: string,
@@ -96,23 +98,26 @@ export async function deleteSkill(
 
 /**
  * Infer MCP app names from a skill's instructions/metadata.
- * Heuristic: looks for known patterns like "google_slides_custom_api_call" -> "google-slides".
+ *
+ * Best-effort heuristic — may produce false positives for generic patterns
+ * like "data_get_something". The length check (>3) and exclusion list filter
+ * out common English words but cannot eliminate all ambiguity. Acceptable
+ * since the result is used for tool discovery hints, not access control.
  */
 export function inferMcpApps(instructions: string): string[] {
   const apps = new Set<string>();
 
-  // Pattern: tool names like "google_slides_custom_api_call" -> "google-slides"
+  // Heuristic: tool names like "google_slides_custom_api_call" -> "google-slides"
   const toolPattern = /(\w+)_custom_api_call/g;
   let match;
   while ((match = toolPattern.exec(instructions)) !== null) {
     apps.add(match[1].replace(/_/g, '-'));
   }
 
-  // Pattern: "google_slides_*" tool references -> "google-slides"
+  // Heuristic: "google_slides_get_*" tool references -> "google-slides"
   const appToolPattern = /(\w+)_(?:get|create|update|delete|list|search|send|read|write)\w*/g;
   while ((match = appToolPattern.exec(instructions)) !== null) {
     const candidate = match[1].replace(/_/g, '-');
-    // Only add if it looks like a plausible app name (not too generic)
     if (candidate.length > 3 && !['the', 'and', 'for', 'use', 'you'].includes(candidate)) {
       apps.add(candidate);
     }

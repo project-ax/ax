@@ -204,10 +204,15 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     description:
       'Install a skill from ClawHub by slug or search query. ' +
       'The host downloads, screens, writes files, and adds domains to the proxy allowlist.',
-    parameters: Type.Object({
-      query: Type.Optional(Type.String({ description: 'Search query (finds best match and installs)' })),
-      slug: Type.Optional(Type.String({ description: 'ClawHub skill slug (e.g. "linear-skill")' })),
-    }),
+    parameters: Type.Union([
+      Type.Object({
+        slug: Type.String({ description: 'ClawHub skill slug (e.g. "linear-skill")' }),
+        query: Type.Optional(Type.String({ description: 'Search query (optional refinement)' })),
+      }),
+      Type.Object({
+        query: Type.String({ description: 'Search query (finds best match and installs)' }),
+      }),
+    ]),
     category: 'skill',
     singletonAction: 'skill_install',
   },
@@ -221,7 +226,10 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
       'The host will prompt the user to provide it. This ends the current turn; you will be\n' +
       're-invoked with the credential available as an environment variable.',
     parameters: Type.Object({
-      envName: Type.String({ description: 'Environment variable name needed (e.g. LINEAR_API_KEY)' }),
+      envName: Type.String({
+        pattern: '^[A-Z][A-Z0-9_]{1,63}$',
+        description: 'Environment variable name needed (e.g. LINEAR_API_KEY). Must be uppercase with underscores only.',
+      }),
     }),
     category: 'credential',
     singletonAction: 'credential_request',

@@ -10,6 +10,7 @@ import type { EventBus } from '../../src/host/event-bus.js';
 
 function makeCtx(overrides: Partial<ToolRouterContext> = {}): ToolRouterContext {
   return {
+    requestId: 'req-1',
     agentId: 'agent-1',
     userId: 'user-1',
     sessionId: 'sess-1',

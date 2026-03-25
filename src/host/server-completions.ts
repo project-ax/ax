@@ -404,6 +404,10 @@ export async function processCompletion(
   });
 
   if (turnLayer === 'in-process') {
+    if (!providers.storage?.documents) {
+      reqLogger.warn('fast_path_skip_no_documents');
+      // Fall through to sandbox path below
+    } else {
     const agentName = config.agent_name ?? 'main';
     const currentUserId = userId ?? process.env.USER ?? 'default';
     try {
@@ -464,6 +468,7 @@ export async function processCompletion(
       reqLogger.error('fast_path_error', { error: (err as Error).message });
       return { responseContent: `Fast path error: ${(err as Error).message}`, finishReason: 'stop' };
     }
+    } // end documents guard
   }
 
   // ── Sandbox path (existing flow) ──
