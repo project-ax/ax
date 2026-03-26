@@ -151,10 +151,10 @@ describe('ipc-tools', () => {
     expect(tool!.description).toContain('cron');
   });
 
-  test('total tool count is 16 without filter', () => {
+  test('total tool count is 18 without filter', () => {
     const client = createMockClient();
     const tools = createIPCTools(client as any);
-    expect(tools.length).toBe(16);
+    expect(tools.length).toBe(18);
   });
 
   test('filter excludes scheduler tool when hasHeartbeat is false', () => {

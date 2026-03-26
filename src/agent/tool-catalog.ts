@@ -202,19 +202,44 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     name: 'skill',
     label: 'Skill',
     description:
-      'Install a skill from ClawHub by slug or search query. ' +
-      'The host downloads, screens, writes files, and adds domains to the proxy allowlist.',
+      'Install, list, read, update, and delete skills.\n\nUse `type` to select:\n' +
+      '- install: Install a skill from ClawHub by slug or search query\n' +
+      '- list: List all installed skills\n' +
+      '- read: Read a skill\'s files by slug\n' +
+      '- update: Update a specific file in a skill\n' +
+      '- delete: Uninstall a skill by slug',
     parameters: Type.Union([
       Type.Object({
-        slug: Type.String({ description: 'ClawHub skill slug (e.g. "linear-skill")' }),
-        query: Type.Optional(Type.String({ description: 'Search query (optional refinement)' })),
+        type: Type.Literal('install'),
+        slug: Type.Optional(Type.String({ description: 'ClawHub skill slug' })),
+        query: Type.Optional(Type.String({ description: 'Search query' })),
       }),
       Type.Object({
-        query: Type.String({ description: 'Search query (finds best match and installs)' }),
+        type: Type.Literal('list'),
+      }),
+      Type.Object({
+        type: Type.Literal('read'),
+        slug: Type.String({ description: 'Skill slug to read' }),
+      }),
+      Type.Object({
+        type: Type.Literal('update'),
+        slug: Type.String({ description: 'Skill slug to update' }),
+        path: Type.String({ description: 'File path within the skill (e.g. "SKILL.md")' }),
+        content: Type.String({ description: 'New file content' }),
+      }),
+      Type.Object({
+        type: Type.Literal('delete'),
+        slug: Type.String({ description: 'Skill slug to delete' }),
       }),
     ]),
     category: 'skill',
-    singletonAction: 'skill_install',
+    actionMap: {
+      install: 'skill_install',
+      list: 'skill_list',
+      read: 'skill_read',
+      update: 'skill_update',
+      delete: 'skill_delete',
+    },
   },
 
   // ── Credential ──
@@ -248,6 +273,34 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     }),
     category: 'workspace',
     singletonAction: 'workspace_write',
+  },
+
+  // ── Workspace Read ──
+  {
+    name: 'workspace_read',
+    label: 'Read Workspace File',
+    description:
+      'Read a file from a workspace scope (agent, user, or session). Returns the file content as text.',
+    parameters: Type.Object({
+      scope: Type.String({ description: '"agent", "user", or "session"' }),
+      path: Type.String({ description: 'Relative path within the scope' }),
+    }),
+    category: 'workspace',
+    singletonAction: 'workspace_read',
+  },
+
+  // ── Workspace List ──
+  {
+    name: 'workspace_list',
+    label: 'List Workspace Files',
+    description:
+      'List files in a workspace scope (agent, user, or session). Optionally filter by path prefix.',
+    parameters: Type.Object({
+      scope: Type.String({ description: '"agent", "user", or "session"' }),
+      prefix: Type.Optional(Type.String({ description: 'Filter by path prefix' })),
+    }),
+    category: 'workspace',
+    singletonAction: 'workspace_list',
   },
 
   // ── Workspace Scopes ──

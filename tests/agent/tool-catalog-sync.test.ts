@@ -200,6 +200,8 @@ describe('tool-catalog <-> IPC schemas sync', () => {
       'agent_response',
       // Workspace release (NATS mode — agent sends workspace file changes via IPC)
       'workspace_release',
+      // Session lifecycle (host → pod push notification)
+      'session_expiring',
     ]);
 
     for (const action of schemaActions) {

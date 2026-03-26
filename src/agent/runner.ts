@@ -353,117 +353,6 @@ export function parseStdinPayload(data: string): StdinPayload {
 }
 
 /**
- * Provision workspace scopes inside the pod (k8s sandbox-side lifecycle).
- * Called after receiving work payload, before running the agent.
- * Writes hash snapshots to /tmp/.ax-hashes.json for the release step.
- */
-async function provisionWorkspaceFromPayload(payload: StdinPayload): Promise<void> {
-  const { provisionScope } = await import('./workspace.js');
-  const { CANONICAL } = await import('../providers/sandbox/canonical-paths.js');
-  const snapshot: Record<string, [string, string][]> = {};
-
-  // HTTP provisioning options — in k8s the pod fetches files from the host
-  // (the host has GCS credentials, the pod doesn't).
-  const hostUrl = process.env.AX_HOST_URL;
-  const token = payload.ipcToken ?? process.env.AX_IPC_TOKEN;
-
-  // In k8s mode, always provision all scopes via HTTP when a host URL is available.
-  // This doesn't require GCS prefix fields in the payload — the host resolves
-  // the GCS paths from its own config. The agentGcsPrefix fields in the payload
-  // are only needed for the legacy direct-GCS path (non-k8s).
-  if (hostUrl && payload.workspaceProvider === 'gcs') {
-    const agentId = payload.agentId ?? 'assistant';
-    const userId = payload.userId ?? '';
-    const sessionId = payload.sessionId ?? '';
-    const httpOpts = (scope: string, id: string) => ({ hostUrl, token, scope, id });
-
-    try {
-      const result = await provisionScope(CANONICAL.agent, '', payload.agentReadOnly ?? true, httpOpts('agent', agentId));
-      snapshot.agent = [...result.hashes.entries()];
-      logger.info('provision_agent_scope', { source: result.source, fileCount: result.fileCount });
-    } catch (err) {
-      logger.warn('provision_agent_scope_failed', { error: (err as Error).message });
-    }
-
-    try {
-      const result = await provisionScope(CANONICAL.user, '', false, httpOpts('user', userId));
-      snapshot.user = [...result.hashes.entries()];
-      logger.info('provision_user_scope', { source: result.source, fileCount: result.fileCount });
-    } catch (err) {
-      logger.warn('provision_user_scope_failed', { error: (err as Error).message });
-    }
-
-    try {
-      const result = await provisionScope(CANONICAL.scratch, '', false, httpOpts('session', sessionId));
-      snapshot.session = [...result.hashes.entries()];
-      logger.info('provision_session_scope', { source: result.source, fileCount: result.fileCount });
-    } catch (err) {
-      logger.warn('provision_session_scope_failed', { error: (err as Error).message });
-    }
-
-    // Write hash snapshot for workspace release to diff against
-    if (Object.keys(snapshot).length > 0) {
-      try {
-        writeFileSync('/tmp/.ax-hashes.json', JSON.stringify(snapshot), 'utf-8');
-        logger.debug('hash_snapshot_written', { scopes: Object.keys(snapshot) });
-      } catch (err) {
-        logger.warn('hash_snapshot_write_failed', { error: (err as Error).message });
-      }
-    }
-    return;
-  }
-
-  // Agent scope → /workspace/agent
-  if (payload.agentGcsPrefix) {
-    try {
-      const result = await provisionScope(CANONICAL.agent, payload.agentGcsPrefix, payload.agentReadOnly ?? true, {
-        hostUrl, token, scope: 'agent', id: payload.agentId ?? 'assistant',
-      });
-      snapshot.agent = [...result.hashes.entries()];
-      logger.info('provision_agent_scope', { source: result.source, fileCount: result.fileCount });
-    } catch (err) {
-      logger.warn('provision_agent_scope_failed', { error: (err as Error).message });
-    }
-  }
-
-  // User scope → /workspace/user
-  if (payload.userGcsPrefix) {
-    try {
-      const result = await provisionScope(CANONICAL.user, payload.userGcsPrefix, false, {
-        hostUrl, token, scope: 'user', id: payload.userId ?? '',
-      });
-      snapshot.user = [...result.hashes.entries()];
-      logger.info('provision_user_scope', { source: result.source, fileCount: result.fileCount });
-    } catch (err) {
-      logger.warn('provision_user_scope_failed', { error: (err as Error).message });
-    }
-  }
-
-  // Session scope → /workspace/scratch (GCS overlay on top of git workspace)
-  if (payload.sessionGcsPrefix) {
-    try {
-      const result = await provisionScope(CANONICAL.scratch, payload.sessionGcsPrefix, false, {
-        hostUrl, token, scope: 'session', id: payload.sessionId ?? '',
-      });
-      snapshot.session = [...result.hashes.entries()];
-      logger.info('provision_session_scope', { source: result.source, fileCount: result.fileCount });
-    } catch (err) {
-      logger.warn('provision_session_scope_failed', { error: (err as Error).message });
-    }
-  }
-
-  // Write hash snapshot for workspace release to diff against
-  if (Object.keys(snapshot).length > 0) {
-    try {
-      writeFileSync('/tmp/.ax-hashes.json', JSON.stringify(snapshot), 'utf-8');
-      logger.debug('hash_snapshot_written', { scopes: Object.keys(snapshot) });
-    } catch (err) {
-      logger.warn('hash_snapshot_write_failed', { error: (err as Error).message });
-    }
-  }
-}
-
-/**
  * Dispatch to the appropriate agent implementation based on config.agent.
  */
 export async function run(config: AgentConfig): Promise<void> {
@@ -600,41 +489,6 @@ function applyPayload(config: AgentConfig, payload: StdinPayload): void {
   }
 }
 
-/**
- * NATS work subscription: subscribe to sandbox.work with a queue group so NATS
- * delivers work to exactly one warm pod per tier. Replaces the old per-pod
- * subject (agent.work.{podName}) — no k8s API label-patch claiming needed.
- */
-export async function waitForNATSWork(): Promise<string> {
-  const podName = process.env.POD_NAME ?? 'unknown';
-  const tier = process.env.SANDBOX_TIER ?? 'light';
-
-  const natsModule = await import('nats');
-  const { natsConnectOptions } = await import('../utils/nats.js');
-  const nc = await natsModule.connect(natsConnectOptions('runner', podName));
-
-  // Queue group subscription: NATS delivers to exactly one subscriber per tier
-  const sub = nc.subscribe('sandbox.work', { max: 1, queue: tier });
-  logger.info('nats_work_waiting', { subject: 'sandbox.work', queue: tier, podName });
-  process.stderr.write(`[diag] waiting for work on sandbox.work (queue: ${tier})\n`);
-
-  for await (const msg of sub) {
-    const data = new TextDecoder().decode(msg.data);
-    logger.info('nats_work_received', { queue: tier, bytes: data.length });
-    process.stderr.write(`[diag] work received: ${data.length} bytes\n`);
-
-    // Reply with podName so host can track which pod is processing
-    if (msg.reply) {
-      msg.respond(new TextEncoder().encode(JSON.stringify({ podName })));
-    }
-
-    await nc.drain();
-    return data;
-  }
-
-  await nc.drain();
-  throw new Error('NATS work subscription ended without receiving a message');
-}
 
 // Run if this is the main module
 const isMain = process.argv[1]?.endsWith('runner.js') ||
@@ -650,7 +504,7 @@ if (isMain) {
   const isHTTPMode = !!process.env.AX_HOST_URL;
 
   if (isHTTPMode) {
-    // K8s HTTP mode: use HttpIPCClient for IPC, NATS only for work dispatch.
+    // K8s HTTP mode: session-long work loop.
     const { HttpIPCClient } = await import('./http-ipc-client.js');
     const client = new HttpIPCClient({
       hostUrl: process.env.AX_HOST_URL!,
@@ -658,16 +512,48 @@ if (isMain) {
     await client.connect();
     config.ipcClient = client;
 
-    // Wait for work payload via NATS queue group
-    waitForNATSWork().then(async (data) => {
-      const payload = parseStdinPayload(data);
-      applyPayload(config, payload);
+    // Session-long work loop: fetch → process → respond → repeat
+    (async () => {
+      while (true) {
+        logger.info('work_loop_waiting');
+        // Long-poll for work (wait up to 5 minutes, then re-poll)
+        const data = await client.fetchWork(2000, 5 * 60 * 1000);
+        if (!data) {
+          logger.info('work_loop_no_work');
+          continue;
+        }
 
-      // Sandbox-side workspace lifecycle: provision before agent runs
-      await provisionWorkspaceFromPayload(payload);
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed._type === 'session_expiring') {
+            logger.info('session_expiring_received', { secondsRemaining: parsed.secondsRemaining });
+            process.exit(0);
+          }
 
-      return run(config);
-    }).catch((err) => {
+          const payload = parseStdinPayload(data);
+          applyPayload(config, payload);
+
+          client.setContext({
+            sessionId: config.sessionId,
+            requestId: config.requestId,
+            userId: config.userId,
+            sessionScope: config.sessionScope,
+            token: process.env.AX_IPC_TOKEN,
+          });
+
+          await run(config);
+        } catch (err) {
+          logger.error('work_loop_error', { error: (err as Error).message, stack: (err as Error).stack });
+          try {
+            await client.call({
+              action: 'agent_response',
+              content: `Agent error: ${(err as Error).message}`,
+              error: true,
+            });
+          } catch { /* best effort */ }
+        }
+      }
+    })().catch((err) => {
       logger.error('main_error', { error: (err as Error).message, stack: (err as Error).stack });
       process.exitCode = 1;
       process.stderr.write(`Agent runner error: ${(err as Error).message ?? err}\n`);

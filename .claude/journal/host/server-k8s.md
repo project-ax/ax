@@ -1,3 +1,12 @@
+## [2026-03-25 18:10] — Two-tier idle timeout for session pods (clean vs dirty)
+
+**Task:** Add shorter idle timeout for sandbox pods with no filesystem changes
+**What I did:** Added `dirty` flag to `SessionPod`, `cleanIdleTimeoutMs` option, and `markDirty()` method to session-pod-manager. Clean sessions (no FS writes) use shorter timeout (default 5min), dirty sessions use full timeout (default 30min). Wired into `server-k8s.ts` — IPC interceptor marks session dirty on `sandbox_bash`, `sandbox_write_file`, `sandbox_edit_file`, `workspace_write`, `workspace_release` actions. Added `idle_timeout_sec` and `clean_idle_timeout_sec` to sandbox config schema and Helm values.
+**Files touched:**
+  - Modified: src/host/session-pod-manager.ts, src/host/server-k8s.ts, src/config.ts, src/types.ts, charts/ax/values.yaml, tests/host/session-pod-manager.test.ts
+**Outcome:** Success. 12 tests pass (up from 6). TypeScript compiles (only pre-existing error in skills.ts).
+**Notes:** `DIRTY_ACTIONS` set is defined inside the per-turn closure in server-k8s.ts. `markDirty()` is idempotent and resets the timer on first dirty mark so the longer timeout takes effect immediately.
+
 ## [2026-03-23 19:40] — Optimize workspace provisioning: parallel GCS downloads
 
 **Task:** Fix slow workspace provisioning (~50s for 473 files / 7.4MB user workspace) in k8s mode

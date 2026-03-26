@@ -96,6 +96,8 @@ export interface Config {
   channel_config?: Record<string, Partial<ChannelAccessConfig>>;
   sandbox: {
     timeout_sec: number;
+    idle_timeout_sec?: number;
+    clean_idle_timeout_sec?: number;
     memory_mb: number;
     tiers?: {
       default: { memory_mb: number; cpus: number };

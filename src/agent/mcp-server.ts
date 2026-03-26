@@ -187,13 +187,28 @@ export function createIPCMcpServer(client: IIPCClient, opts?: MCPServerOptions):
 
     // ── Skill ──
     tool('skill',
-      'Install a skill from ClawHub by slug or search query. ' +
-      'The host downloads, screens, writes files, and adds domains to the proxy allowlist.',
+      'Install, list, read, update, and delete skills.\n\nUse `type` to select:\n' +
+      '- install: Install a skill from ClawHub by slug or search query\n' +
+      '- list: List all installed skills\n' +
+      '- read: Read a skill\'s files by slug\n' +
+      '- update: Update a specific file in a skill\n' +
+      '- delete: Uninstall a skill by slug',
       {
-        query: z.string().optional().describe('Search query (finds best match and installs)'),
-        slug: z.string().optional().describe('ClawHub skill slug (e.g. "linear-skill")'),
+        type: z.enum(['install', 'list', 'read', 'update', 'delete']),
+        slug: z.string().optional().describe('ClawHub skill slug'),
+        query: z.string().optional().describe('Search query'),
+        path: z.string().optional().describe('File path within the skill (e.g. "SKILL.md")'),
+        content: z.string().optional().describe('New file content'),
       },
-      (args) => ipcCall('skill_install', args),
+      (args) => {
+        const SKILL_ACTIONS: Record<string, string> = {
+          install: 'skill_install', list: 'skill_list', read: 'skill_read',
+          update: 'skill_update', delete: 'skill_delete',
+        };
+        const { type, ...rest } = args;
+        const params = Object.fromEntries(Object.entries(rest).filter(([_, v]) => v !== undefined));
+        return ipcCall(SKILL_ACTIONS[type], params);
+      },
     ),
 
     // ── Credential ──
@@ -216,6 +231,26 @@ export function createIPCMcpServer(client: IIPCClient, opts?: MCPServerOptions):
         content: z.string().describe('File content to write'),
       },
       (args) => ipcCall('workspace_write', args),
+    ),
+
+    // ── Workspace Read ──
+    tool('workspace_read',
+      'Read a file from a workspace scope (agent, user, or session). Returns the file content as text.',
+      {
+        scope: z.string().describe('"agent", "user", or "session"'),
+        path: z.string().describe('Relative path within the scope'),
+      },
+      (args) => ipcCall('workspace_read', args),
+    ),
+
+    // ── Workspace List ──
+    tool('workspace_list',
+      'List files in a workspace scope (agent, user, or session). Optionally filter by path prefix.',
+      {
+        scope: z.string().describe('"agent", "user", or "session"'),
+        prefix: z.string().optional().describe('Filter by path prefix'),
+      },
+      (args) => ipcCall('workspace_list', args),
     ),
 
     // ── Workspace Scopes ──

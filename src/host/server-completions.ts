@@ -63,20 +63,16 @@ export interface CompletionDeps {
   ipcHandler?: (raw: string, ctx: import('./ipc-server.js').IPCContext) => Promise<string>;
   /** Extra env vars to inject into sandbox pods (per-turn IPC token, request ID). */
   extraSandboxEnv?: Record<string, string>;
-  /** Promise that resolves with the agent response content (NATS mode).
+  /** Promise that resolves with the agent response content (k8s HTTP mode).
    *  When set, processCompletion waits on this instead of reading stdout. */
   agentResponsePromise?: Promise<string>;
-  /** Callback to publish work payload via NATS (k8s mode).
-   *  If podName is undefined, uses queue group (warm pool) — returns the claiming pod's name.
-   *  If podName is set, publishes to that specific pod (cold start fallback). */
-  publishWork?: (podName: string | undefined, payload: string) => Promise<string>;
   /** Shared credential registry for k8s shared proxy MITM mode.
    *  Per-session credential maps are registered/deregistered here so the
    *  shared proxy can replace placeholders from any active session. */
   sharedCredentialRegistry?: import('./credential-placeholders.js').SharedCredentialRegistry;
   /** Domain allowlist for proxy — populated from installed skill manifests. */
   domainList?: import('./proxy-domain-list.js').ProxyDomainList;
-  /** Callback to start the agent_response timeout timer (NATS mode).
+  /** Callback to start the agent_response timeout timer (k8s HTTP mode).
    *  Called after work is published so the timer doesn't include pre-processing time
    *  (scanner LLM calls, workspace provisioning, etc.). */
   startAgentResponseTimer?: () => void;
@@ -890,8 +886,7 @@ export async function processCompletion(
       sessionId,
       requestId,
       sessionScope: sessionScope ?? 'dm',
-      // Per-turn IPC token for NATS subject scoping (warm pods need this in the payload
-      // since they don't have AX_IPC_TOKEN env var — it's set at pod creation time for cold pods only)
+      // Per-turn IPC token for HTTP IPC authentication
       ipcToken: deps.extraSandboxEnv?.AX_IPC_TOKEN,
       // Web proxy URL — warm pool pods don't have this in their pod spec
       webProxyUrl: deps.extraSandboxEnv?.AX_WEB_PROXY_URL,
@@ -1041,26 +1036,9 @@ export async function processCompletion(
         }
       }
 
-      // Deliver work payload to agent.
-      // NATS mode (k8s): publish to agent.work.{podName} — no stdin.
-      // Stdin mode (subprocess/apple/cold k8s): write to proc.stdin.
-      if (proc.podName && deps.publishWork) {
-        reqLogger.debug('nats_work_publish', { podName: proc.podName, payloadBytes: stdinPayload.length });
-        try {
-          await deps.publishWork(proc.podName, stdinPayload);
-          // Start the agent_response timeout AFTER work is published, not before
-          // processCompletion runs. Pre-processing (scanner LLM calls, workspace
-          // provisioning, CA generation) can take minutes and must not eat into
-          // the agent's execution timeout budget.
-          deps.startAgentResponseTimer?.();
-        } catch (err) {
-          reqLogger.error('nats_work_publish_failed', { podName: proc.podName, error: (err as Error).message });
-          agentSandbox.kill(proc.pid);
-        }
-      } else {
-        // Send raw user message to agent (not the taint-tagged queued.content).
-        // Guard: if the bridge connect failed and we killed the process, stdin
-        // is already closed — writing would throw EPIPE.
+      // Deliver work payload to agent via stdin (subprocess/apple mode).
+      // In k8s HTTP mode, pods fetch work via GET /internal/work instead.
+      if (!deps.agentResponsePromise) {
         try {
           reqLogger.debug('stdin_write', { payloadBytes: stdinPayload.length });
           proc.stdin.write(stdinPayload);
@@ -1068,27 +1046,28 @@ export async function processCompletion(
         } catch {
           // Process already killed (bridge failure) — stdin write throws EPIPE
         }
+      } else {
+        // K8s HTTP mode: start the response timeout timer now
+        deps.startAgentResponseTimer?.();
       }
 
       // Wait for agent to complete.
-      // NATS mode: response comes via agent_response IPC (agentResponsePromise).
+      // K8s HTTP mode: response comes via agent_response IPC (agentResponsePromise).
       // Stdin mode: response comes from stdout.
       let agentResponseReceived = false;
       if (deps.agentResponsePromise) {
-        // In NATS mode, we race the agent_response promise against pod exit.
-        // The stdout/stderr are already closed (dummy streams) for k8s.
+        // In k8s mode, we race the agent_response promise against pod exit.
         try {
           response = await deps.agentResponsePromise;
           agentResponseReceived = true;
-          reqLogger.debug('nats_agent_response_received', { responseLength: response.length });
+          reqLogger.debug('agent_response_received', { responseLength: response.length });
         } catch (err) {
-          reqLogger.warn('nats_agent_response_error', { error: (err as Error).message });
+          reqLogger.warn('agent_response_error', { error: (err as Error).message });
           // Fall through to let exitCode determine retry
         }
 
-        // In NATS/k8s mode, the cold-start pod may never have received work
-        // (a warm pool pod claimed it first via the queue group). Don't block
-        // on proc.exitCode — it would hang until the pod's activeDeadlineSeconds.
+        // In k8s HTTP mode, the pod fetches work via GET /internal/work.
+        // Don't block on proc.exitCode — it would hang until the pod's idle timeout.
         // If we got the response, treat it as success; otherwise let retry logic handle it.
         // NOTE: Use !== undefined (not truthiness) because an empty string ('')
         // is a valid agent response (e.g. agent only made tool calls with no text).

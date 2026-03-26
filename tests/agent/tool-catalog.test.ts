@@ -3,8 +3,8 @@ import { TOOL_CATALOG, TOOL_NAMES, getToolParamKeys, normalizeOrigin, normalizeI
 import type { ToolFilterContext, ToolCategory } from '../../src/agent/tool-catalog.js';
 
 describe('tool-catalog', () => {
-  test('exports exactly 16 tools', () => {
-    expect(TOOL_CATALOG.length).toBe(16);
+  test('exports exactly 18 tools', () => {
+    expect(TOOL_CATALOG.length).toBe(18);
   });
 
   test('TOOL_NAMES matches TOOL_CATALOG names', () => {
@@ -53,7 +53,8 @@ describe('tool-catalog', () => {
   test('contains all expected tool names', () => {
     const expected = [
       'memory', 'web', 'identity', 'scheduler', 'skill', 'request_credential',
-      'workspace_write', 'workspace_mount', 'governance', 'audit', 'agent', 'image',
+      'workspace_write', 'workspace_read', 'workspace_list', 'workspace_mount',
+      'governance', 'audit', 'agent', 'image',
       'bash', 'read_file', 'write_file', 'edit_file',
     ];
     expect(TOOL_NAMES).toEqual(expected);
@@ -66,16 +67,20 @@ describe('tool-catalog', () => {
     expect(spec!.category).toBe('workspace');
   });
 
-  test('skill tool exists in catalog as singleton', () => {
+  test('skill tool exists in catalog with actionMap', () => {
     const skillTool = TOOL_CATALOG.find(t => t.name === 'skill');
     expect(skillTool).toBeDefined();
-    expect(skillTool!.singletonAction).toBe('skill_install');
-    expect(skillTool!.actionMap).toBeUndefined();
+    expect(skillTool!.actionMap).toBeDefined();
+    expect(skillTool!.actionMap!.install).toBe('skill_install');
+    expect(skillTool!.actionMap!.list).toBe('skill_list');
+    expect(skillTool!.actionMap!.read).toBe('skill_read');
+    expect(skillTool!.actionMap!.update).toBe('skill_update');
+    expect(skillTool!.actionMap!.delete).toBe('skill_delete');
   });
 
   test('skill tool has correct param keys', () => {
     const keys = getToolParamKeys('skill');
-    expect(keys.sort()).toEqual(['query', 'slug']);
+    expect(keys.sort()).toEqual(['content', 'path', 'query', 'slug']);
   });
 
   test('request_credential tool exists in catalog as singleton', () => {

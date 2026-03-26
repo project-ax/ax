@@ -166,7 +166,7 @@ describe('IPC MCP Server', () => {
     expect(result.content[0].text).toContain('"ok":true');
   });
 
-  test('all 16 tools are registered without filter', () => {
+  test('all 18 tools are registered without filter', () => {
     const client = createMockClient();
     const server = createIPCMcpServer(client);
     const tools = getTools(server);
@@ -175,7 +175,8 @@ describe('IPC MCP Server', () => {
       'memory', 'web', 'audit', 'identity',
       'scheduler', 'skill', 'request_credential',
       'agent', 'image',
-      'workspace_write', 'workspace_mount', 'governance',
+      'workspace_write', 'workspace_read', 'workspace_list',
+      'workspace_mount', 'governance',
       'bash', 'read_file', 'write_file', 'edit_file',
     ];
 
@@ -183,7 +184,7 @@ describe('IPC MCP Server', () => {
     for (const name of expectedTools) {
       expect(registeredNames, `expected tool "${name}" to be registered`).toContain(name);
     }
-    expect(registeredNames.length).toBe(16);
+    expect(registeredNames.length).toBe(18);
   });
 
   test('filter excludes scheduler and skill when their flags are false', () => {

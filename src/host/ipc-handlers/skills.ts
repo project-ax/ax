@@ -17,7 +17,7 @@ import { generateManifest } from '../../utils/manifest-generator.js';
 import { userSkillsDir } from '../../paths.js';
 import { resolveCredential } from '../credential-scopes.js';
 import { getLogger } from '../../logger.js';
-import { upsertSkill, inferMcpApps } from '../../providers/storage/skills.js';
+import { upsertSkill, getSkill, listSkills, deleteSkill, inferMcpApps } from '../../providers/storage/skills.js';
 import type { DocumentStore } from '../../providers/storage/types.js';
 
 const logger = getLogger().child({ component: 'ipc-skills' });
@@ -115,6 +115,7 @@ export function createSkillsHandlers(providers: ProviderRegistry, opts?: SkillsH
             agentId: agentName,
             version: '1.0.0',
             instructions: skillMd.content,
+            files: pkg.files.map(f => ({ path: f.path, content: f.content })),
             mcpApps,
           });
           logger.info('skill_stored_in_db', { slug, agentId: agentName, mcpApps });
@@ -149,6 +150,85 @@ export function createSkillsHandlers(providers: ProviderRegistry, opts?: SkillsH
         domains: manifest.capabilities.domains,
         installSteps: parsed.install.length,
       };
+    },
+
+    skill_list: async (_req: any, ctx: IPCContext) => {
+      if (!providers.storage?.documents) return { skills: [] };
+      const agentName = ctx.agentId ?? 'main';
+      const skills = await listSkills(providers.storage.documents, agentName);
+      return {
+        skills: skills.map(s => ({
+          id: s.id,
+          name: s.id,
+          version: s.version,
+          fileCount: s.files?.length ?? 1,
+          mcpApps: s.mcpApps,
+          installedAt: s.installedAt,
+        })),
+      };
+    },
+
+    skill_read: async (req: any, ctx: IPCContext) => {
+      if (!providers.storage?.documents) return { ok: false, error: 'No storage provider' };
+      const agentName = ctx.agentId ?? 'main';
+      const skill = await getSkill(providers.storage.documents, agentName, req.slug);
+      if (!skill) return { ok: false, error: 'Skill not found' };
+      return {
+        ok: true,
+        id: skill.id,
+        version: skill.version,
+        instructions: skill.instructions,
+        files: skill.files ?? [{ path: 'SKILL.md', content: skill.instructions }],
+        mcpApps: skill.mcpApps,
+      };
+    },
+
+    skill_update: async (req: any, ctx: IPCContext) => {
+      if (!providers.storage?.documents) return { ok: false, error: 'No storage provider' };
+      const agentName = ctx.agentId ?? 'main';
+      const existing = await getSkill(providers.storage.documents, agentName, req.slug);
+      if (!existing) return { ok: false, error: 'Skill not found' };
+
+      const files = existing.files ?? [{ path: 'SKILL.md', content: existing.instructions }];
+      const idx = files.findIndex(f => f.path === req.path);
+      if (idx >= 0) {
+        files[idx].content = req.content;
+      } else {
+        files.push({ path: req.path, content: req.content });
+      }
+
+      const skillMd = files.find(f => f.path === 'SKILL.md');
+      const instructions = skillMd?.content ?? existing.instructions;
+
+      await upsertSkill(providers.storage.documents, {
+        ...existing,
+        instructions,
+        files,
+      });
+
+      await providers.audit.log({
+        action: 'skill_update',
+        sessionId: ctx.sessionId,
+        args: { slug: req.slug, path: req.path },
+        result: 'success',
+      });
+
+      return { ok: true, updated: req.path };
+    },
+
+    skill_delete: async (req: any, ctx: IPCContext) => {
+      if (!providers.storage?.documents) return { ok: false, error: 'No storage provider' };
+      const agentName = ctx.agentId ?? 'main';
+      const deleted = await deleteSkill(providers.storage.documents, agentName, req.slug);
+
+      await providers.audit.log({
+        action: 'skill_delete',
+        sessionId: ctx.sessionId,
+        args: { slug: req.slug },
+        result: deleted ? 'success' : 'error',
+      });
+
+      return { ok: deleted, slug: req.slug };
     },
 
     audit_query: async (req: any) => {

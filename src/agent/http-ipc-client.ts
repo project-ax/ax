@@ -122,4 +122,45 @@ export class HttpIPCClient implements IIPCClient {
     logger.debug('call_done', { action });
     return result;
   }
+
+  /**
+   * Fetch work payload from host. Returns null if no work pending (404).
+   * Used by session-long pods to receive each turn's payload.
+   */
+  async fetchWork(pollIntervalMs = 2000, maxWaitMs = 0): Promise<string | null> {
+    const url = `${this.hostUrl}/internal/work`;
+    const startTime = Date.now();
+
+    while (true) {
+      try {
+        const res = await fetch(url, {
+          method: 'GET',
+          headers: { 'Authorization': `Bearer ${this.token}` },
+          signal: AbortSignal.timeout(10_000),
+        });
+
+        if (res.ok) {
+          return await res.text();
+        }
+
+        if (res.status === 404) {
+          if (maxWaitMs > 0 && (Date.now() - startTime) < maxWaitMs) {
+            await new Promise(r => setTimeout(r, pollIntervalMs));
+            continue;
+          }
+          return null;
+        }
+
+        logger.warn('fetch_work_error', { status: res.status });
+        return null;
+      } catch (err) {
+        logger.warn('fetch_work_failed', { error: (err as Error).message });
+        if (maxWaitMs > 0 && (Date.now() - startTime) < maxWaitMs) {
+          await new Promise(r => setTimeout(r, pollIntervalMs));
+          continue;
+        }
+        return null;
+      }
+    }
+  }
 }
