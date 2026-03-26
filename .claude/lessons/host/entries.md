@@ -1,5 +1,17 @@
 # Host
 
+### K8s work dispatch requires explicit queueWork wiring
+**Date:** 2026-03-25
+**Context:** The k8s simplification commit implemented session pod manager, GET /internal/work endpoint, and agent work loop in isolation — but never called `sessionPodManager.queueWork()` from the completion pipeline. Sandbox pods polled forever getting 404s.
+**Lesson:** When implementing a producer-consumer pattern across files (server-k8s.ts creates sessionPodManager, server-completions.ts runs the pipeline), verify the handoff is actually wired. Check by grepping for the producer method (`queueWork`) — if it's only called in tests or the manager itself, the integration is missing. For k8s HTTP work dispatch: the `CompletionDeps` interface must include a `queueWork` callback, and it must be called in the k8s branch (where `deps.agentResponsePromise` is set) right before `startAgentResponseTimer`.
+**Tags:** host, k8s, work-dispatch, session-pod-manager, integration-gap
+
+### Session-long pods need session-level auth tokens, not per-turn tokens
+**Date:** 2026-03-25
+**Context:** Session pods were killed after each turn because: (1) work was keyed by per-turn token but pods poll with their original spawn token, (2) `proc.kill()` was called after every response, (3) `process.env.AX_IPC_TOKEN` in the agent was only set once (guarded by `!process.env.AX_IPC_TOKEN`).
+**Lesson:** For session-long pods: use a two-layer token scheme. The pod gets a session-level `authToken` at spawn (stored in `tokenToSession` reverse map) for authenticating work fetch. Each turn creates a fresh `turnToken` for IPC calls, delivered inside the work payload. The agent MUST update `process.env.AX_IPC_TOKEN` unconditionally on each turn. Queue work by sessionId (not token), and `/internal/work` authenticates via `findSessionByToken(bearerToken) → sessionId → claimWork(sessionId)`. Never kill pods that are tracked by the session pod manager.
+**Tags:** host, k8s, session-pod-manager, token, reuse, work-dispatch
+
 ### Proxy domain approval must be synchronous, not blocking
 **Date:** 2026-03-22
 **Context:** The old event-bus domain approval system caused deadlocks: agent blocked on bash (running curl), proxy blocked waiting for agent to approve the domain, agent can't approve because it's blocked. The `extractNetworkDomains` regex approach to pre-approve domains was brittle and failed on complex curl flags.

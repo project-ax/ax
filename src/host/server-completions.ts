@@ -76,6 +76,13 @@ export interface CompletionDeps {
    *  Called after work is published so the timer doesn't include pre-processing time
    *  (scanner LLM calls, workspace provisioning, etc.). */
   startAgentResponseTimer?: () => void;
+  /** Queue a work payload for a session-long pod to fetch via GET /internal/work.
+   *  Called in k8s HTTP mode instead of writing to stdin. Keyed by sessionId. */
+  queueWork?: (sessionId: string, payload: string) => void;
+  /** Check if a session-long pod already exists for this session (k8s HTTP mode). */
+  getSessionPod?: (sessionId: string) => { podName: string; pid: number; kill: () => void } | undefined;
+  /** Register a newly spawned pod for session reuse (k8s HTTP mode). */
+  registerSessionPod?: (sessionId: string, pod: { podName: string; pid: number; kill: () => void }) => void;
 }
 
 export interface ExtractedFile {
@@ -758,12 +765,15 @@ export async function processCompletion(
     // and use the provider's directories (writable). Otherwise fall back to
     // the legacy read-only enterprise paths.
     const hasWorkspaceProvider = config.providers.workspace && config.providers.workspace !== 'none';
+    // Skip host-side workspace pre-mount when sandbox handles provisioning itself
+    // (k8s pods provision via GET /internal/workspace/provision — host mount is a no-op).
+    const shouldPreMount = hasWorkspaceProvider && agentSandbox.workspaceLocation !== 'sandbox';
     let agentWsPath: string | undefined;
     let userWsPath: string | undefined;
     let agentWorkspaceWritable = false;
     let userWorkspaceWritable = false;
 
-    if (hasWorkspaceProvider) {
+    if (shouldPreMount) {
       // Pre-mount agent, user, and session scopes so their directories exist before sandbox spawn.
       // Session scope backs scratch with GCS — in k8s mode, scratch content survives pod restarts.
       try {
@@ -940,17 +950,48 @@ export async function processCompletion(
       stderr = '';
       const attemptStartTime = Date.now();
 
-      eventBus?.emit({
-        type: 'status',
-        requestId,
-        timestamp: Date.now(),
-        data: {
-          operation: 'pod',
-          phase: attempt === 0 ? 'creating' : 'retrying',
-          message: attempt === 0 ? 'Starting sandbox\u2026' : `Retrying sandbox (attempt ${attempt + 1})\u2026`,
-        },
-      });
-      const proc = await agentSandbox.spawn(sandboxConfig);
+      // K8s session-long pods: reuse existing pod if available
+      const existingPod = deps.getSessionPod?.(sessionId);
+      let proc: Awaited<ReturnType<typeof agentSandbox.spawn>>;
+
+      if (existingPod && deps.agentResponsePromise) {
+        // Reuse session pod — skip spawn, just queue work
+        reqLogger.debug('session_pod_reuse', { podName: existingPod.podName, sessionId });
+        // Create a minimal proc wrapper for the existing pod
+        const { PassThrough } = await import('node:stream');
+        const dummyStream = new PassThrough();
+        dummyStream.end();
+        proc = {
+          pid: existingPod.pid,
+          podName: existingPod.podName,
+          exitCode: new Promise<number>(() => {}), // never resolves — session pod stays alive
+          stdout: dummyStream,
+          stderr: new PassThrough().end() as any,
+          stdin: new PassThrough().end() as any,
+          kill: existingPod.kill,
+        };
+      } else {
+        eventBus?.emit({
+          type: 'status',
+          requestId,
+          timestamp: Date.now(),
+          data: {
+            operation: 'pod',
+            phase: attempt === 0 ? 'creating' : 'retrying',
+            message: attempt === 0 ? 'Starting sandbox\u2026' : `Retrying sandbox (attempt ${attempt + 1})\u2026`,
+          },
+        });
+        proc = await agentSandbox.spawn(sandboxConfig);
+
+        // Register newly spawned pod for session reuse
+        if (deps.registerSessionPod && proc.podName) {
+          deps.registerSessionPod(sessionId, {
+            podName: proc.podName,
+            pid: proc.pid,
+            kill: proc.kill,
+          });
+        }
+      }
       reqLogger.debug('agent_spawn', { sandbox: config.providers.sandbox, attempt });
       eventBus?.emit({
         type: 'completion.agent',
@@ -1047,7 +1088,12 @@ export async function processCompletion(
           // Process already killed (bridge failure) — stdin write throws EPIPE
         }
       } else {
-        // K8s HTTP mode: start the response timeout timer now
+        // K8s HTTP mode: queue work for pod to fetch via GET /internal/work
+        if (deps.queueWork) {
+          deps.queueWork(sessionId, stdinPayload);
+          reqLogger.debug('work_queued', { sessionId });
+        }
+        // Start the response timeout timer now
         deps.startAgentResponseTimer?.();
       }
 
@@ -1073,7 +1119,11 @@ export async function processCompletion(
         // is a valid agent response (e.g. agent only made tool calls with no text).
         if (agentResponseReceived) {
           exitCode = 0;
-          proc.kill(); // clean up the idle cold-start pod
+          // Session-long pods stay alive for reuse — idle timeout handles cleanup.
+          // Only kill if session pod manager is not tracking this pod.
+          if (!deps.getSessionPod?.(sessionId)) {
+            proc.kill();
+          }
         } else {
           exitCode = await proc.exitCode;
         }

@@ -13,6 +13,8 @@ export interface SessionPod {
   podName: string;
   pid: number;
   sessionId: string;
+  /** The original IPC token the pod was spawned with — used to authenticate work fetch. */
+  authToken: string;
   /** Last IPC activity timestamp (ms). Reset on every IPC call. */
   lastActivity: number;
   /** Whether the sandbox has made filesystem changes (write/edit/bash). */
@@ -43,7 +45,8 @@ export interface SessionPodManagerOptions {
 
 export function createSessionPodManager(opts: SessionPodManagerOptions) {
   const sessions = new Map<string, SessionPod>();
-  const pendingWork = new Map<string, PendingWork>();  // token → pending work
+  const tokenToSession = new Map<string, string>();     // authToken → sessionId
+  const pendingWork = new Map<string, PendingWork>();   // sessionId → pending work
 
   const cleanTimeout = opts.cleanIdleTimeoutMs ?? opts.idleTimeoutMs;
 
@@ -87,6 +90,7 @@ export function createSessionPodManager(opts: SessionPodManagerOptions) {
     register(sessionId: string, pod: Omit<SessionPod, 'lastActivity' | 'activeTurnToken' | 'dirty'>): void {
       const entry: SessionPod = { ...pod, lastActivity: Date.now(), activeTurnToken: null, dirty: false };
       sessions.set(sessionId, entry);
+      tokenToSession.set(pod.authToken, sessionId);
       resetIdleTimer(sessionId);
       logger.info('session_pod_registered', { sessionId, podName: pod.podName });
     },
@@ -107,6 +111,7 @@ export function createSessionPodManager(opts: SessionPodManagerOptions) {
       if (pod) {
         if (pod.warningTimer) clearTimeout(pod.warningTimer);
         if (pod.killTimer) clearTimeout(pod.killTimer);
+        tokenToSession.delete(pod.authToken);
         sessions.delete(sessionId);
       }
     },
@@ -126,18 +131,23 @@ export function createSessionPodManager(opts: SessionPodManagerOptions) {
       resetIdleTimer(sessionId);
     },
 
-    /** Queue a work payload for a pod to fetch via GET /internal/work. */
-    queueWork(token: string, payload: string): Promise<string> {
+    /** Queue a work payload for a session's pod to fetch via GET /internal/work. */
+    queueWork(sessionId: string, payload: string): Promise<string> {
       return new Promise((resolve, reject) => {
-        pendingWork.set(token, { payload, resolve, reject });
+        pendingWork.set(sessionId, { payload, resolve, reject });
       });
     },
 
-    /** Pod calls this to fetch its work. Returns the payload and removes from queue. */
-    claimWork(token: string): PendingWork | undefined {
-      const work = pendingWork.get(token);
-      if (work) pendingWork.delete(token);
+    /** Pod calls this to fetch its work by session ID. Returns the payload and removes from queue. */
+    claimWork(sessionId: string): PendingWork | undefined {
+      const work = pendingWork.get(sessionId);
+      if (work) pendingWork.delete(sessionId);
       return work;
+    },
+
+    /** Look up session ID from a pod's auth token (used by GET /internal/work). */
+    findSessionByToken(token: string): string | undefined {
+      return tokenToSession.get(token);
     },
 
     /** Get all active sessions (for metrics/debugging). */
@@ -153,6 +163,7 @@ export function createSessionPodManager(opts: SessionPodManagerOptions) {
         pod.kill();
       }
       sessions.clear();
+      tokenToSession.clear();
       for (const [, work] of pendingWork) {
         work.reject(new Error('Session pod manager shutting down'));
       }

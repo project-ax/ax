@@ -409,10 +409,9 @@ function applyPayload(config: AgentConfig, payload: StdinPayload): void {
       token: payload.ipcToken,
     });
   }
-  // IPC token — warm pool pods don't have AX_IPC_TOKEN in their pod spec,
-  // so the host sends it in the payload. Set it in process.env so workspace-release.ts
-  // can use it for direct HTTP release (bypassing the legacy staging path).
-  if (payload.ipcToken && !process.env.AX_IPC_TOKEN) {
+  // IPC token — updated each turn. The host sends a fresh per-turn token in the payload.
+  // Set it in process.env so workspace-release.ts can use it for direct HTTP release.
+  if (payload.ipcToken) {
     process.env.AX_IPC_TOKEN = payload.ipcToken;
   }
 
@@ -532,14 +531,8 @@ if (isMain) {
 
           const payload = parseStdinPayload(data);
           applyPayload(config, payload);
-
-          client.setContext({
-            sessionId: config.sessionId,
-            requestId: config.requestId,
-            userId: config.userId,
-            sessionScope: config.sessionScope,
-            token: process.env.AX_IPC_TOKEN,
-          });
+          // applyPayload already calls client.setContext with the per-turn
+          // token and session context from the payload — no override needed.
 
           await run(config);
         } catch (err) {

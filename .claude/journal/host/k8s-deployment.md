@@ -1,5 +1,21 @@
 # K8s Deployment Journal
 
+## [2026-03-25 19:45] — Fix session-long pod reuse: token keying + per-turn token update
+
+**Task:** Sandbox pods were killed immediately after each turn instead of being reused across turns
+**What I did:** Three fixes: (1) Changed work queue keying from per-turn token to sessionId in session-pod-manager. (2) Added authToken to SessionPod + reverse token→session map so pods authenticate with their original spawn token. (3) Fixed agent runner to update AX_IPC_TOKEN unconditionally from each turn's payload and removed stale env var override in work loop.
+**Files touched:** `src/host/session-pod-manager.ts` (authToken field, tokenToSession map, queueWork/claimWork by sessionId, findSessionByToken), `src/host/server-k8s.ts` (authToken in registerSessionPod, findSessionByToken in /internal/work), `src/host/server-completions.ts` (queueWork by sessionId, skip kill when session pod tracked, pod reuse via getSessionPod/registerSessionPod), `src/agent/runner.ts` (unconditional AX_IPC_TOKEN update, removed stale setContext override)
+**Outcome:** Success — one sandbox pod serves multiple turns, no pod per turn. Turn 2 skips spawn entirely.
+**Notes:** The root cause was a per-turn token mismatch: each turn creates a new turnToken, but the pod keeps polling with its original token. Fix uses session-level auth (original token for authentication) + per-turn tokens (delivered in payload for IPC calls).
+
+## [2026-03-25 19:15] — Fix k8s work dispatch: sessionPodManager.queueWork never called
+
+**Task:** Debug chat UI stuck on "Starting sandbox" in kind-ax cluster
+**What I did:** Traced the HTTP work dispatch flow: host spawns pod, pod polls GET /internal/work, but work was never queued. The session pod manager's `queueWork()` existed but was never wired into the completion pipeline. Added `queueWork` callback to `CompletionDeps`, passed it from `server-k8s.ts`, and called it in the k8s branch of `server-completions.ts` where stdin write is skipped.
+**Files touched:** `src/host/server-completions.ts` (added `queueWork` to `CompletionDeps`, called it in k8s branch), `src/host/server-k8s.ts` (passed `queueWork` via `turnDeps`)
+**Outcome:** Success — pod now fetches work and responds in ~5s
+**Notes:** The simplification commit (c650600) implemented all the pieces (session pod manager, /internal/work endpoint, agent work loop) but missed wiring `queueWork()` into the completion pipeline. The three pieces were implemented in isolation.
+
 ## [2026-03-18 06:00] — Fix PR review: scheduler preProcessed reuse and LLM model precedence
 
 **Task:** Address two code review comments on the k8s-scheduler-and-model-routing PR

@@ -258,6 +258,16 @@ async function main(): Promise<void> {
       },
       ...(agentResponsePromise ? { agentResponsePromise } : {}),
       ...(startAgentResponseTimer ? { startAgentResponseTimer } : {}),
+      ...(isK8s ? {
+        queueWork: (sid: string, payload: string) => { sessionPodManager.queueWork(sid, payload); },
+        getSessionPod: (sid: string) => {
+          const pod = sessionPodManager.get(sid);
+          return pod ? { podName: pod.podName, pid: pod.pid, kill: pod.kill } : undefined;
+        },
+        registerSessionPod: (sid: string, pod: { podName: string; pid: number; kill: () => void }) => {
+          sessionPodManager.register(sid, { podName: pod.podName, pid: pod.pid, sessionId: sid, authToken: turnToken, kill: pod.kill });
+        },
+      } : {}),
     };
 
     const sessionStartTime = Date.now();
@@ -341,7 +351,7 @@ async function main(): Promise<void> {
       return true;
     }
 
-    // Pod work fetch: new pod calls this to get its initial work payload
+    // Pod work fetch: session-long pod polls for work
     if (url === '/internal/work' && req.method === 'GET') {
       const token = req.headers.authorization?.replace('Bearer ', '');
       if (!token) {
@@ -349,7 +359,9 @@ async function main(): Promise<void> {
         res.end(JSON.stringify({ error: 'missing token' }));
         return true;
       }
-      const work = sessionPodManager.claimWork(token);
+      // Authenticate: look up session by the pod's auth token (set at registration)
+      const sid = sessionPodManager.findSessionByToken(token);
+      const work = sid ? sessionPodManager.claimWork(sid) : undefined;
       if (!work) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'no pending work for token' }));
