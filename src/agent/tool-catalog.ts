@@ -241,8 +241,11 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     label: 'Request Credential',
     description:
       'Request a credential (e.g. API key) that a skill or web API call needs.\n' +
-      'The host will prompt the user to provide it. This ends the current turn; you will be\n' +
-      're-invoked with the credential available as an environment variable.',
+      'The host will prompt the user to provide it.\n\n' +
+      'IMPORTANT: If the response shows available=false, you MUST stop immediately.\n' +
+      'Tell the user what credential is needed and why, then end your turn.\n' +
+      'Do NOT attempt to use the skill, call APIs, or run scripts without the credential.\n' +
+      'The credential will be available as an environment variable when you are re-invoked on the next turn.',
     parameters: Type.Object({
       envName: Type.String({
         pattern: '^[A-Z][A-Z0-9_]{1,63}$',
@@ -511,7 +514,7 @@ export function filterTools(ctx: ToolFilterContext): readonly ToolSpec[] {
   return TOOL_CATALOG.filter(spec => {
     switch (spec.category) {
       case 'scheduler':  return ctx.hasHeartbeat;
-      case 'skill':      return ctx.skillInstallEnabled !== false;
+      case 'skill':      return true;  // always available — delete/update shouldn't require install intent
       case 'workspace':        return ctx.hasWorkspaceScopes;
       case 'workspace_scopes': return ctx.hasWorkspaceScopes;
       case 'governance': return ctx.hasGovernance;

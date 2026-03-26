@@ -424,14 +424,15 @@ function applyPayload(config: AgentConfig, payload: StdinPayload): void {
   } else {
     logger.debug('web_proxy_url_absent', { envSet: !!process.env.AX_WEB_PROXY_URL, payloadSet: !!payload.webProxyUrl });
   }
-  // Credential placeholder env vars — warm pool pods don't have these in their pod spec,
-  // so the host sends them in the payload. The MITM proxy replaces placeholders with real
-  // values in intercepted HTTPS traffic.
+  // Credential placeholder env vars — always overwrite, even if already set.
+  // Placeholders rotate per-turn (each turn creates a new CredentialPlaceholderMap
+  // on the host with fresh ax-cred:<random> tokens). On session pods that persist
+  // across turns, the old placeholders become stale — the shared credential
+  // registry on the host only has the new turn's map, so old placeholders
+  // won't be replaced by the MITM proxy.
   if (payload.credentialEnv) {
     for (const [key, value] of Object.entries(payload.credentialEnv)) {
-      if (!process.env[key]) {
-        process.env[key] = value;
-      }
+      process.env[key] = value;
     }
     logger.info('credential_env_set', { count: Object.keys(payload.credentialEnv).length });
   }

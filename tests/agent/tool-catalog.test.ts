@@ -221,15 +221,16 @@ describe('filterTools', () => {
 
   test('all flags false returns only always-on categories', () => {
     const result = filterTools(NO_FLAGS);
-    // scheduler/workspace/governance/skill are excluded when their flags are false
+    // scheduler/workspace/governance are excluded when their flags are false
+    // skill is always included (delete/update shouldn't require install intent)
     const alwaysOn = TOOL_CATALOG.filter(s =>
-      !['scheduler', 'skill', 'workspace', 'workspace_scopes', 'governance'].includes(s.category)
+      !['scheduler', 'workspace', 'workspace_scopes', 'governance'].includes(s.category)
     );
     expect(result.length).toBe(alwaysOn.length);
 
     // Verify excluded categories
     for (const spec of result) {
-      expect(['scheduler', 'skill', 'workspace', 'workspace_scopes', 'governance']).not.toContain(spec.category);
+      expect(['scheduler', 'workspace', 'workspace_scopes', 'governance']).not.toContain(spec.category);
     }
   });
 
@@ -250,9 +251,9 @@ describe('filterTools', () => {
     expect(result.map(s => s.name)).toContain('skill');
   });
 
-  test('skillInstallEnabled=false excludes skill tool but keeps request_credential', () => {
+  test('skill tool always present regardless of skillInstallEnabled flag', () => {
     const result = filterTools({ ...NO_FLAGS, skillInstallEnabled: false });
-    expect(result.map(s => s.name)).not.toContain('skill');
+    expect(result.map(s => s.name)).toContain('skill');
     expect(result.map(s => s.name)).toContain('request_credential');
   });
 

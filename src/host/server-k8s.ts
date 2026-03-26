@@ -171,6 +171,7 @@ async function main(): Promise<void> {
     userId?: string,
     _agentType?: string,
     preProcessed?: { sessionId: string; messageId: string; canaryToken: string },
+    baseDeps?: CompletionDeps,
   ): Promise<{ responseContent: string; finishReason: 'stop' | 'content_filter'; contentBlocks?: import('../types.js').ContentBlock[] }> {
     const turnToken = randomUUID();
     const isK8s = config.providers.sandbox === 'k8s';
@@ -236,7 +237,8 @@ async function main(): Promise<void> {
     const startAgentResponseTimer = isK8s
       ? () => {
           if (agentTimer) return;
-          const agentTimeoutMs = ((config.sandbox?.timeout_sec ?? 600) + 60) * 1000;
+          const effectiveTimeout = baseDeps?.config.sandbox.timeout_sec ?? config.sandbox?.timeout_sec ?? 600;
+          const agentTimeoutMs = (effectiveTimeout + 60) * 1000;
           agentTimer = setTimeout(() => {
             agentResponseReject?.(new Error('agent_response timeout'));
           }, agentTimeoutMs);
@@ -246,7 +248,7 @@ async function main(): Promise<void> {
 
     // Pass per-turn token to sandbox via deps
     const turnDeps: CompletionDeps = {
-      ...completionDeps,
+      ...(baseDeps ?? completionDeps),
       extraSandboxEnv: {
         AX_IPC_TOKEN: turnToken,
         AX_IPC_REQUEST_ID: requestId,
@@ -465,6 +467,9 @@ async function main(): Promise<void> {
     channels: providers.channels,
     scheduler: providers.scheduler,
     runCompletion: async (content, requestId, messages, sessionId, userId, preProcessed) => {
+      const deps = config.scheduler.timeout_sec
+        ? { ...completionDeps, config: { ...config, sandbox: { ...config.sandbox, timeout_sec: config.scheduler.timeout_sec } } }
+        : undefined;
       return processCompletionForSession(
         content, requestId,
         messages as { role: string; content: string | import('../types.js').ContentBlock[] }[],
@@ -472,6 +477,7 @@ async function main(): Promise<void> {
         userId,
         undefined,
         preProcessed,
+        deps,
       );
     },
   });

@@ -218,11 +218,11 @@ describe('ipc-tools', () => {
     expect(names).toContain('agent');
     expect(names).toContain('image');
     expect(names).toContain('request_credential'); // always available
-    expect(names).not.toContain('skill'); // skill install excluded when skillInstallEnabled=false
+    expect(names).toContain('skill'); // always available — delete/update don't require install intent
     expect(names).toContain('bash');
     expect(names).toContain('read_file');
     expect(names).toContain('write_file');
     expect(names).toContain('edit_file');
-    expect(tools.length).toBe(11);
+    expect(tools.length).toBe(12);
   });
 });
