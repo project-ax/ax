@@ -85,7 +85,7 @@ describe('SessionPodManager', () => {
   });
 
   it('queues and claims work', () => {
-    const promise = manager.queueWork('token-1', '{"msg":"hello"}');
+    manager.queueWork('token-1', '{"msg":"hello"}');
     const work = manager.claimWork('token-1');
     expect(work).toBeDefined();
     expect(work!.payload).toBe('{"msg":"hello"}');

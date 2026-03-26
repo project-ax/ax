@@ -8,8 +8,8 @@ import { IPCClient } from './ipc-client.js';
 import { getLogger, truncate } from '../logger.js';
 import type { ContentBlock } from '../types.js';
 import type { IdentityFiles } from './prompt/types.js';
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { join, dirname, resolve, sep } from 'node:path';
 
 const logger = getLogger().child({ component: 'runner' });
 
@@ -475,10 +475,25 @@ function applyPayload(config: AgentConfig, payload: StdinPayload): void {
   // Write skills from DB payload to workspace skills/ directory so
   // installSkillDeps() and buildSystemPrompt()'s loadSkillsMultiDir() find them.
   if (Array.isArray(payload.skills) && payload.skills.length > 0 && config.userWorkspace) {
-    const skillsBase = join(config.userWorkspace, 'skills');
+    const skillsBase = resolve(config.userWorkspace, 'skills');
+    // Prune stale skills from previous turns so deleted skills don't linger on disk
+    if (existsSync(skillsBase)) {
+      rmSync(skillsBase, { recursive: true, force: true });
+    }
     for (const skill of payload.skills) {
+      // SC-SEC-004: Constrain skill writes to the skills root
+      const skillDir = resolve(skillsBase, skill.slug.replace(/[/\\]/g, '_').replace(/\.\./g, '_'));
+      if (!skillDir.startsWith(skillsBase + sep)) {
+        logger.warn('skill_path_traversal_blocked', { slug: skill.slug });
+        continue;
+      }
       for (const file of skill.files) {
-        const filePath = join(skillsBase, skill.slug, file.path);
+        const filePath = resolve(skillDir, file.path);
+        // Containment check: ensure file stays within the skill directory
+        if (!filePath.startsWith(skillDir + sep) && filePath !== skillDir) {
+          logger.warn('skill_file_path_traversal_blocked', { slug: skill.slug, path: file.path });
+          continue;
+        }
         mkdirSync(dirname(filePath), { recursive: true });
         writeFileSync(filePath, file.content, 'utf-8');
       }

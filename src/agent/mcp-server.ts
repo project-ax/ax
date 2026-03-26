@@ -171,11 +171,18 @@ export function createIPCMcpServer(client: IIPCClient, opts?: MCPServerOptions):
         path: z.string().optional().describe('File path within the skill (e.g. "SKILL.md")'),
         content: z.string().optional().describe('New file content'),
       },
-      (args) => {
+      async (args) => {
         const SKILL_ACTIONS: Record<string, string> = {
           install: 'skill_install', update: 'skill_update', delete: 'skill_delete',
         };
         const { type, ...rest } = args;
+        // Validate required params per operation type
+        if (type === 'update' && (!rest.slug || !rest.path || !rest.content)) {
+          return errorResult(new Error('update requires slug, path, and content'));
+        }
+        if (type === 'delete' && !rest.slug) {
+          return errorResult(new Error('delete requires slug'));
+        }
         const params = Object.fromEntries(Object.entries(rest).filter(([_, v]) => v !== undefined));
         return ipcCall(SKILL_ACTIONS[type], params);
       },

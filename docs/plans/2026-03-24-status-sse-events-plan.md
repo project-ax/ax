@@ -345,6 +345,11 @@ git commit -m "feat: display backend status messages in chat UI"
 
 ### Task 6: Backend test — Verify status events are emitted
 
+> **Note (2026-03-26):** These tests validate the event shape contract only — they construct
+> literal status objects rather than driving the actual `eventBus.emit()` call sites in
+> `server-completions.ts`. A future improvement should import and invoke the real completion
+> helpers with a mocked EventBus to prove the emit sites work end-to-end.
+
 **Files:**
 - Create: `tests/host/server-completions-status-events.test.ts`
 
@@ -420,6 +425,10 @@ git commit -m "test: add status event shape tests"
 ---
 
 ### Task 7: Backend test — Verify SSE forwarding of status events
+
+> **Note (2026-03-26):** This test exercises `createEventBus()` pub/sub directly and does not
+> invoke `handleCompletions()` or `sendSSENamedEvent()`. A future improvement should call the
+> actual request handler in `server-request-handlers.ts` to verify SSE forwarding end-to-end.
 
 **Files:**
 - Create: `tests/host/server-request-handlers-status.test.ts`

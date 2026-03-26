@@ -909,7 +909,12 @@ export async function processCompletion(
       agentReadOnly: !agentWorkspaceWritable,
       // Credential placeholders — warm pool pods don't have these in their pod spec,
       // so include them in the payload for the agent to set via process.env.
-      credentialEnv: credentialMap.toEnvMap(),
+      credentialEnv: {
+        ...credentialMap.toEnvMap(),
+        // When web_proxy is off, real credential values must be delivered via payload
+        // since per-turn extraEnv is only applied on spawn (not reused session pods).
+        ...(!config.web_proxy ? credentialEnv : {}),
+      },
       // MITM CA cert — sandbox pods need this to trust the proxy's TLS certs.
       caCert: caCertPem,
     });
@@ -1142,7 +1147,13 @@ export async function processCompletion(
             proc.kill();
           }
         } else {
-          exitCode = await proc.exitCode;
+          // Don't block indefinitely on session pods — they stay alive for reuse,
+          // so proc.exitCode may never resolve. Race against a short timeout.
+          if (deps.getSessionPod?.(sessionId)) {
+            exitCode = 1; // Trigger retry logic
+          } else {
+            exitCode = await proc.exitCode;
+          }
         }
       } else {
         await Promise.all([stdoutDone, stderrDone]);

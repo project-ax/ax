@@ -50,6 +50,22 @@ export function createSessionPodManager(opts: SessionPodManagerOptions) {
 
   const cleanTimeout = opts.cleanIdleTimeoutMs ?? opts.idleTimeoutMs;
 
+  /** Shared teardown: clears timers, rejects pending work, revokes auth token, removes session. */
+  function teardown(sessionId: string): void {
+    const pod = sessions.get(sessionId);
+    if (!pod) return;
+    if (pod.warningTimer) clearTimeout(pod.warningTimer);
+    if (pod.killTimer) clearTimeout(pod.killTimer);
+    // Reject any queued work so callers don't hang
+    const work = pendingWork.get(sessionId);
+    if (work) {
+      work.reject(new Error(`Session ${sessionId} torn down`));
+      pendingWork.delete(sessionId);
+    }
+    tokenToSession.delete(pod.authToken);
+    sessions.delete(sessionId);
+  }
+
   function resetIdleTimer(sessionId: string): void {
     const pod = sessions.get(sessionId);
     if (!pod) return;
@@ -77,7 +93,7 @@ export function createSessionPodManager(opts: SessionPodManagerOptions) {
       pod.killTimer = setTimeout(() => {
         logger.info('session_pod_idle_kill', { sessionId, podName: pod.podName, dirty: pod.dirty });
         pod.kill();
-        sessions.delete(sessionId);
+        teardown(sessionId);
         opts.onKill?.(sessionId, pod);
       }, opts.warningLeadMs);
       if (pod.killTimer.unref) pod.killTimer.unref();
@@ -107,13 +123,7 @@ export function createSessionPodManager(opts: SessionPodManagerOptions) {
 
     /** Remove a session (pod exited or was killed externally). */
     remove(sessionId: string): void {
-      const pod = sessions.get(sessionId);
-      if (pod) {
-        if (pod.warningTimer) clearTimeout(pod.warningTimer);
-        if (pod.killTimer) clearTimeout(pod.killTimer);
-        tokenToSession.delete(pod.authToken);
-        sessions.delete(sessionId);
-      }
+      teardown(sessionId);
     },
 
     /** Record IPC activity — resets the idle timer. */

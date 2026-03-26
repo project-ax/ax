@@ -314,6 +314,12 @@ git commit -m "feat: add Postgres LISTEN/NOTIFY eventbus provider"
 
 ### Task 2: Skill CRUD IPC Actions with Files Field
 
+> **Note (2026-03-26):** This task has been implemented differently than originally planned.
+> The `skill_list`/`skill_read` IPC actions were not added — instead, the existing `skill_install`,
+> `skill_update`, and `skill_delete` handlers in `src/host/ipc-handlers/skills.ts` cover all CRUD.
+> The agent-side `skill` tool in `src/agent/mcp-server.ts` uses a `type` enum (`install`/`update`/`delete`)
+> rather than the multi-op `actionMap` described below. The plan below is retained for historical context only.
+
 **Files:**
 - Modify: `src/providers/storage/skills.ts` (add `files` field to `SkillRecord` + `SkillUpsertInput`)
 - Modify: `src/ipc-schemas.ts:155-160` (add `skill_list`, `skill_read`, `skill_update`, `skill_delete` schemas)

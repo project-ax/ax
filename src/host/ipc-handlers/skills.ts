@@ -121,11 +121,27 @@ export function createSkillsHandlers(providers: ProviderRegistry, opts?: SkillsH
       const skillMd = files.find(f => f.path === 'SKILL.md');
       const instructions = skillMd?.content ?? existing.instructions;
 
+      // Resync derived metadata (mcpApps, domains) after content change
+      const mcpApps = skillMd ? inferMcpApps(skillMd.content) : existing.mcpApps;
       await upsertSkill(providers.storage.documents, {
         ...existing,
         instructions,
         files,
+        mcpApps,
       });
+
+      // Resync proxy allowlist domains from updated SKILL.md
+      if (opts?.domainList && skillMd) {
+        try {
+          const parsed = parseAgentSkill(skillMd.content);
+          const manifest = generateManifest(parsed);
+          if (manifest.capabilities.domains.length > 0) {
+            opts.domainList.addSkillDomains(req.slug, manifest.capabilities.domains);
+          } else {
+            opts.domainList.removeSkillDomains(req.slug);
+          }
+        } catch { /* skip if unparseable */ }
+      }
 
       await providers.audit.log({
         action: 'skill_update',
@@ -141,6 +157,11 @@ export function createSkillsHandlers(providers: ProviderRegistry, opts?: SkillsH
       if (!providers.storage?.documents) return { ok: false, error: 'No storage provider' };
       const agentName = ctx.agentId ?? 'main';
       const deleted = await deleteSkill(providers.storage.documents, agentName, req.slug);
+
+      // Remove skill's domains from proxy allowlist
+      if (deleted && opts?.domainList) {
+        opts.domainList.removeSkillDomains(req.slug);
+      }
 
       await providers.audit.log({
         action: 'skill_delete',
