@@ -338,6 +338,7 @@ export async function createServer(
       agentName,
       channels: providers.channels,
       scheduler: providers.scheduler,
+      isBootstrapMode: () => isAgentBootstrapMode(agentName),
       runCompletion: async (content, requestId, messages, sessionId, userId, preProcessed) => {
         const deps = config.scheduler.timeout_sec
           ? { ...completionDeps, config: { ...config, sandbox: { ...config.sandbox, timeout_sec: config.scheduler.timeout_sec } } }

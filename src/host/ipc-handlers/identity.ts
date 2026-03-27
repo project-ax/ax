@@ -73,8 +73,13 @@ export function createIdentityHandlers(providers: ProviderRegistry, opts: Identi
         return { ok: false, error: `Identity content blocked by scanner: ${scanResult.reason ?? 'policy violation'}` };
       }
 
-      // 1. Check taint — if tainted, queue for approval (except yolo)
-      if (profile !== 'yolo' && taintBudget) {
+      // 1. Check taint — if tainted, queue for approval (except yolo).
+      // During bootstrap, SOUL.md and IDENTITY.md writes bypass the taint gate —
+      // bootstrap cannot complete without these files, creating an unrecoverable
+      // deadlock when all content is external (taint = 100%).
+      const isBootstrapWrite = (req.file === 'SOUL.md' || req.file === 'IDENTITY.md')
+        && !!(await documents.get('identity', `${agentName}/BOOTSTRAP.md`));
+      if (profile !== 'yolo' && taintBudget && !isBootstrapWrite) {
         const check = taintBudget.checkAction(ctx.sessionId, 'identity_write');
         if (!check.allowed) {
           await providers.audit.log({
@@ -86,8 +91,8 @@ export function createIdentityHandlers(providers: ProviderRegistry, opts: Identi
         }
       }
 
-      // 2. Check profile — paranoid always queues
-      if (profile === 'paranoid') {
+      // 2. Check profile — paranoid always queues (bootstrap writes still bypass)
+      if (profile === 'paranoid' && !isBootstrapWrite) {
         await providers.audit.log({
           action: 'identity_write',
           sessionId: ctx.sessionId,
