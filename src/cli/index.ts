@@ -15,6 +15,7 @@ export interface CommandHandlers {
   bootstrap?: (args: string[]) => Promise<void>;
   plugin?: (args: string[]) => Promise<void>;
   k8s?: (args: string[]) => Promise<void>;
+  mcp?: (args: string[]) => Promise<void>;
   help?: () => Promise<void>;
 }
 
@@ -43,6 +44,9 @@ export async function routeCommand(
     case 'k8s':
       if (handlers.k8s) await handlers.k8s(args.slice(1));
       break;
+    case 'mcp':
+      if (handlers.mcp) await handlers.mcp(args.slice(1));
+      break;
     default:
       if (handlers.help) await handlers.help();
       break;
@@ -59,6 +63,7 @@ Usage:
   ax configure           Run configuration wizard
   ax bootstrap [agent]   Reset agent identity and re-run bootstrap
   ax plugin <command>    Manage third-party provider plugins
+  ax mcp <command>       Manage MCP server connections (add/remove/list/test)
   ax k8s init [options]  Generate Helm values and K8s secrets for deployment
 
 Server Options:
@@ -111,7 +116,7 @@ export async function main(): Promise<void> {
     return;
   }
 
-  const knownCommands = new Set(['serve', 'send', 'configure', 'bootstrap', 'plugin', 'k8s', 'help']);
+  const knownCommands = new Set(['serve', 'send', 'configure', 'bootstrap', 'plugin', 'k8s', 'mcp', 'help']);
   let command: string;
   let restArgs: string[];
 
@@ -143,6 +148,10 @@ export async function main(): Promise<void> {
     plugin: async (pluginArgs) => {
       const { runPlugin } = await import('./plugin.js');
       await runPlugin(pluginArgs);
+    },
+    mcp: async (mcpArgs) => {
+      const { runMcp } = await import('./mcp.js');
+      await runMcp(mcpArgs);
     },
     k8s: async (k8sArgs) => {
       const subcommand = k8sArgs[0];
