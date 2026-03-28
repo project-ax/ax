@@ -157,16 +157,6 @@ export interface Config {
     port: number;
     disable_auth?: boolean;
   };
-  /** MCP gateway configuration (Activepieces, etc.). */
-  mcp?: {
-    url: string;
-    healthcheck_interval_ms: number;
-    circuit_breaker: {
-      failure_threshold: number;
-      cooldown_ms: number;
-    };
-    timeout_ms: number;
-  };
   /** Enable HTTP forward proxy for agent outbound HTTP/HTTPS requests. */
   web_proxy?: boolean;
   /** Domains that bypass MITM TLS inspection (cert-pinning CLIs). */
