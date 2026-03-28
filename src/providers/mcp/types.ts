@@ -29,7 +29,7 @@ export interface McpCredentialStatus {
 }
 
 export interface McpProvider {
-  listTools(filter?: { apps?: string[]; query?: string }): Promise<McpToolSchema[]>;
+  listTools(filter?: { apps?: string[]; query?: string; agentId?: string }): Promise<McpToolSchema[]>;
   callTool(call: McpToolCall): Promise<McpToolResult>;
   credentialStatus(agentId: string, app: string): Promise<McpCredentialStatus>;
   storeCredential(agentId: string, app: string, value: string): Promise<void>;
