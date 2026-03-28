@@ -108,9 +108,14 @@ export async function loadProviders(config: Config, opts?: LoadProvidersOptions)
   });
 
   // Load MCP provider if configured (optional — fast path only)
-  const mcp = config.providers.mcp
-    ? await loadProvider('mcp', config.providers.mcp, config)
-    : undefined;
+  let mcp;
+  if (config.providers.mcp === 'database') {
+    const mcpModPath = resolveProviderPath('mcp', 'database');
+    const mcpMod = await import(mcpModPath);
+    mcp = await mcpMod.create(config, 'database', { database, credentials });
+  } else if (config.providers.mcp) {
+    mcp = await loadProvider('mcp', config.providers.mcp, config);
+  }
 
   const registry: ProviderRegistry = {
     llm:         tracedLlm,
