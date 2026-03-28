@@ -468,6 +468,78 @@ async function handleAdminAPI(
     return;
   }
 
+  // ── MCP Server Management ──
+
+  // GET /admin/api/agents/:id/mcp-servers
+  const mcpListMatch = pathname.match(/^\/admin\/api\/agents\/([^/]+)\/mcp-servers$/);
+  if (mcpListMatch && method === 'GET') {
+    const id = decodeURIComponent(mcpListMatch[1]);
+    if (!providers.database) { sendError(res, 500, 'Database not configured'); return; }
+    const { listMcpServers } = await import('../providers/mcp/database.js');
+    const servers = await listMcpServers(providers.database.db, id);
+    sendJSON(res, servers);
+    return;
+  }
+
+  // POST /admin/api/agents/:id/mcp-servers
+  if (mcpListMatch && method === 'POST') {
+    const id = decodeURIComponent(mcpListMatch[1]);
+    if (!providers.database) { sendError(res, 500, 'Database not configured'); return; }
+    try {
+      const body = JSON.parse(await readBody(req));
+      const { name, url, headers } = body;
+      if (!name || !url) { sendError(res, 400, 'Missing required fields: name, url'); return; }
+      const { addMcpServer } = await import('../providers/mcp/database.js');
+      const server = await addMcpServer(providers.database.db, id, name, url, headers);
+      sendJSON(res, server, 201);
+    } catch (err) {
+      sendError(res, 400, `Invalid request: ${(err as Error).message}`);
+    }
+    return;
+  }
+
+  // DELETE /admin/api/agents/:id/mcp-servers/:name
+  const mcpDeleteMatch = pathname.match(/^\/admin\/api\/agents\/([^/]+)\/mcp-servers\/([^/]+)$/);
+  if (mcpDeleteMatch && method === 'DELETE') {
+    const id = decodeURIComponent(mcpDeleteMatch[1]);
+    const name = decodeURIComponent(mcpDeleteMatch[2]);
+    if (!providers.database) { sendError(res, 500, 'Database not configured'); return; }
+    const { removeMcpServer } = await import('../providers/mcp/database.js');
+    const removed = await removeMcpServer(providers.database.db, id, name);
+    if (!removed) { sendError(res, 404, 'MCP server not found'); return; }
+    sendJSON(res, { ok: true });
+    return;
+  }
+
+  // PUT /admin/api/agents/:id/mcp-servers/:name
+  if (mcpDeleteMatch && method === 'PUT') {
+    const id = decodeURIComponent(mcpDeleteMatch[1]);
+    const name = decodeURIComponent(mcpDeleteMatch[2]);
+    if (!providers.database) { sendError(res, 500, 'Database not configured'); return; }
+    try {
+      const body = JSON.parse(await readBody(req));
+      const { updateMcpServer } = await import('../providers/mcp/database.js');
+      const updated = await updateMcpServer(providers.database.db, id, name, body);
+      if (!updated) { sendError(res, 404, 'MCP server not found'); return; }
+      sendJSON(res, { ok: true });
+    } catch (err) {
+      sendError(res, 400, `Invalid request: ${(err as Error).message}`);
+    }
+    return;
+  }
+
+  // POST /admin/api/agents/:id/mcp-servers/:name/test
+  const mcpTestMatch = pathname.match(/^\/admin\/api\/agents\/([^/]+)\/mcp-servers\/([^/]+)\/test$/);
+  if (mcpTestMatch && method === 'POST') {
+    const id = decodeURIComponent(mcpTestMatch[1]);
+    const name = decodeURIComponent(mcpTestMatch[2]);
+    if (!providers.database) { sendError(res, 500, 'Database not configured'); return; }
+    const { testMcpServer } = await import('../providers/mcp/database.js');
+    const result = await testMcpServer(providers.database.db, id, name, providers.credentials);
+    sendJSON(res, result);
+    return;
+  }
+
   // GET /admin/api/events — SSE stream
   if (pathname.startsWith('/admin/api/events') && method === 'GET') {
     handleAdminSSE(req, res, deps);
