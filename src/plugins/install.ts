@@ -2,6 +2,7 @@ import type { DocumentStore } from '../providers/storage/types.js';
 import type { McpConnectionManager } from './mcp-manager.js';
 import type { AuditProvider } from '../providers/audit/types.js';
 import type { ProxyDomainList } from '../host/proxy-domain-list.js';
+import type { DatabaseProvider } from '../providers/database/types.js';
 import { parsePluginSource, fetchPluginFiles } from './fetcher.js';
 import { parsePluginBundle } from './parser.js';
 import { upsertPlugin, deletePlugin, getPlugin } from './store.js';
@@ -20,6 +21,8 @@ export interface InstallPluginInput {
   audit?: AuditProvider;
   domainList?: ProxyDomainList;
   sessionId?: string;
+  /** Database provider — used to persist MCP servers globally. */
+  database?: DatabaseProvider;
 }
 
 export interface InstallPluginResult {
@@ -104,9 +107,22 @@ export async function installPlugin(input: InstallPluginInput): Promise<InstallP
     });
   }
 
-  // 5. Register MCP servers (live -- no restart needed)
+  // 5. Register MCP servers globally (live + persisted to DB + assigned to agent)
   for (const server of bundle.mcpServers) {
     mcpManager.addServer(agentId, server, pluginName);
+    if (input.database) {
+      try {
+        const { addGlobalMcpServer, assignServerToAgent } = await import('../providers/mcp/database.js');
+        await addGlobalMcpServer(input.database.db, server.name, server.url);
+        await assignServerToAgent(input.database.db, agentId, server.name);
+      } catch {
+        // Server may already exist (e.g. reinstall) — just ensure assignment
+        try {
+          const { assignServerToAgent } = await import('../providers/mcp/database.js');
+          await assignServerToAgent(input.database.db, agentId, server.name);
+        } catch { /* ignore */ }
+      }
+    }
   }
 
   // 6. Add MCP server domains to proxy allowlist
@@ -167,6 +183,8 @@ export async function uninstallPlugin(input: {
   audit?: AuditProvider;
   domainList?: ProxyDomainList;
   sessionId?: string;
+  /** Database provider — used to remove persisted MCP servers. */
+  database?: DatabaseProvider;
 }): Promise<{ ok: boolean; reason?: string }> {
   const { pluginName, agentId, documents, mcpManager } = input;
 
@@ -187,8 +205,14 @@ export async function uninstallPlugin(input: {
   // Remove commands
   await deleteCommandsByPlugin(documents, agentId, pluginName);
 
-  // Remove MCP servers
+  // Remove MCP servers from manager and database
   mcpManager.removeServersByPlugin(agentId, pluginName);
+  if (input.database && existing.mcpServers) {
+    const { removeGlobalMcpServer } = await import('../providers/mcp/database.js');
+    for (const server of existing.mcpServers) {
+      try { await removeGlobalMcpServer(input.database.db, server.name); } catch { /* ignore */ }
+    }
+  }
 
   // Remove proxy domains
   if (input.domainList) {

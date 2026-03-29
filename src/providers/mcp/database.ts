@@ -14,7 +14,6 @@ import type { CredentialProvider } from '../credentials/types.js';
 
 interface McpServerRow {
   id: string;
-  agent_id: string;
   name: string;
   url: string;
   headers: string | null;
@@ -288,21 +287,27 @@ class DatabaseMcpProvider implements McpProvider {
 }
 
 // ---------------------------------------------------------------------------
-// CRUD helpers (exported for CLI/admin)
+// Global MCP Server CRUD
 // ---------------------------------------------------------------------------
 
-async function getEnabledServers(db: Kysely<any>, agentId: string): Promise<McpServerRow[]> {
+async function getEnabledServers(db: Kysely<any>, _agentId: string): Promise<McpServerRow[]> {
   return db
     .selectFrom('mcp_servers')
     .selectAll()
-    .where('agent_id', '=', agentId)
     .where('enabled', '=', 1)
     .execute() as Promise<McpServerRow[]>;
 }
 
-export async function addMcpServer(
+export async function listAllMcpServers(db: Kysely<any>): Promise<McpServerRow[]> {
+  return db
+    .selectFrom('mcp_servers')
+    .selectAll()
+    .orderBy('name')
+    .execute() as Promise<McpServerRow[]>;
+}
+
+export async function addGlobalMcpServer(
   db: Kysely<any>,
-  agentId: string,
   name: string,
   url: string,
   headers?: Record<string, string>,
@@ -313,7 +318,6 @@ export async function addMcpServer(
     .insertInto('mcp_servers')
     .values({
       id,
-      agent_id: agentId,
       name,
       url,
       headers: headers ? JSON.stringify(headers) : null,
@@ -322,30 +326,21 @@ export async function addMcpServer(
       updated_at: now,
     })
     .execute();
-  return { id, agent_id: agentId, name, url, headers: headers ? JSON.stringify(headers) : null, enabled: 1, created_at: now, updated_at: now };
+  return { id, name, url, headers: headers ? JSON.stringify(headers) : null, enabled: 1, created_at: now, updated_at: now };
 }
 
-export async function removeMcpServer(db: Kysely<any>, agentId: string, name: string): Promise<boolean> {
+export async function removeGlobalMcpServer(db: Kysely<any>, name: string): Promise<boolean> {
+  // Also remove agent assignments
+  try { await db.deleteFrom('agent_mcp_servers').where('server_name', '=', name).execute(); } catch { /* table may not exist yet */ }
   const result = await db
     .deleteFrom('mcp_servers')
-    .where('agent_id', '=', agentId)
     .where('name', '=', name)
     .executeTakeFirst();
   return (result?.numDeletedRows ?? 0n) > 0n;
 }
 
-export async function listMcpServers(db: Kysely<any>, agentId: string): Promise<McpServerRow[]> {
-  return db
-    .selectFrom('mcp_servers')
-    .selectAll()
-    .where('agent_id', '=', agentId)
-    .orderBy('name')
-    .execute() as Promise<McpServerRow[]>;
-}
-
-export async function updateMcpServer(
+export async function updateGlobalMcpServer(
   db: Kysely<any>,
-  agentId: string,
   name: string,
   updates: { url?: string; headers?: Record<string, string>; enabled?: boolean },
 ): Promise<boolean> {
@@ -357,22 +352,19 @@ export async function updateMcpServer(
   const result = await db
     .updateTable('mcp_servers')
     .set(set)
-    .where('agent_id', '=', agentId)
     .where('name', '=', name)
     .executeTakeFirst();
   return (result?.numUpdatedRows ?? 0n) > 0n;
 }
 
-export async function testMcpServer(
+export async function testGlobalMcpServer(
   db: Kysely<any>,
-  agentId: string,
   name: string,
   credentials: CredentialProvider,
 ): Promise<{ ok: boolean; tools?: McpToolSchema[]; error?: string }> {
   const rows = await db
     .selectFrom('mcp_servers')
     .selectAll()
-    .where('agent_id', '=', agentId)
     .where('name', '=', name)
     .execute() as McpServerRow[];
 
@@ -387,6 +379,65 @@ export async function testMcpServer(
     return { ok: false, error: (err as Error).message };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Agent ↔ MCP Server assignment
+// ---------------------------------------------------------------------------
+
+/** Assign a global MCP server to an agent. */
+export async function assignServerToAgent(db: Kysely<any>, agentId: string, serverName: string): Promise<void> {
+  try {
+    await db
+      .insertInto('agent_mcp_servers')
+      .values({ agent_id: agentId, server_name: serverName })
+      .execute();
+  } catch {
+    // Already assigned (unique constraint) — that's fine
+  }
+}
+
+/** Remove an agent's assignment to an MCP server. */
+export async function unassignServerFromAgent(db: Kysely<any>, agentId: string, serverName: string): Promise<boolean> {
+  const result = await db
+    .deleteFrom('agent_mcp_servers')
+    .where('agent_id', '=', agentId)
+    .where('server_name', '=', serverName)
+    .executeTakeFirst();
+  return (result?.numDeletedRows ?? 0n) > 0n;
+}
+
+/** List MCP server names assigned to an agent. */
+export async function listAgentServerNames(db: Kysely<any>, agentId: string): Promise<string[]> {
+  const rows = await db
+    .selectFrom('agent_mcp_servers')
+    .select('server_name')
+    .where('agent_id', '=', agentId)
+    .execute() as Array<{ server_name: string }>;
+  return rows.map(r => r.server_name);
+}
+
+/** List full MCP server records assigned to an agent. */
+export async function listAgentServers(db: Kysely<any>, agentId: string): Promise<McpServerRow[]> {
+  return db
+    .selectFrom('mcp_servers')
+    .innerJoin('agent_mcp_servers', 'mcp_servers.name', 'agent_mcp_servers.server_name')
+    .selectAll('mcp_servers')
+    .where('agent_mcp_servers.agent_id', '=', agentId)
+    .where('mcp_servers.enabled', '=', 1)
+    .execute() as Promise<McpServerRow[]>;
+}
+
+// Legacy compat wrappers (used by CLI, old admin routes)
+/** @deprecated Use addGlobalMcpServer */
+export const addMcpServer = (_db: Kysely<any>, _agentId: string, name: string, url: string, headers?: Record<string, string>) => addGlobalMcpServer(_db, name, url, headers);
+/** @deprecated Use removeGlobalMcpServer */
+export const removeMcpServer = (_db: Kysely<any>, _agentId: string, name: string) => removeGlobalMcpServer(_db, name);
+/** @deprecated Use listAllMcpServers */
+export const listMcpServers = (_db: Kysely<any>, _agentId: string) => listAllMcpServers(_db);
+/** @deprecated Use updateGlobalMcpServer */
+export const updateMcpServer = (_db: Kysely<any>, _agentId: string, name: string, updates: { url?: string; headers?: Record<string, string>; enabled?: boolean }) => updateGlobalMcpServer(_db, name, updates);
+/** @deprecated Use testGlobalMcpServer */
+export const testMcpServer = (_db: Kysely<any>, _agentId: string, name: string, credentials: CredentialProvider) => testGlobalMcpServer(_db, name, credentials);
 
 // ---------------------------------------------------------------------------
 // Factory

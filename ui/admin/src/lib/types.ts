@@ -112,6 +112,7 @@ export interface MemoryEntryView {
 /** Setup status response. */
 export interface SetupStatus {
   configured: boolean;
+  auth_disabled?: boolean;
 }
 
 /** Setup configuration request. */
@@ -124,4 +125,34 @@ export interface SetupRequest {
 /** Setup configuration response. */
 export interface SetupResponse {
   token: string;
+}
+
+/** MCP server record. */
+export interface McpServer {
+  id: string;
+  name: string;
+  url: string;
+  headers: string | null;
+  enabled: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Installed plugin record from admin API. */
+export interface InstalledPlugin {
+  name: string;
+  version: string;
+  description: string;
+  source: string;
+  skills: number;
+  commands: number;
+  mcpServers: string[];
+  installedAt: string;
+}
+
+/** MCP server test result. */
+export interface McpTestResult {
+  ok: boolean;
+  tools?: Array<{ name: string; description?: string }>;
+  error?: string;
 }
