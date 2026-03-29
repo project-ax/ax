@@ -277,6 +277,9 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     workspaceMap,
     requestedCredentials,
     domainList,
+    toolBatchProvider: providers.mcp
+      ? () => providers.mcp!
+      : undefined,
   });
   completionDeps.ipcHandler = handleIPC;
 

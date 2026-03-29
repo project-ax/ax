@@ -442,6 +442,16 @@ export const SandboxResultSchema = ipcAction('sandbox_result', {
   error: safeString(10_000).optional(),
 });
 
+// ── Tool Batch (scripted tool execution) ────────────
+
+export const ToolBatchSchema = ipcAction('tool_batch', {
+  /** Ordered tool calls. Args may contain { __batchRef, path } for dependent pipelining. */
+  calls: z.array(z.object({
+    tool: safeString(200),
+    args: z.record(z.string(), z.unknown()),
+  })),
+});
+
 // ── Plugin Management ────────────────────────────────
 
 export const PluginListSchema = ipcAction('plugin_list', {});
