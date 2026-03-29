@@ -254,4 +254,77 @@ describe('openai provider integration', () => {
     expect(doneChunk).toBeDefined();
     expect(doneChunk!.usage).toEqual({ inputTokens: 15, outputTokens: 10 });
   });
+
+  test('yields tool calls with non-standard finish_reason (e.g. Gemini STOP)', async () => {
+    // Gemini via OpenRouter may use "STOP" instead of "tool_calls"
+    const sseChunks = [
+      JSON.stringify({
+        id: 'chatcmpl-test',
+        object: 'chat.completion.chunk',
+        choices: [{
+          index: 0,
+          delta: {
+            role: 'assistant',
+            tool_calls: [{
+              index: 0,
+              id: 'call_gem1',
+              type: 'function',
+              function: { name: 'identity', arguments: '' },
+            }],
+          },
+          finish_reason: null,
+        }],
+      }),
+      JSON.stringify({
+        id: 'chatcmpl-test',
+        object: 'chat.completion.chunk',
+        choices: [{
+          index: 0,
+          delta: {
+            tool_calls: [{
+              index: 0,
+              function: { arguments: '{"file":"SOUL.md","content":"# Soul"}' },
+            }],
+          },
+          finish_reason: null,
+        }],
+      }),
+      // Non-standard finish_reason from Gemini
+      JSON.stringify({
+        id: 'chatcmpl-test',
+        object: 'chat.completion.chunk',
+        choices: [{ index: 0, delta: {}, finish_reason: 'STOP' }],
+        usage: { prompt_tokens: 20, completion_tokens: 15, total_tokens: 35 },
+      }),
+      '[DONE]',
+    ];
+
+    server = await startMockServer(PORT, (_req, _body, res) => {
+      writeSSE(res, sseChunks);
+    });
+
+    const provider = await create(config, 'groq');
+    const chunks: ChatChunk[] = [];
+
+    for await (const chunk of provider.chat({
+      model: 'test-model',
+      messages: [{ role: 'user', content: 'Set up identity' }],
+      tools: [{
+        name: 'identity',
+        description: 'Write identity file',
+        parameters: { type: 'object', properties: { file: { type: 'string' }, content: { type: 'string' } } },
+      }],
+    })) {
+      chunks.push(chunk);
+    }
+
+    // Tool call must be yielded despite non-standard finish_reason
+    const toolChunks = chunks.filter(c => c.type === 'tool_use');
+    expect(toolChunks).toHaveLength(1);
+    expect(toolChunks[0].toolCall).toEqual({
+      id: 'call_gem1',
+      name: 'identity',
+      args: { file: 'SOUL.md', content: '# Soul' },
+    });
+  });
 });

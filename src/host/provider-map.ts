@@ -94,8 +94,8 @@ const _PROVIDER_MAP = {
     gcs:   '../providers/workspace/gcs.js',
   },
   mcp: {
-    none:         '../providers/mcp/none.js',
-    activepieces: '../providers/mcp/activepieces.js',
+    none:     '../providers/mcp/none.js',
+    database: '../providers/mcp/database.js',
   },
 } as const;
 

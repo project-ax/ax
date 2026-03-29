@@ -4,6 +4,7 @@ Category-based organization of all journal entries. Total: 120 entries across 10
 
 ## Entries
 
+- 2026-03-27 06:25 — Fix bootstrap deadlock: taint gate, scheduler skip, and tool_calls_dropped [host/server.md](host/server.md)
 - 2026-03-26 07:45 — Fix proxy domain allowlist not loading DB-stored skill domains on startup [host/server.md](host/server.md)
 - 2026-03-24 12:55 — Fix CI: bump pi-ai to match pi-agent-core/pi-coding-agent [refactoring/cleanup.md](refactoring/cleanup.md)
 - 2026-03-22 16:30 — Fix agent_response timeout race in k8s NATS mode [host/server-k8s.md](host/server-k8s.md)

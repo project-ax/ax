@@ -166,7 +166,7 @@ async function discoverTools(
   if (!mcp || installedApps.length === 0) return [];
 
   const hinted = extractAppHints(userMessage, installedApps);
-  const filter = hinted.length > 0 ? { apps: hinted } : { apps: installedApps };
+  const filter = hinted.length > 0 ? { apps: hinted, agentId } : { apps: installedApps, agentId };
 
   return mcp.listTools(filter);
 }

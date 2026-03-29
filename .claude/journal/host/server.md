@@ -2,6 +2,18 @@
 
 Server core, completions pipeline, file handling, bootstrap, admin gate, session management.
 
+## [2026-03-27 06:25] — Fix bootstrap deadlock: taint gate, scheduler skip, and tool_calls_dropped
+
+**Task:** Debug why agent keeps re-bootstrapping in kind cluster — bootstrap never completes
+**What I did:**
+1. Traced full data flow: chat-UI → host → IPC → identity handler → DocumentStore
+2. Found 3 bugs: (a) taint gate blocks identity writes during bootstrap (100% taint from external messages), (b) scheduler triggers bootstrap sessions with userId "default" that fails admin gate, (c) openai.ts drops tool calls with non-standard finish_reason
+3. Fixed taint gate to bypass during bootstrap (check BOOTSTRAP.md in DocumentStore), added scheduler skip during bootstrap, broadened finish_reason handling in openai.ts
+4. Added 3 tests covering bootstrap taint bypass, non-bootstrap taint enforcement, and non-standard finish_reason tool call yielding
+**Files touched:** src/host/ipc-handlers/identity.ts, src/host/server-request-handlers.ts, src/host/server-k8s.ts, src/host/server-local.ts, src/providers/llm/openai.ts, tests/host/ipc-server.test.ts, tests/providers/llm/openai-integration.test.ts
+**Outcome:** Success — bootstrap completes in kind cluster, SOUL.md + IDENTITY.md written, BOOTSTRAP.md deleted, scheduler runs normally
+**Notes:** Root cause was a deadlock: bootstrap requires SOUL.md+IDENTITY.md writes → taint gate queues them (100% external) → bootstrap never completes → agent stuck forever. Systematic debugging with audit_log + pod logs was essential.
+
 ## [2026-03-26 07:45] — Fix proxy domain allowlist not loading DB-stored skill domains on startup
 
 **Task:** Debug why "check my active linear issues" fails with 403 Forbidden from the web proxy in the kind cluster

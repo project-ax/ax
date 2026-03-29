@@ -329,6 +329,7 @@ export interface SchedulerCallbackOpts {
   agentName: string;
   channels: ProviderRegistry['channels'];
   scheduler: ProviderRegistry['scheduler'];
+  isBootstrapMode?: () => boolean;
   runCompletion: (
     content: string,
     requestId: string,
@@ -343,6 +344,17 @@ export function createSchedulerCallback(opts: SchedulerCallbackOpts): (msg: Inbo
   const { config, router, sessionCanaries, sessionStore, agentName, channels, scheduler } = opts;
 
   return async (msg: InboundMessage) => {
+    // Skip scheduler sessions when agent hasn't completed bootstrap —
+    // an unbootstrapped agent can't handle tasks, and scheduler sessions
+    // use a system userId that fails the admin gate for identity writes.
+    // Intentionally dropped (not deferred): cron will fire again on its
+    // next interval once bootstrap completes, and heartbeat ticks carry
+    // no unique payload worth replaying.
+    if (opts.isBootstrapMode?.()) {
+      logger.info('scheduler_skip_bootstrap', { sender: msg.sender });
+      return;
+    }
+
     const result = await router.processInbound(msg);
     if (!result.queued) return;
 

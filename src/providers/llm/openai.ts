@@ -205,8 +205,10 @@ export async function create(config: Config, providerName?: string): Promise<LLM
           });
         }
 
-        // When the stream signals stop, yield accumulated tool calls
-        if (choice.finish_reason === 'tool_calls' || choice.finish_reason === 'stop') {
+        // When the stream signals any finish_reason, yield accumulated tool calls.
+        // Different providers use different values (OpenAI: "tool_calls"/"stop",
+        // Gemini: "STOP", Anthropic: "end_turn"/"tool_use"), so accept any non-null value.
+        if (choice.finish_reason && toolCalls.size > 0) {
           for (const [, tc] of toolCalls) {
             if (tc.id && tc.name) {
               let parsedArgs: Record<string, unknown> = {};

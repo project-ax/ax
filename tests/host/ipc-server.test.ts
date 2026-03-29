@@ -550,6 +550,63 @@ describe('unified identity_write', () => {
     else delete process.env.AX_HOME;
   });
 
+  test('bypasses taint gate during bootstrap for SOUL.md/IDENTITY.md', async () => {
+    const documents = createMockDocumentStore();
+    // Seed BOOTSTRAP.md to indicate bootstrap is active
+    await documents.put('identity', 'main/BOOTSTRAP.md', '# Bootstrap');
+
+    const taintBudget = new TaintBudget({ threshold: 0.30 });
+    // Session is 100% tainted — would normally block
+    taintBudget.recordContent('test-session', 'external user message', true);
+
+    const handle = createIPCHandler(mockRegistry(documents), {
+      profile: 'balanced',
+      taintBudget,
+    });
+
+    // SOUL.md should bypass taint during bootstrap
+    const soulResult = JSON.parse(await handle(JSON.stringify({
+      action: 'identity_write',
+      file: 'SOUL.md',
+      content: '# Soul\nI am curious.',
+      reason: 'Bootstrap initialization',
+      origin: 'user_request',
+    }), { sessionId: 'test-session', agentId: 'test' }));
+    expect(soulResult.applied).toBe(true);
+
+    // IDENTITY.md should also bypass taint during bootstrap
+    const idResult = JSON.parse(await handle(JSON.stringify({
+      action: 'identity_write',
+      file: 'IDENTITY.md',
+      content: '# Identity\nName: Atlas',
+      reason: 'Bootstrap initialization',
+      origin: 'user_request',
+    }), { sessionId: 'test-session', agentId: 'test' }));
+    expect(idResult.applied).toBe(true);
+  });
+
+  test('does not bypass taint gate for non-bootstrap SOUL.md writes', async () => {
+    const documents = createMockDocumentStore();
+    // No BOOTSTRAP.md — bootstrap is complete
+    const taintBudget = new TaintBudget({ threshold: 0.30 });
+    taintBudget.recordContent('test-session', 'external content', true);
+
+    const handle = createIPCHandler(mockRegistry(documents), {
+      profile: 'balanced',
+      taintBudget,
+    });
+
+    const result = JSON.parse(await handle(JSON.stringify({
+      action: 'identity_write',
+      file: 'SOUL.md',
+      content: '# Soul\nModified by external input.',
+      reason: 'Learned from email',
+      origin: 'agent_initiated',
+    }), { sessionId: 'test-session', agentId: 'test' }));
+    expect(result.queued).toBe(true);
+    expect(result.applied).toBeUndefined();
+  });
+
   test('audits the mutation with file and reason', async () => {
     const auditEntries: any[] = [];
     const registry = mockRegistry();
