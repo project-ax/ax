@@ -202,7 +202,7 @@ describe('tool-catalog <-> IPC schemas sync', () => {
       'workspace_release',
       // Session lifecycle (host → pod push notification)
       'session_expiring',
-      // Tool batch (scripted tool execution with $ref pipelining, not agent-facing tool)
+      // Tool batch (scripted tool execution with __batchRef pipelining, not agent-facing tool)
       'tool_batch',
     ]);
 

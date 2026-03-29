@@ -2,7 +2,7 @@
  * IPC handler for batched tool execution with dependency pipelining.
  *
  * The agent sends an ordered array of tool calls. Each call's args may
- * contain { $ref: N, path: "[0].id" } references to prior results.
+ * contain { __batchRef: N, path: "[0].id" } references to prior results.
  * The host executes calls in order, substituting refs with real values.
  *
  * One IPC round trip for N tool calls, including dependent chains.
@@ -15,7 +15,7 @@ import { getLogger } from '../../logger.js';
 const logger = getLogger().child({ component: 'tool-batch' });
 
 // ---------------------------------------------------------------------------
-// $ref resolution
+// __batchRef resolution
 // ---------------------------------------------------------------------------
 
 /**
@@ -38,12 +38,19 @@ function evaluatePath(value: unknown, path: string): unknown {
 }
 
 /**
- * Deep-resolve { $ref, path } markers in args using prior results.
+ * Deep-resolve { __batchRef, path } markers in args using prior results.
  */
 function resolveRefs(value: unknown, results: unknown[]): unknown {
-  if (value && typeof value === 'object' && '$ref' in (value as any)) {
-    const ref = value as { $ref: number; path?: string };
-    const resolved = results[ref.$ref];
+  if (value && typeof value === 'object' && '__batchRef' in (value as any)) {
+    const ref = value as { __batchRef: number; path?: string };
+    const idx = ref.__batchRef;
+    if (idx < 0 || idx >= results.length) {
+      throw new Error(`Batch ref index ${idx} out of range (${results.length} results available)`);
+    }
+    const resolved = results[idx];
+    if (resolved && typeof resolved === 'object' && 'ok' in (resolved as any) && !(resolved as any).ok) {
+      throw new Error(`Batch ref index ${idx} references a failed call`);
+    }
     return ref.path ? evaluatePath(resolved, ref.path) : resolved;
   }
   if (Array.isArray(value)) {
@@ -103,12 +110,12 @@ export function createToolBatchHandlers(
           });
 
           if (result.isError) {
-            results.push({ $error: typeof result.content === 'string' ? result.content : JSON.stringify(result.content) });
+            results.push({ ok: false, error: typeof result.content === 'string' ? result.content : JSON.stringify(result.content) });
           } else {
             results.push(result.content);
           }
         } catch (err) {
-          results.push({ $error: (err as Error).message });
+          results.push({ ok: false, error: (err as Error).message });
         }
       }
 

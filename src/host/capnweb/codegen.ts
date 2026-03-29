@@ -181,7 +181,7 @@ function createRef(callId: number, path: string): any {
 }
 
 function serializeArgs(value: any): any {
-  if (value && value[REF]) return { $ref: value.callId, path: value.path };
+  if (value && value[REF]) return { __batchRef: value.callId, path: value.path };
   if (Array.isArray(value)) return value.map(serializeArgs);
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {};
@@ -194,7 +194,7 @@ function serializeArgs(value: any): any {
 /**
  * Register a tool call. Returns a thenable proxy:
  * - await it → flushes batch, returns result
- * - access properties → creates $ref for pipelining
+ * - access properties → creates __batchRef for pipelining
  */
 export function callTool(tool: string, args: Record<string, unknown>): any {
   const callId = pendingCalls.length;
@@ -207,7 +207,7 @@ export function callTool(tool: string, args: Record<string, unknown>): any {
         return (resolve: any, reject: any) => {
           flush.then((results: any) => {
             const r = results[callId];
-            if (r && typeof r === 'object' && '$error' in r) reject(new Error(r.$error));
+            if (r && typeof r === 'object' && 'ok' in r && !r.ok) reject(new Error(r.error));
             else resolve(r);
           }).catch(reject);
         };
@@ -292,9 +292,17 @@ export async function generateToolStubs(opts: CodegenOptions): Promise<Generated
     mkdirSync(serverDir, { recursive: true });
 
     const barrelEntries: Array<{ fileName: string; methodName: string }> = [];
+    const seenNames = new Map<string, string>();
 
     for (const tool of group.tools) {
       const methodName = toMethodName(tool.name);
+      const prior = seenNames.get(methodName);
+      if (prior) {
+        throw new Error(
+          `Tool name collision in server "${group.server}": "${prior}" and "${tool.name}" both sanitize to "${methodName}"`,
+        );
+      }
+      seenNames.set(methodName, tool.name);
       const filePath = join(serverDir, `${methodName}.ts`);
       writeFileSync(filePath, await generateToolStub(group.server, tool, methodName), 'utf8');
       files.push(filePath);
@@ -321,10 +329,13 @@ export function groupToolsByServer(tools: McpToolSchema[]): ToolStubGroup[] {
   const map = new Map<string, McpToolSchema[]>();
 
   for (const tool of tools) {
-    const sepIdx = Math.max(tool.name.indexOf('_'), tool.name.indexOf('/'));
+    const indices = [tool.name.indexOf('_'), tool.name.indexOf('/')]
+      .filter(i => i > 0);
+    const sepIdx = indices.length > 0 ? Math.min(...indices) : -1;
     const server = sepIdx > 0 ? tool.name.slice(0, sepIdx) : 'default';
+    const localName = sepIdx > 0 ? tool.name.slice(sepIdx + 1) : tool.name;
     if (!map.has(server)) map.set(server, []);
-    map.get(server)!.push(tool);
+    map.get(server)!.push({ ...tool, name: localName });
   }
 
   return [...map.entries()].map(([server, serverTools]) => ({

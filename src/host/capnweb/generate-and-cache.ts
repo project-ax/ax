@@ -10,7 +10,7 @@
  */
 
 import { tmpdir } from 'node:os';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import type { DocumentStore } from '../../providers/storage/types.js';
 import type { McpToolSchema } from '../../providers/mcp/types.js';
@@ -87,7 +87,6 @@ export async function prepareToolStubs(
 
 /** Recursively collect all files in a directory as { path, content } pairs. */
 function collectFiles(dir: string): ToolStubFile[] {
-  const { readdirSync, statSync } = require('node:fs') as typeof import('node:fs');
   const files: ToolStubFile[] = [];
 
   function walk(current: string) {

@@ -54,7 +54,15 @@ export async function getToolStubs(
   const raw = await documents.get('tool-stubs', agentName);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as ToolStubCache;
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      !parsed ||
+      typeof parsed !== 'object' ||
+      typeof (parsed as any).schemaHash !== 'string' ||
+      typeof (parsed as any).generatedAt !== 'string' ||
+      !Array.isArray((parsed as any).files)
+    ) return null;
+    return parsed as ToolStubCache;
   } catch {
     return null;
   }

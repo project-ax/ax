@@ -506,8 +506,8 @@ function applyPayload(config: AgentConfig, payload: StdinPayload): void {
   }
 
   // ── Write tool stubs to /tools/ ──
-  if (Array.isArray(payload.toolStubs) && payload.toolStubs.length > 0) {
-    // Use workspace root (CWD) for tools — available to all sandbox scripts
+  // Treat an explicit empty array as "clear generated stubs for this turn".
+  if (Array.isArray(payload.toolStubs)) {
     const toolsBase = resolve(process.env.AX_WORKSPACE ?? process.cwd(), 'tools');
     if (existsSync(toolsBase)) {
       rmSync(toolsBase, { recursive: true, force: true });

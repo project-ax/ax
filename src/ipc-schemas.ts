@@ -445,10 +445,10 @@ export const SandboxResultSchema = ipcAction('sandbox_result', {
 // ── Tool Batch (scripted tool execution) ────────────
 
 export const ToolBatchSchema = ipcAction('tool_batch', {
-  /** Ordered tool calls. Args may contain { $ref, path } for dependent pipelining. */
+  /** Ordered tool calls. Args may contain { __batchRef, path } for dependent pipelining. */
   calls: z.array(z.object({
     tool: safeString(200),
-    args: z.record(z.unknown()),
+    args: z.record(z.string(), z.unknown()),
   })),
 });
 
