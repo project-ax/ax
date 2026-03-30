@@ -480,11 +480,17 @@ function parseArgs(argv) {
 // ── Stdin ────────────────────────────────────────────
 async function readStdin() {
   if (process.stdin.isTTY) return null;
-  const chunks = [];
-  for await (const chunk of process.stdin) chunks.push(chunk);
-  const text = Buffer.concat(chunks).toString('utf8').trim();
-  if (!text) return null;
-  try { return JSON.parse(text); } catch { return null; }
+  // Only read if data is already available or pipe is being closed.
+  // Avoid blocking forever when spawned as a subprocess with open stdin pipe.
+  return new Promise((resolve) => {
+    let data = '';
+    let timer = setTimeout(() => { process.stdin.pause(); resolve(null); }, 50);
+    process.stdin.setEncoding('utf8');
+    process.stdin.on('data', (chunk) => { clearTimeout(timer); data += chunk; });
+    process.stdin.on('end', () => { clearTimeout(timer); if (!data.trim()) { resolve(null); return; } try { resolve(JSON.parse(data.trim())); } catch { resolve(null); } });
+    process.stdin.on('error', () => { clearTimeout(timer); resolve(null); });
+    process.stdin.resume();
+  });
 }
 
 // ── Main ─────────────────────────────────────────────
