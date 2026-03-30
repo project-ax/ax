@@ -281,8 +281,8 @@ async function generateToolStub(
     ``,
     `// CLI entrypoint — run this file directly with JSON args`,
     `if (process.argv[1]?.endsWith('${methodName}.ts')) {`,
-    `  const args = process.argv[2] ? JSON.parse(process.argv[2]) : {};`,
-    `  ${methodName}(args).then((r: any) => console.log(JSON.stringify(r, null, 2))).catch((e: any) => { console.error(e); process.exit(1); });`,
+    `  try { const r = await ${methodName}(process.argv[2] ? JSON.parse(process.argv[2]) : {}); console.log(JSON.stringify(r, null, 2)); }`,
+    `  catch (e: any) { console.error(e.message ?? e); process.exit(1); }`,
     `}`,
   ];
 
