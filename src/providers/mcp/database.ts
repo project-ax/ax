@@ -7,6 +7,7 @@ import type {
 } from './types.js';
 import type { DatabaseProvider } from '../database/types.js';
 import type { CredentialProvider } from '../credentials/types.js';
+import { connectAndListTools, callToolOnServer } from '../../plugins/mcp-client.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -107,47 +108,6 @@ export function parseServerFromToolName(name: string): { server: string; tool: s
 }
 
 // ---------------------------------------------------------------------------
-// JSON-RPC helpers
-// ---------------------------------------------------------------------------
-
-interface JsonRpcResponse {
-  jsonrpc: '2.0';
-  id: number;
-  result?: unknown;
-  error?: { code: number; message: string };
-}
-
-async function jsonRpcCall(
-  url: string,
-  method: string,
-  params: unknown,
-  headers: Record<string, string>,
-  timeoutMs = 30_000,
-): Promise<unknown> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...headers },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`MCP server HTTP ${res.status}: ${text}`);
-    }
-    const data = await res.json() as JsonRpcResponse;
-    if (data.error) {
-      throw new Error(`MCP JSON-RPC error ${data.error.code}: ${data.error.message}`);
-    }
-    return data.result;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Provider
 // ---------------------------------------------------------------------------
 
@@ -195,8 +155,8 @@ class DatabaseMcpProvider implements McpProvider {
 
       try {
         const headers = await resolveHeaders(server.headers, this.credentials);
-        const result = await jsonRpcCall(server.url, 'tools/list', {}, headers) as { tools?: McpToolSchema[] };
-        const tools = (result?.tools ?? []).map(t => ({
+        const rawTools = await connectAndListTools(server.url, { headers });
+        const tools = rawTools.map(t => ({
           ...t,
           name: `${server.name}__${t.name}`,
         }));
@@ -235,10 +195,7 @@ class DatabaseMcpProvider implements McpProvider {
 
     try {
       const headers = await resolveHeaders(server.headers, this.credentials);
-      const result = await jsonRpcCall(server.url, 'tools/call', {
-        name: parsed.tool,
-        arguments: call.arguments,
-      }, headers) as { content: Array<{ type: string; text?: string }> ; isError?: boolean };
+      const result = await callToolOnServer(server.url, parsed.tool, call.arguments ?? {}, { headers });
 
       breaker.reset();
 
@@ -251,15 +208,9 @@ class DatabaseMcpProvider implements McpProvider {
         timestamp: new Date(),
       };
 
-      // Extract text content from MCP response
-      const textContent = result?.content
-        ?.filter((c: { type: string }) => c.type === 'text')
-        .map((c: { text?: string }) => c.text ?? '')
-        .join('\n') ?? '';
-
       return {
-        content: textContent,
-        isError: result?.isError,
+        content: result.content,
+        isError: result.isError,
         taint,
       };
     } catch (err) {
@@ -373,8 +324,8 @@ export async function testGlobalMcpServer(
 
   try {
     const headers = await resolveHeaders(server.headers, credentials);
-    const result = await jsonRpcCall(server.url, 'tools/list', {}, headers) as { tools?: McpToolSchema[] };
-    return { ok: true, tools: result?.tools ?? [] };
+    const tools = await connectAndListTools(server.url, { headers });
+    return { ok: true, tools };
   } catch (err) {
     return { ok: false, error: (err as Error).message };
   }
