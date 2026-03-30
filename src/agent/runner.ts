@@ -295,6 +295,8 @@ export interface StdinPayload {
   /** Pre-generated tool stubs for scripted MCP tool execution.
    *  Cached in DocumentStore by schema hash, written to agentWorkspace/tools/. */
   toolStubs?: Array<{ path: string; content: string }>;
+  /** MCP CLI executables — one file per server, written to agentWorkspace/bin/. */
+  mcpCLIs?: Array<{ path: string; content: string }>;
 }
 
 /**
@@ -350,6 +352,7 @@ export function parseStdinPayload(data: string): StdinPayload {
         skills: Array.isArray(parsed.skills) ? parsed.skills : undefined,
         userSkills: Array.isArray(parsed.userSkills) ? parsed.userSkills : undefined,
         toolStubs: Array.isArray(parsed.toolStubs) ? parsed.toolStubs : undefined,
+        mcpCLIs: Array.isArray(parsed.mcpCLIs) ? parsed.mcpCLIs : undefined,
       };
     }
   } catch {
@@ -554,6 +557,21 @@ function applyPayload(config: AgentConfig, payload: StdinPayload): void {
       writeFileSync(filePath, file.content, 'utf-8');
     }
     logger.info('tool_stubs_written', { count: payload.toolStubs.length, dir: toolsBase });
+  }
+
+  // ── Write MCP CLI executables to agentWorkspace/bin/ ──
+  if (Array.isArray(payload.mcpCLIs) && config.agentWorkspace) {
+    const binDir = resolve(config.agentWorkspace, 'bin');
+    mkdirSync(binDir, { recursive: true });
+    for (const file of payload.mcpCLIs) {
+      const filePath = resolve(binDir, file.path);
+      if (!filePath.startsWith(binDir + sep) && filePath !== binDir) {
+        logger.warn('mcp_cli_path_traversal_blocked', { path: file.path });
+        continue;
+      }
+      writeFileSync(filePath, file.content, { mode: 0o755 });
+    }
+    logger.info('mcp_clis_written', { count: payload.mcpCLIs.length, dir: binDir });
   }
 
   if (payload.identity) {
