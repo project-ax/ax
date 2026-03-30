@@ -362,6 +362,169 @@ export async function generateToolStubs(opts: CodegenOptions): Promise<Generated
   return { files, toolCount };
 }
 
+// ---------------------------------------------------------------------------
+// CLI generation — replaces TypeScript stubs with one executable per MCP server
+// ---------------------------------------------------------------------------
+
+/**
+ * Parse an MCP tool name into verb + noun for CLI subcommands.
+ * list_issues → { verb: 'list', noun: 'issues' }
+ * get_authenticated_user → { verb: 'get', noun: 'authenticated-user' }
+ */
+export function mcpToolToCLICommand(toolName: string): { verb: string; noun: string } {
+  const parts = toolName.split('_');
+  const verb = parts[0];
+  const noun = parts.slice(1).join('-');
+  return { verb, noun };
+}
+
+/**
+ * Infer a group name from the noun (pluralize/singularize to title case).
+ * issues → Issues, team → Teams, customer-need → Customer Needs
+ */
+function inferGroup(noun: string): string {
+  const base = noun.replace(/-/g, ' ');
+  // Capitalize each word
+  const titled = base.replace(/\b\w/g, c => c.toUpperCase());
+  // Ensure plural
+  if (!titled.endsWith('s') && !titled.endsWith('tion')) return titled + 's';
+  return titled;
+}
+
+/**
+ * Generate a self-contained CLI executable for an MCP server.
+ */
+export function generateCLI(
+  server: string,
+  tools: McpToolSchema[],
+): string {
+  // Build the TOOLS registry
+  const toolEntries = tools.map(tool => {
+    const { verb, noun } = mcpToolToCLICommand(tool.name);
+    const cmd = `${verb} ${noun}`;
+    const params = tool.inputSchema?.properties
+      ? Object.keys(tool.inputSchema.properties as Record<string, unknown>)
+      : [];
+    const group = inferGroup(noun);
+    const desc = tool.description?.split('\n')[0]?.slice(0, 80) ?? tool.name;
+    return `  '${cmd}': { tool: '${tool.name}', desc: '${desc.replace(/'/g, "\\'")}', group: '${group}', params: [${params.map(p => `'${p}'`).join(', ')}] }`;
+  });
+
+  return `#!/usr/bin/env node
+// Auto-generated CLI for ${server} MCP server. Do not edit.
+'use strict';
+
+// ── IPC ──────────────────────────────────────────────
+async function ipc(tool, params) {
+  const hostUrl = process.env.AX_HOST_URL;
+  const token = process.env.AX_IPC_TOKEN;
+  if (!hostUrl) { process.stderr.write('Error: AX_HOST_URL not set\\n'); process.exit(1); }
+  const res = await fetch(hostUrl + '/internal/ipc', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) },
+    body: JSON.stringify({ action: 'tool_batch', calls: [{ tool, args: params }] }),
+    signal: AbortSignal.timeout(120000),
+  });
+  if (!res.ok) { process.stderr.write('Error: HTTP ' + res.status + ' ' + (await res.text()) + '\\n'); process.exit(1); }
+  const data = await res.json();
+  const result = data.results?.[0];
+  if (result && typeof result === 'object' && 'ok' in result && !result.ok) {
+    process.stderr.write('Error: ' + (result.error || 'tool call failed') + '\\n');
+    process.exit(1);
+  }
+  return result;
+}
+
+// ── Tools ────────────────────────────────────────────
+const TOOLS = {
+${toolEntries.join(',\n')}
+};
+
+// ── Help ─────────────────────────────────────────────
+function showHelp() {
+  process.stdout.write('Usage: ${server} <verb> <noun> [--flag value ...]\\n\\n');
+  const groups = {};
+  for (const [cmd, t] of Object.entries(TOOLS)) {
+    if (!groups[t.group]) groups[t.group] = [];
+    groups[t.group].push({ cmd, ...t });
+  }
+  for (const [group, cmds] of Object.entries(groups)) {
+    process.stdout.write(group + ':\\n');
+    for (const c of cmds) {
+      const flags = c.params.length ? ' [--' + c.params.join(', --') + ']' : '';
+      process.stdout.write('  ' + c.cmd.padEnd(24) + c.desc + flags + '\\n');
+    }
+    process.stdout.write('\\n');
+  }
+}
+
+// ── Argv parser ──────────────────────────────────────
+function parseArgs(argv) {
+  const params = {};
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i].startsWith('--')) {
+      const key = argv[i].slice(2);
+      const val = argv[i + 1];
+      if (val === undefined || val.startsWith('--')) { params[key] = true; i++; continue; }
+      // Try to parse as number/boolean/JSON
+      if (val === 'true') params[key] = true;
+      else if (val === 'false') params[key] = false;
+      else if (/^-?\\d+(\\.\\d+)?$/.test(val)) params[key] = Number(val);
+      else params[key] = val;
+      i++;
+    }
+  }
+  return params;
+}
+
+// ── Stdin ────────────────────────────────────────────
+async function readStdin() {
+  if (process.stdin.isTTY) return null;
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  const text = Buffer.concat(chunks).toString('utf8').trim();
+  if (!text) return null;
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+// ── Main ─────────────────────────────────────────────
+async function main() {
+  const args = process.argv.slice(2);
+  if (args.length === 0 || args[0] === '--help' || args[0] === '-h') { showHelp(); return; }
+
+  const verb = args[0];
+  const noun = args[1] || '';
+  const cmd = verb + ' ' + noun;
+  const entry = TOOLS[cmd];
+  if (!entry) {
+    // Try verb-only match
+    const match = Object.keys(TOOLS).find(k => k.startsWith(verb + ' '));
+    if (match) { process.stderr.write('Unknown: ' + cmd + '. Did you mean: ' + match + '?\\n'); }
+    else { process.stderr.write('Unknown command: ' + cmd + '. Run ${server} --help\\n'); }
+    process.exit(1);
+  }
+
+  const flagParams = parseArgs(args.slice(2));
+  const stdinParams = await readStdin();
+  const params = { ...(stdinParams && typeof stdinParams === 'object' && !Array.isArray(stdinParams) ? stdinParams : {}), ...flagParams };
+
+  const result = await ipc(entry.tool, params);
+
+  // Unwrap single-key objects with array values for cleaner piping
+  if (result && typeof result === 'object' && !Array.isArray(result)) {
+    const keys = Object.keys(result);
+    if (keys.length === 1 && Array.isArray(result[keys[0]])) {
+      process.stdout.write(JSON.stringify(result[keys[0]], null, 2) + '\\n');
+      return;
+    }
+  }
+  process.stdout.write(JSON.stringify(result, null, 2) + '\\n');
+}
+
+main().catch(e => { process.stderr.write('Error: ' + (e.message || e) + '\\n'); process.exit(1); });
+`;
+}
+
 /**
  * Group flat MCP tool schemas by server name.
  *

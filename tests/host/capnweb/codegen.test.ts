@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { tmpdir } from 'node:os';
 import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { generateToolStubs, groupToolsByServer } from '../../../src/host/capnweb/codegen.js';
+import { generateToolStubs, groupToolsByServer, generateCLI, mcpToolToCLICommand } from '../../../src/host/capnweb/codegen.js';
 import type { McpToolSchema } from '../../../src/providers/mcp/types.js';
 import { initLogger } from '../../../src/logger.js';
 
@@ -163,5 +163,62 @@ describe('generateToolStubs', () => {
     expect(existsSync(join(outputDir, 'test', 'getItems.ts'))).toBe(true);
     const content = readFileSync(join(outputDir, 'test', 'getItems.ts'), 'utf8');
     expect(content).toContain('export function getItems');
+  });
+});
+
+describe('mcpToolToCLICommand', () => {
+  it('parses list_issues → list issues', () => {
+    expect(mcpToolToCLICommand('list_issues')).toEqual({ verb: 'list', noun: 'issues' });
+  });
+  it('parses get_team → get team', () => {
+    expect(mcpToolToCLICommand('get_team')).toEqual({ verb: 'get', noun: 'team' });
+  });
+  it('parses save_customer_need → save customer-need', () => {
+    expect(mcpToolToCLICommand('save_customer_need')).toEqual({ verb: 'save', noun: 'customer-need' });
+  });
+  it('parses search_documentation → search documentation', () => {
+    expect(mcpToolToCLICommand('search_documentation')).toEqual({ verb: 'search', noun: 'documentation' });
+  });
+  it('parses extract_images → extract images', () => {
+    expect(mcpToolToCLICommand('extract_images')).toEqual({ verb: 'extract', noun: 'images' });
+  });
+  it('parses get_authenticated_user → get authenticated-user', () => {
+    expect(mcpToolToCLICommand('get_authenticated_user')).toEqual({ verb: 'get', noun: 'authenticated-user' });
+  });
+});
+
+describe('generateCLI', () => {
+  it('generates a valid JS file with shebang', () => {
+    const result = generateCLI('linear', [
+      { name: 'list_issues', description: 'List issues', inputSchema: { type: 'object', properties: { team: { type: 'string' }, limit: { type: 'number' } } } },
+      { name: 'get_issue', description: 'Get issue by ID', inputSchema: { type: 'object', properties: { id: { type: 'string' } } } },
+    ]);
+    expect(result).toMatch(/^#!\/usr\/bin\/env node\n/);
+    expect(result).toContain("'list issues'");
+    expect(result).toContain("'get issue'");
+    expect(result).toContain('list_issues');
+    expect(result).toContain("'team'");
+    expect(result).toContain("'limit'");
+    expect(result).toContain("'id'");
+    // Help output groups
+    expect(result).toContain("'Issues'");
+  });
+
+  it('includes IPC client using fetch', () => {
+    const result = generateCLI('linear', [
+      { name: 'list_teams', description: 'List teams', inputSchema: { type: 'object', properties: { limit: { type: 'number' } } } },
+    ]);
+    expect(result).toContain('AX_HOST_URL');
+    expect(result).toContain('AX_IPC_TOKEN');
+    expect(result).toContain('/internal/ipc');
+    expect(result).toContain('tool_batch');
+  });
+
+  it('handles stdin piping', () => {
+    const result = generateCLI('linear', [
+      { name: 'list_teams', description: 'List teams', inputSchema: { type: 'object', properties: {} } },
+    ]);
+    expect(result).toContain('stdin');
+    expect(result).toContain('JSON.parse');
   });
 });
