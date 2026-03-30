@@ -1,4 +1,14 @@
-# Scripted Tool Execution
+# MCP CLI Tools
+
+## [2026-03-30 15:55] — Replace TypeScript stubs with CLI executables
+
+**Task:** Replace fragile TypeScript MCP tool stubs (proxy-based, needs --experimental-strip-types) with simple CLI executables (one per MCP server, plain JS, #!/usr/bin/env node).
+**What I did:** Implemented 7-task plan: generateCLI() codegen, prepareMcpCLIs() orchestration, host payload update (mcpCLIs replaces toolStubs), runner bin/ writes, prompt update (show CLI tools in PATH), E2E testing on kind cluster, and cleanup of old stub code. Found and fixed a stdin blocking bug where the CLI hung when spawned as a subprocess.
+**Files touched:** src/host/capnweb/codegen.ts, src/host/capnweb/generate-and-cache.ts, src/host/capnweb/index.ts, src/host/server-completions.ts, src/agent/runner.ts, src/agent/agent-setup.ts, src/agent/prompt/types.ts, src/agent/prompt/modules/runtime.ts, src/plugins/mcp-manager.ts, tests/host/capnweb/codegen.test.ts, tests/host/capnweb/generate-and-cache.test.ts
+**Outcome:** Success. CLI tools work end-to-end in kind cluster. Agent runs `linear list teams` and `linear list cycles` via bash, gets real Linear API data. Old TypeScript stub code removed (~800 lines deleted, ~200 lines added).
+**Notes:** Key bug: generated CLIs hung when spawned as subprocess because `readStdin()` blocked on an open pipe. Fixed with 50ms timeout. The `json-schema-to-typescript` dependency is no longer needed by codegen.
+
+# Scripted Tool Execution (Legacy)
 
 ## [2026-03-28 21:10] — Add DB caching for generated tool stubs
 
