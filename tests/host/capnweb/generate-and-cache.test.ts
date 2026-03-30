@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { computeSchemaHash } from '../../../src/providers/storage/tool-stubs.js';
-import { prepareToolStubs } from '../../../src/host/capnweb/generate-and-cache.js';
+import { prepareToolStubs, prepareMcpCLIs } from '../../../src/host/capnweb/generate-and-cache.js';
 import type { McpToolSchema } from '../../../src/providers/mcp/types.js';
 import type { DocumentStore } from '../../../src/providers/storage/types.js';
 import { initLogger } from '../../../src/logger.js';
@@ -154,5 +154,25 @@ describe('prepareToolStubs', () => {
 
     expect(files).not.toBeNull();
     expect(files!.length).toBeGreaterThan(0);
+  });
+});
+
+describe('prepareMcpCLIs', () => {
+  it('generates one CLI file per server', async () => {
+    const tools: McpToolSchema[] = [
+      { name: 'list_issues', description: 'List issues', inputSchema: { type: 'object', properties: { team: { type: 'string' } } }, server: 'linear' },
+      { name: 'get_issue', description: 'Get issue', inputSchema: { type: 'object', properties: { id: { type: 'string' } } }, server: 'linear' },
+      { name: 'list_repos', description: 'List repos', inputSchema: { type: 'object', properties: {} }, server: 'github' },
+    ];
+    const result = await prepareMcpCLIs({ agentName: 'test', tools });
+    expect(result).toHaveLength(2);
+    expect(result!.find(f => f.path === 'linear')).toBeTruthy();
+    expect(result!.find(f => f.path === 'github')).toBeTruthy();
+    expect(result![0].content).toMatch(/^#!\/usr\/bin\/env node/);
+  });
+
+  it('returns null for empty tools', async () => {
+    const result = await prepareMcpCLIs({ agentName: 'test', tools: [] });
+    expect(result).toBeNull();
   });
 });

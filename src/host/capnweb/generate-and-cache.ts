@@ -21,7 +21,7 @@ import {
   type ToolStubFile,
   type ToolStubCache,
 } from '../../providers/storage/tool-stubs.js';
-import { generateToolStubs, groupToolsByServer } from './codegen.js';
+import { generateToolStubs, generateCLI, groupToolsByServer } from './codegen.js';
 import { getLogger } from '../../logger.js';
 
 const logger = getLogger().child({ component: 'tool-stubs' });
@@ -83,6 +83,32 @@ export async function prepareToolStubs(
   } finally {
     rmSync(tempDir, { recursive: true, force: true });
   }
+}
+
+// ---------------------------------------------------------------------------
+// CLI generation (replaces stubs) — no caching needed, CLIs are cheap to generate
+// ---------------------------------------------------------------------------
+
+export interface PrepareMcpCLIsOptions {
+  agentName: string;
+  tools: McpToolSchema[];
+}
+
+export async function prepareMcpCLIs(
+  opts: PrepareMcpCLIsOptions,
+): Promise<ToolStubFile[] | null> {
+  const { tools } = opts;
+  if (tools.length === 0) return null;
+
+  const groups = groupToolsByServer(tools);
+  const files: ToolStubFile[] = [];
+
+  for (const group of groups) {
+    const content = generateCLI(group.server, group.tools);
+    files.push({ path: group.server, content });
+  }
+
+  return files.length > 0 ? files : null;
 }
 
 /** Recursively collect all files in a directory as { path, content } pairs. */
