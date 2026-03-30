@@ -25,26 +25,23 @@ export interface ToolStubGroup {
 // ---------------------------------------------------------------------------
 
 /**
- * Parse an MCP tool name into verb + noun for CLI subcommands.
- * list_issues → { verb: 'list', noun: 'issues' }
- * get_authenticated_user → { verb: 'get', noun: 'authenticated-user' }
+ * Convert an MCP tool name to a kebab-case CLI subcommand.
+ * list_issues → 'list-issues'
+ * get_authenticated_user → 'get-authenticated-user'
  */
-export function mcpToolToCLICommand(toolName: string): { verb: string; noun: string } {
-  const parts = toolName.split('_');
-  const verb = parts[0];
-  const noun = parts.slice(1).join('-');
-  return { verb, noun };
+export function mcpToolToCLICommand(toolName: string): string {
+  return toolName.replace(/_/g, '-');
 }
 
 /**
- * Infer a group name from the noun (pluralize/singularize to title case).
- * issues → Issues, team → Teams, customer-need → Customer Needs
+ * Infer a group name from a kebab-case command (strip verb, title-case noun, pluralize).
+ * list-issues → Issues, get-team → Teams, save-customer-need → Customer Needs
  */
-function inferGroup(noun: string): string {
-  const base = noun.replace(/-/g, ' ');
-  // Capitalize each word
-  const titled = base.replace(/\b\w/g, c => c.toUpperCase());
-  // Ensure plural
+function inferGroup(cmd: string): string {
+  const parts = cmd.split('-');
+  const noun = parts.slice(1).join(' ');
+  if (!noun) return 'Commands';
+  const titled = noun.replace(/\b\w/g, c => c.toUpperCase());
   if (!titled.endsWith('s') && !titled.endsWith('tion')) return titled + 's';
   return titled;
 }
@@ -58,12 +55,11 @@ export function generateCLI(
 ): string {
   // Build the TOOLS registry
   const toolEntries = tools.map(tool => {
-    const { verb, noun } = mcpToolToCLICommand(tool.name);
-    const cmd = `${verb} ${noun}`;
+    const cmd = mcpToolToCLICommand(tool.name);
     const params = tool.inputSchema?.properties
       ? Object.keys(tool.inputSchema.properties as Record<string, unknown>)
       : [];
-    const group = inferGroup(noun);
+    const group = inferGroup(cmd);
     const desc = tool.description?.split('\n')[0]?.slice(0, 80) ?? tool.name;
     return `  '${cmd}': { tool: '${tool.name}', desc: '${desc.replace(/'/g, "\\'")}', group: '${group}', params: [${params.map(p => `'${p}'`).join(', ')}] }`;
   });
@@ -100,7 +96,7 @@ ${toolEntries.join(',\n')}
 
 // ── Help ─────────────────────────────────────────────
 function showHelp() {
-  process.stdout.write('Usage: ${server} <verb> <noun> [--flag value ...]\\n\\n');
+  process.stdout.write('Usage: ${server} <command> [--flag value ...]\\n\\n');
   const groups = {};
   for (const [cmd, t] of Object.entries(TOOLS)) {
     if (!groups[t.group]) groups[t.group] = [];
@@ -156,19 +152,16 @@ async function main() {
   const args = process.argv.slice(2);
   if (args.length === 0 || args[0] === '--help' || args[0] === '-h') { showHelp(); return; }
 
-  const verb = args[0];
-  const noun = args[1] || '';
-  const cmd = verb + ' ' + noun;
+  const cmd = args[0];
   const entry = TOOLS[cmd];
   if (!entry) {
-    // Try verb-only match
-    const match = Object.keys(TOOLS).find(k => k.startsWith(verb + ' '));
+    const match = Object.keys(TOOLS).find(k => k.startsWith(cmd));
     if (match) { process.stderr.write('Unknown: ' + cmd + '. Did you mean: ' + match + '?\\n'); }
     else { process.stderr.write('Unknown command: ' + cmd + '. Run ${server} --help\\n'); }
     process.exit(1);
   }
 
-  const flagParams = parseArgs(args.slice(2));
+  const flagParams = parseArgs(args.slice(1));
   const stdinParams = await readStdin();
   const params = { ...(stdinParams && typeof stdinParams === 'object' && !Array.isArray(stdinParams) ? stdinParams : {}), ...flagParams };
 
