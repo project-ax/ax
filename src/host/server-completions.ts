@@ -894,8 +894,8 @@ export async function processCompletion(
       }
     }
 
-    // ── Load or generate tool stubs (cached by schema hash) ──
-    let toolStubsPayload: Array<{ path: string; content: string }> | undefined;
+    // ── Generate MCP CLI tools ──
+    let mcpCLIsPayload: Array<{ path: string; content: string }> | undefined;
     if (deps.mcpManager) {
       try {
         const resolveHeaders = providers.credentials
@@ -924,40 +924,22 @@ export async function processCompletion(
           : undefined;
         const mcpTools = await deps.mcpManager.discoverAllTools(agentName, { resolveHeaders, authForServer });
         if (mcpTools.length > 0) {
-          const { prepareToolStubs } = await import('./capnweb/generate-and-cache.js');
-          const stubs = await prepareToolStubs({
-            documents: providers.storage?.documents,
-            agentName,
-            tools: mcpTools,
-          });
-          if (stubs && stubs.length > 0) toolStubsPayload = stubs;
-        }
-        // If discovery returned no tools, fall back to last cached stubs
-        if (!toolStubsPayload && providers.storage?.documents) {
-          const { getToolStubs } = await import('../providers/storage/tool-stubs.js');
-          const cached = await getToolStubs(providers.storage.documents, agentName);
-          if (cached && cached.files.length > 0) {
-            toolStubsPayload = cached.files;
-            reqLogger.debug('tool_stubs_fallback_cache', { fileCount: cached.files.length });
-          }
+          const { prepareMcpCLIs } = await import('./capnweb/generate-and-cache.js');
+          const clis = await prepareMcpCLIs({ agentName, tools: mcpTools });
+          if (clis && clis.length > 0) mcpCLIsPayload = clis;
         }
       } catch (err) {
-        reqLogger.warn('mcp_tool_discovery_failed', { error: (err as Error).message });
+        reqLogger.warn('mcp_cli_generation_failed', { error: (err as Error).message });
       }
     } else if (providers.mcp && providers.mcp.listTools) {
       // @deprecated Legacy fallback: no manager, use providers.mcp directly.
-      // Remove when McpConnectionManager fully replaces providers.mcp.
       try {
-        const { prepareToolStubs } = await import('./capnweb/generate-and-cache.js');
+        const { prepareMcpCLIs } = await import('./capnweb/generate-and-cache.js');
         const mcpTools = await providers.mcp.listTools();
-        const stubs = await prepareToolStubs({
-          documents: providers.storage?.documents,
-          agentName,
-          tools: mcpTools,
-        });
-        if (stubs && stubs.length > 0) toolStubsPayload = stubs;
+        const clis = await prepareMcpCLIs({ agentName, tools: mcpTools });
+        if (clis && clis.length > 0) mcpCLIsPayload = clis;
       } catch (err) {
-        reqLogger.warn('tool_stubs_load_failed', { error: (err as Error).message });
+        reqLogger.warn('mcp_cli_generation_failed', { error: (err as Error).message });
       }
     }
 
@@ -991,7 +973,7 @@ export async function processCompletion(
       identity: identityPayload,
       skills: skillsPayload.length > 0 ? skillsPayload : undefined,
       userSkills: userSkillsPayload.length > 0 ? userSkillsPayload : undefined,
-      toolStubs: toolStubsPayload,
+      mcpCLIs: mcpCLIsPayload,
       agentReadOnly: !agentWorkspaceWritable,
       // Credential placeholders — warm pool pods don't have these in their pod spec,
       // so include them in the payload for the agent to set via process.env.
