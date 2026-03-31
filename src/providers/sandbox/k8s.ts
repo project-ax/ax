@@ -35,7 +35,7 @@ const DEFAULT_IMAGE = 'ax/agent:latest';
 const DEFAULT_NAMESPACE = 'ax';
 const DEFAULT_RUNTIME_CLASS = 'gvisor';
 const DEFAULT_CPU_LIMIT = '1';
-const DEFAULT_MEMORY_LIMIT = '512Mi';
+const DEFAULT_MEMORY_LIMIT = '1Gi';
 
 /** Synthetic PID counter — k8s pods don't have local PIDs. */
 let nextPid = 100_000;

@@ -64,7 +64,7 @@ sandbox:
       template:
         command: ["node", "/opt/ax/dist/agent/runner.js"]
         cpu: "500m"
-        memory: "512Mi"
+        memory: "1Gi"
         workspaceRoot: "/workspace"
         extraVolumeMounts:
           - name: ax-dev-dist
