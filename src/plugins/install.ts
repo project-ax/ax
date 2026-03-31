@@ -205,12 +205,19 @@ export async function uninstallPlugin(input: {
   // Remove commands
   await deleteCommandsByPlugin(documents, agentId, pluginName);
 
-  // Remove MCP servers from manager and database
+  // Remove MCP servers: unassign this agent first, then remove global server
+  // only if no other agents still reference it.
   mcpManager.removeServersByPlugin(agentId, pluginName);
   if (input.database && existing.mcpServers) {
-    const { removeGlobalMcpServer } = await import('../providers/mcp/database.js');
+    const { unassignServerFromAgent, countServerAssignments, removeGlobalMcpServer } = await import('../providers/mcp/database.js');
     for (const server of existing.mcpServers) {
-      try { await removeGlobalMcpServer(input.database.db, server.name); } catch { /* ignore */ }
+      try {
+        await unassignServerFromAgent(input.database.db, agentId, server.name);
+        const remaining = await countServerAssignments(input.database.db, server.name);
+        if (remaining === 0) {
+          await removeGlobalMcpServer(input.database.db, server.name);
+        }
+      } catch { /* ignore — table may not exist */ }
     }
   }
 

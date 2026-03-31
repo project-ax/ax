@@ -929,8 +929,8 @@ export async function processCompletion(
           try {
             const { listAgentServerNames } = await import('../providers/mcp/database.js');
             const assigned = await listAgentServerNames(providers.database.db, agentName);
-            if (assigned.length > 0) serverFilter = new Set(assigned);
-          } catch { /* table may not exist yet */ }
+            serverFilter = new Set(assigned);
+          } catch { /* table may not exist yet — leave filter undefined (all servers) */ }
         }
         const mcpTools = await deps.mcpManager.discoverAllTools(agentName, { resolveHeaders, authForServer, serverFilter });
         if (mcpTools.length > 0) {

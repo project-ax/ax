@@ -20,13 +20,13 @@ describe('McpConnectionManager', () => {
     expect(servers[0].url).toBe('https://mcp.slack.com/mcp');
   });
 
-  it('scopes servers to agents', () => {
+  it('shares global server registry across agents', () => {
     manager.addServer('pi', { name: 'slack', type: 'http', url: 'https://mcp.slack.com/mcp' });
     manager.addServer('counsel', { name: 'docusign', type: 'http', url: 'https://mcp.docusign.com/mcp' });
-    expect(manager.listServers('pi')).toHaveLength(1);
-    expect(manager.listServers('counsel')).toHaveLength(1);
-    expect(manager.listServers('pi')[0].name).toBe('slack');
-    expect(manager.listServers('counsel')[0].name).toBe('docusign');
+    // Server registry is global — all agents see every server.
+    // Per-agent filtering happens at discovery time via serverFilter.
+    expect(manager.listServers('pi')).toHaveLength(2);
+    expect(manager.listServers('counsel')).toHaveLength(2);
   });
 
   it('removes a server', () => {

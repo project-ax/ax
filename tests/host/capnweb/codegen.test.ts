@@ -63,13 +63,13 @@ describe('generateCLI', () => {
       { name: 'get_issue', description: 'Get issue by ID', inputSchema: { type: 'object', properties: { id: { type: 'string' } } } },
     ]);
     expect(result).toMatch(/^#!\/usr\/bin\/env node\n/);
-    expect(result).toContain("'list-issues'");
-    expect(result).toContain("'get-issue'");
+    expect(result).toContain('"list-issues"');
+    expect(result).toContain('"get-issue"');
     expect(result).toContain('list_issues');
-    expect(result).toContain("'team'");
-    expect(result).toContain("'limit'");
-    expect(result).toContain("'id'");
-    expect(result).toContain("'Issues'");
+    expect(result).toContain('"team"');
+    expect(result).toContain('"limit"');
+    expect(result).toContain('"id"');
+    expect(result).toContain('"Issues"');
   });
 
   it('includes IPC client using fetch', () => {

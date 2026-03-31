@@ -61,7 +61,7 @@ export function generateCLI(
       : [];
     const group = inferGroup(cmd);
     const desc = tool.description?.split('\n')[0]?.slice(0, 80) ?? tool.name;
-    return `  '${cmd}': { tool: '${tool.name}', desc: '${desc.replace(/'/g, "\\'")}', group: '${group}', params: [${params.map(p => `'${p}'`).join(', ')}] }`;
+    return `  ${JSON.stringify(cmd)}: { tool: ${JSON.stringify(tool.name)}, desc: ${JSON.stringify(desc)}, group: ${JSON.stringify(group)}, params: [${params.map(p => JSON.stringify(p)).join(', ')}] }`;
   });
 
   return `#!/usr/bin/env node

@@ -114,13 +114,12 @@ export function createSkillsHandlers(providers: ProviderRegistry, opts?: SkillsH
       if (!providers.storage?.documents) return { ok: false, error: 'No storage provider' };
       const agentName = ctx.agentId ?? 'main';
 
-      // Determine scope: non-admin users in DM or web sessions get user-scoped skills.
+      // Determine scope: only admins get agent-scoped skills, everyone else gets user-scoped.
       const topDir = agentDirPath(agentName);
       const userIsAdmin = ctx.userId ? isAdmin(topDir, ctx.userId) : false;
-      const isUserScope = !userIsAdmin && (ctx.sessionScope === 'dm' || !ctx.sessionScope);
-      const scope = isUserScope ? 'user' as const : 'agent' as const;
+      const scope = userIsAdmin ? 'agent' as const : 'user' as const;
 
-      if (isUserScope && !ctx.userId) {
+      if (scope === 'user' && !ctx.userId) {
         return { ok: false, error: 'User ID required for user-scoped skills' };
       }
 
@@ -135,7 +134,7 @@ export function createSkillsHandlers(providers: ProviderRegistry, opts?: SkillsH
         files: [{ path: 'SKILL.md', content: req.content }],
         mcpApps,
         scope,
-        userId: isUserScope ? ctx.userId : undefined,
+        userId: scope === 'user' ? ctx.userId : undefined,
       });
 
       // Add domains to proxy allowlist
@@ -147,14 +146,14 @@ export function createSkillsHandlers(providers: ProviderRegistry, opts?: SkillsH
       await providers.audit.log({
         action: 'skill_create',
         sessionId: ctx.sessionId,
-        args: { slug: req.slug, scope, userId: isUserScope ? ctx.userId : undefined },
+        args: { slug: req.slug, scope, userId: scope === 'user' ? ctx.userId : undefined },
         result: 'success',
       });
 
       logger.info('skill_create_complete', {
         slug: req.slug,
         scope,
-        userId: isUserScope ? ctx.userId : undefined,
+        userId: scope === 'user' ? ctx.userId : undefined,
         sessionId: ctx.sessionId,
       });
 

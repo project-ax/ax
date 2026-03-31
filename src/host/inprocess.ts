@@ -232,8 +232,8 @@ export async function runFastPath(
         try {
           const { listAgentServerNames } = await import('../providers/mcp/database.js');
           const assigned = await listAgentServerNames(providers.database.db, request.agentId);
-          if (assigned.length > 0) serverFilter = new Set(assigned);
-        } catch { /* table may not exist */ }
+          serverFilter = new Set(assigned);
+        } catch { /* table may not exist — leave filter undefined (all servers) */ }
       }
       mcpTools = await deps.mcpManager.discoverAllTools(request.agentId, { resolveHeaders, authForServer, serverFilter });
     } else {

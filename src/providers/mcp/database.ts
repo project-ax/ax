@@ -241,12 +241,8 @@ class DatabaseMcpProvider implements McpProvider {
 // Global MCP Server CRUD
 // ---------------------------------------------------------------------------
 
-async function getEnabledServers(db: Kysely<any>, _agentId: string): Promise<McpServerRow[]> {
-  return db
-    .selectFrom('mcp_servers')
-    .selectAll()
-    .where('enabled', '=', 1)
-    .execute() as Promise<McpServerRow[]>;
+async function getEnabledServers(db: Kysely<any>, agentId: string): Promise<McpServerRow[]> {
+  return listAgentServers(db, agentId);
 }
 
 export async function listAllMcpServers(db: Kysely<any>): Promise<McpServerRow[]> {
@@ -355,6 +351,16 @@ export async function unassignServerFromAgent(db: Kysely<any>, agentId: string, 
     .where('server_name', '=', serverName)
     .executeTakeFirst();
   return (result?.numDeletedRows ?? 0n) > 0n;
+}
+
+/** Count how many agents are assigned to a given server. */
+export async function countServerAssignments(db: Kysely<any>, serverName: string): Promise<number> {
+  const result = await db
+    .selectFrom('agent_mcp_servers')
+    .select(db.fn.countAll<number>().as('count'))
+    .where('server_name', '=', serverName)
+    .executeTakeFirst();
+  return Number(result?.count ?? 0);
 }
 
 /** List MCP server names assigned to an agent. */
