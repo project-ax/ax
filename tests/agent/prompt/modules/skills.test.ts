@@ -155,11 +155,11 @@ describe('SkillsModule', () => {
     expect(rendered).not.toContain('Creating Skills');
   });
 
-  test('includes next-session hint when writable', () => {
+  test('includes skill creation guidance when writable', () => {
     const mod = new SkillsModule();
     const ctx = makeContext({ skills: [makeSkill('Test Skill', 'Do stuff')], userWorkspaceWritable: true });
     const rendered = mod.render(ctx).join('\n');
-    expect(rendered).toContain('next session');
+    expect(rendered).toContain('type: "create"');
   });
 
   test('includes creating skills section when writable', () => {

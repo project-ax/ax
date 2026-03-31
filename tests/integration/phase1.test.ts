@@ -17,8 +17,6 @@ import { initLogger, resetLogger } from '../../src/logger.js';
 // Direct-integration imports (not subprocess)
 import { createRouter } from '../../src/host/router.js';
 import { createKyselyDb } from '../../src/utils/database.js';
-import { runMigrations } from '../../src/utils/migrator.js';
-import { storageMigrations } from '../../src/providers/storage/migrations.js';
 import { create as createStorage } from '../../src/providers/storage/database.js';
 import type { MessageQueueStore } from '../../src/providers/storage/types.js';
 import { TaintBudget, thresholdForProfile } from '../../src/host/taint-budget.js';
@@ -146,7 +144,6 @@ function mockProviders(opts?: {
 
 async function createMessageQueueStore(dbPath: string): Promise<{ db: MessageQueueStore; destroy: () => Promise<void> }> {
   const kyselyDb = createKyselyDb({ type: 'sqlite', path: dbPath });
-  await runMigrations(kyselyDb, storageMigrations('sqlite'));
   const storage = await createStorage({} as Config, undefined, {
     database: { db: kyselyDb, type: 'sqlite', vectorsAvailable: false, close: async () => { await kyselyDb.destroy(); } },
   });

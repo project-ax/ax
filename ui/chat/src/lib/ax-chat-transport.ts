@@ -95,6 +95,8 @@ export class AxChatTransport extends HttpChatTransport<UIMessage> {
     let carry = '';
     let finished = false;
     let toolsStarted = false;
+    // Track tool call IDs so we can mark them done when next content arrives
+    const pendingToolCallIds: string[] = [];
 
     return stream
       .pipeThrough(new TextDecoderStream() as ReadableWritablePair<string, Uint8Array>)
@@ -119,6 +121,11 @@ export class AxChatTransport extends HttpChatTransport<UIMessage> {
               if (trimmed === 'data: [DONE]') {
                 pendingEventName = null;
                 if (!finished) {
+                  // Mark any remaining pending tools as done
+                  for (const id of pendingToolCallIds) {
+                    controller.enqueue({ type: 'tool-output-available', toolCallId: id, output: { ok: true } });
+                  }
+                  pendingToolCallIds.length = 0;
                   if (started) {
                     controller.enqueue({ type: 'text-end', id: textPartId });
                   }
@@ -161,6 +168,11 @@ export class AxChatTransport extends HttpChatTransport<UIMessage> {
 
               if (delta?.content) {
                 if (!started) {
+                  // Mark pending tools as done — content after tools means they completed
+                  for (const id of pendingToolCallIds) {
+                    controller.enqueue({ type: 'tool-output-available', toolCallId: id, output: { ok: true } });
+                  }
+                  pendingToolCallIds.length = 0;
                   // Clear status message once real content starts flowing
                   statusCallback?.({ operation: '', phase: 'clear', message: '' });
                   controller.enqueue({ type: 'text-start', id: textPartId });
@@ -179,18 +191,27 @@ export class AxChatTransport extends HttpChatTransport<UIMessage> {
                   statusCallback?.({ operation: '', phase: 'clear', message: '' });
                   toolsStarted = true;
                 }
+                // Close current text part so text after tools gets its own part
+                if (started) {
+                  controller.enqueue({ type: 'text-end', id: textPartId });
+                  started = false;
+                  textPartCounter++;
+                  textPartId = `text-${textPartCounter}`;
+                }
                 for (const tc of delta.tool_calls) {
                   if (tc.function?.name) {
+                    const toolCallId = tc.id ?? `call_${tc.index}`;
                     let args = {};
                     if (tc.function.arguments) {
                       try { args = JSON.parse(tc.function.arguments); } catch { /* partial/malformed args, use empty */ }
                     }
                     controller.enqueue({
                       type: 'tool-input-available',
-                      toolCallId: tc.id ?? `call_${tc.index}`,
+                      toolCallId,
                       toolName: tc.function.name,
                       input: args,
                     });
+                    pendingToolCallIds.push(toolCallId);
                   }
                 }
               }

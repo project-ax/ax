@@ -5,8 +5,6 @@ import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import type { Kysely } from 'kysely';
 import { createKyselyDb } from '../../src/utils/database.js';
-import { runMigrations } from '../../src/utils/migrator.js';
-import { storageMigrations } from '../../src/providers/storage/migrations.js';
 import { create as createStorage } from '../../src/providers/storage/database.js';
 import type { MessageQueueStore } from '../../src/providers/storage/types.js';
 import { createRouter, type Router } from '../../src/host/router.js';
@@ -179,7 +177,6 @@ describe('E2E Integration', () => {
   beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'ax-e2e-'));
     kyselyDb = createKyselyDb({ type: 'sqlite', path: join(tmpDir, 'messages.db') });
-    await runMigrations(kyselyDb, storageMigrations('sqlite'));
     const storage = await createStorage({} as Config, undefined, {
       database: { db: kyselyDb, type: 'sqlite', vectorsAvailable: false, close: async () => { await kyselyDb.destroy(); } },
     });

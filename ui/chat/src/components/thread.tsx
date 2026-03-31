@@ -113,10 +113,6 @@ const ToolCallFallback: FC<{ toolName: string; args: unknown; status: { type: st
 
 const ChainOfThoughtTriggerContent: FC = () => {
   const statusMessage = useContext(StatusMessageContext);
-  const isActive = useAuiState((s: Record<string, unknown>) => {
-    const cot = s.chainOfThought as { status: { type: string }; parts: unknown[] };
-    return cot.status.type === 'running';
-  });
   const partsCount = useAuiState((s: Record<string, unknown>) => {
     const cot = s.chainOfThought as { parts: unknown[] };
     return cot.parts.length;
@@ -125,17 +121,29 @@ const ChainOfThoughtTriggerContent: FC = () => {
     const cot = s.chainOfThought as { collapsed: boolean };
     return cot.collapsed;
   });
+  const hasToolCalls = useAuiState((s: Record<string, unknown>) => {
+    const cot = s.chainOfThought as { parts: { type: string }[] };
+    return cot.parts.some(p => p.type === 'tool-call');
+  });
+  // A ChainOfThought is "active" if the message is running AND its tools don't all have results yet
+  const isActive = useAuiState((s: Record<string, unknown>) => {
+    const cot = s.chainOfThought as { status: { type: string }; parts: { type: string; result?: unknown; status?: { type: string } }[] };
+    if (cot.status.type !== 'running') return false;
+    const toolParts = cot.parts.filter(p => p.type === 'tool-call');
+    if (toolParts.length === 0) return true;
+    return !toolParts.every(p => p.result !== undefined || (p.status && p.status.type === 'complete'));
+  });
 
   return (
     <>
-      {collapsed
+      {(hasToolCalls || !isActive) && (collapsed
         ? <ChevronRightIcon className="size-3.5 shrink-0" strokeWidth={1.8} />
         : <ChevronDownIcon className="size-3.5 shrink-0" strokeWidth={1.8} />
-      }
+      )}
       {isActive ? (
         <>
           <LoaderIcon className="size-3.5 shrink-0 animate-spin text-amber" strokeWidth={1.8} />
-          <span>{'Thinking\u2026'}</span>
+          <span>{statusMessage || 'Thinking\u2026'}</span>
         </>
       ) : (
         <span>Done ({partsCount} tool {partsCount === 1 ? 'call' : 'calls'})</span>
@@ -174,7 +182,6 @@ const ThinkingChip: FC = () => {
   return (
     <div className="my-2 rounded-lg border border-border/40 bg-card/60 backdrop-blur-sm overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-muted-foreground">
-        <ChevronRightIcon className="size-3.5 shrink-0" strokeWidth={1.8} />
         <LoaderIcon className="size-3.5 shrink-0 animate-spin text-amber" strokeWidth={1.8} />
         <span>{statusMessage || 'Thinking\u2026'}</span>
       </div>

@@ -79,7 +79,8 @@ async function mockDeps(configOverrides: Partial<Config['admin']> = {}): Promise
       },
       storage: {
         documents: {
-          list: vi.fn().mockResolvedValue(['main/persona.md']),
+          list: vi.fn().mockImplementation((collection: string) =>
+            collection === 'identity' ? Promise.resolve(['main/persona.md']) : Promise.resolve([])),
           get: vi.fn().mockResolvedValue('You are a helpful assistant.'),
         },
       },
@@ -547,11 +548,11 @@ describe('tab endpoints handle provider errors gracefully', () => {
     expect(body.error.message).toContain('database connection lost');
   });
 
-  it('skills endpoint returns empty list when workspace has no downloadScope', async () => {
+  it('skills endpoint returns 500 with specific error when provider fails', async () => {
     const res = await fetchAdmin(port, '/admin/api/agents/main/skills', { token: 'test-secret-token' });
-    expect(res.status).toBe(200);
-    const data = res.body as Array<{ name: string }>;
-    expect(data).toEqual([]);
+    expect(res.status).toBe(500);
+    const body = res.body as { error: { message: string } };
+    expect(body.error.message).toContain('Failed to list skills');
   });
 
   it('workspace endpoint returns 500 with specific error when provider fails', async () => {
