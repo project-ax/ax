@@ -26,7 +26,23 @@ const useChatThreadRuntime = (transport: AxChatTransport): AssistantRuntime => {
   );
 
   const chat = useChat({ id, transport });
-  return useAISDKRuntime(chat, { adapters: { history } });
+  return useAISDKRuntime(chat, {
+    adapters: {
+      history,
+      attachments: {
+        accept: 'image/*,.pdf,.txt,.csv,.md,.json,.xlsx',
+        async send(attachment) {
+          const resp = await fetch(`/v1/files?agent=main&user=chat-ui&filename=${encodeURIComponent(attachment.name)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': attachment.type },
+            body: attachment.file,
+          });
+          const { fileId } = await resp.json();
+          return { ...attachment, url: fileId, contentType: attachment.type };
+        },
+      },
+    },
+  });
 };
 
 /**

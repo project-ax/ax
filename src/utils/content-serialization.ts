@@ -6,10 +6,10 @@ import type { ContentBlock } from '../types.js';
  */
 export function serializeContent(content: string | ContentBlock[]): string {
   if (typeof content === 'string') return content;
-  // Defense-in-depth: strip image_data blocks (transient, large base64) before
-  // persisting. These should already be converted to image file-ref blocks
+  // Defense-in-depth: strip transient data blocks (large base64) before
+  // persisting. These should already be converted to file-ref blocks
   // upstream, but guard against accidental leakage.
-  const safe = content.filter(b => b.type !== 'image_data');
+  const safe = content.filter(b => b.type !== 'image_data' && b.type !== 'file_data');
   return JSON.stringify(safe);
 }
 

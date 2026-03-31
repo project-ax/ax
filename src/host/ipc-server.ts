@@ -96,6 +96,10 @@ export interface IPCHandlerOptions {
   toolBatchProvider?: ((ctx: IPCContext) => ToolBatchProvider | null) | ToolBatchOptions;
   /** Cowork plugin management: MCP connection manager + optional domain list. */
   coworkPlugins?: CoworkPluginHandlerOptions;
+  /** GCS file storage for persistent file access. */
+  gcsFileStorage?: import('./gcs-file-storage.js').GcsFileStorage;
+  /** File store for file metadata lookups. */
+  fileStore?: import('../file-store.js').FileStore;
 }
 
 export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerOptions) {
@@ -123,7 +127,7 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
     ...createImageHandlers(providers),
     ...createDelegationHandlers(providers, opts),
     ...createSchedulerHandlers(providers, agentName),
-    ...createWorkspaceHandlers(providers, { agentName, profile }),
+    ...createWorkspaceHandlers(providers, { agentName, profile, gcsFileStorage: opts?.gcsFileStorage, fileStore: opts?.fileStore }),
     ...createGovernanceHandlers(providers, {
       agentDir: opts?.agentDir,
       agentName,

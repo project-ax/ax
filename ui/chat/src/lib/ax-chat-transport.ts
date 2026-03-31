@@ -64,10 +64,25 @@ export class AxChatTransport extends HttpChatTransport<UIMessage> {
           stream: true,
           // user format: "userId/threadId" — server derives sessionId from this
           user: options.id ? `${user}/${options.id}` : user,
-          messages: options.messages.map((m) => ({
-            role: m.role,
-            content: extractText(m),
-          })),
+          messages: options.messages.map((m) => {
+            const parts: any[] = [];
+            const text = extractText(m);
+            if (text) parts.push({ type: 'text', text });
+            // Include file attachments as content blocks
+            if ((m as any).experimental_attachments) {
+              for (const att of (m as any).experimental_attachments) {
+                if (att.contentType?.startsWith('image/')) {
+                  parts.push({ type: 'image', fileId: att.url, mimeType: att.contentType });
+                } else {
+                  parts.push({ type: 'file', fileId: att.url, mimeType: att.contentType, filename: att.name });
+                }
+              }
+            }
+            return {
+              role: m.role,
+              content: parts.length > 1 ? parts : text,
+            };
+          }),
         },
       }),
     });
@@ -150,6 +165,36 @@ export class AxChatTransport extends HttpChatTransport<UIMessage> {
                 try {
                   const payload = JSON.parse(trimmed.slice(6));
                   statusCallback?.(payload);
+                } catch { /* malformed event, skip */ }
+                pendingEventName = null;
+                continue;
+              }
+              if (pendingEventName === 'content_block') {
+                try {
+                  const block = JSON.parse(trimmed.slice(6));
+                  // Close current text part before inserting non-text content
+                  if (started) {
+                    controller.enqueue({ type: 'text-end', id: textPartId });
+                    started = false;
+                    textPartCounter++;
+                    textPartId = `text-${textPartCounter}`;
+                  }
+                  if (block.type === 'image') {
+                    // Emit image as an inline HTML block (rendered via text-start/delta/end)
+                    const imgTag = `\n\n![Generated image](/v1/files/${block.fileId})\n\n`;
+                    controller.enqueue({ type: 'text-start', id: textPartId });
+                    controller.enqueue({ type: 'text-delta', id: textPartId, delta: imgTag });
+                    controller.enqueue({ type: 'text-end', id: textPartId });
+                    textPartCounter++;
+                    textPartId = `text-${textPartCounter}`;
+                  } else if (block.type === 'file') {
+                    const fileLink = `\n\n[${block.filename}](/v1/files/${block.fileId})\n\n`;
+                    controller.enqueue({ type: 'text-start', id: textPartId });
+                    controller.enqueue({ type: 'text-delta', id: textPartId, delta: fileLink });
+                    controller.enqueue({ type: 'text-end', id: textPartId });
+                    textPartCounter++;
+                    textPartId = `text-${textPartCounter}`;
+                  }
                 } catch { /* malformed event, skip */ }
                 pendingEventName = null;
                 continue;

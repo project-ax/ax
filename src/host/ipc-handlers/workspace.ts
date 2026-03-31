@@ -11,14 +11,26 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import type { ProviderRegistry } from '../../types.js';
 import type { IPCContext } from '../ipc-server.js';
 import type { WorkspaceScope } from '../../providers/workspace/types.js';
 import { safePath } from '../../utils/safe-path.js';
+import type { GcsFileStorage } from '../gcs-file-storage.js';
+import type { FileStore } from '../../file-store.js';
+
+/** Extension to MIME type mapping for workspace file uploads. */
+const EXT_TO_MIME: Record<string, string> = {
+  pdf: 'application/pdf', txt: 'text/plain', csv: 'text/csv', md: 'text/markdown',
+  json: 'application/json', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+};
 
 export interface WorkspaceHandlerOptions {
   agentName: string;
   profile: string;
+  gcsFileStorage?: GcsFileStorage;
+  fileStore?: FileStore;
 }
 
 export function createWorkspaceHandlers(providers: ProviderRegistry, opts: WorkspaceHandlerOptions) {
@@ -78,6 +90,18 @@ export function createWorkspaceHandlers(providers: ProviderRegistry, opts: Works
         args: { tier, path: req.path, bytes: req.content.length },
         result: 'success',
       });
+
+      // Upload to GCS for persistent access via /v1/files
+      if (opts.gcsFileStorage) {
+        const ext = req.path.split('.').pop() ?? '';
+        const fileId = `files/${randomUUID()}.${ext}`;
+        const buf = Buffer.from(req.content, 'utf-8');
+        const mimeType = EXT_TO_MIME[ext] ?? 'application/octet-stream';
+        const originalFilename = req.path.split('/').pop() ?? req.path;
+        await opts.gcsFileStorage.upload(fileId, buf, mimeType, originalFilename);
+        await opts.fileStore?.register(fileId, opts.agentName, ctx.userId ?? 'unknown', mimeType, originalFilename);
+        return { written: true, tier, path: req.path, fileId };
+      }
 
       return { written: true, tier, path: req.path };
     },

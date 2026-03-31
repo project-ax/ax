@@ -4,8 +4,8 @@
  * agent spawning, outbound scanning, and memory persistence.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
 import { workspaceDir, agentWorkspaceDir, userWorkspaceDir, agentDir } from '../paths.js';
@@ -30,6 +30,7 @@ import { ensureOAuthTokenFreshViaProvider, ensureOAuthTokenFresh, refreshOAuthTo
 import { runnerPath as resolveRunnerPath, tsxLoader, isDevMode } from '../utils/assets.js';
 import type { OpenAIChatRequest } from './server-http.js';
 import type { FileStore } from '../file-store.js';
+import type { GcsFileStorage } from './gcs-file-storage.js';
 import type { EventBus } from './event-bus.js';
 import { maybeSummarizeHistory, type SummarizationConfig } from './history-summarizer.js';
 import { recallMemoryForMessage, type MemoryRecallConfig } from './memory-recall.js';
@@ -55,6 +56,7 @@ export interface CompletionDeps {
   logger: Logger;
   verbose?: boolean;
   fileStore?: FileStore;
+  gcsFileStorage?: GcsFileStorage;
   eventBus?: EventBus;
   /** Maps sessionId → workspace directory path. Shared with sandbox tool IPC handlers. */
   workspaceMap?: Map<string, string>;
@@ -243,9 +245,10 @@ export function extractImageDataBlocks(
   blocks: ContentBlock[],
   wsDir: string,
   logger: Logger,
+  gcsFileStorage?: GcsFileStorage,
 ): { blocks: ContentBlock[]; extractedFiles: ExtractedFile[] } {
-  const hasImageData = blocks.some(b => b.type === 'image_data');
-  if (!hasImageData) return { blocks, extractedFiles: [] };
+  const hasTransientData = blocks.some(b => b.type === 'image_data' || b.type === 'file_data');
+  if (!hasTransientData) return { blocks, extractedFiles: [] };
 
   const filesDir = safePath(wsDir, 'files');
   mkdirSync(filesDir, { recursive: true });
@@ -259,10 +262,17 @@ export function extractImageDataBlocks(
         const buf = Buffer.from(block.data, 'base64');
         const ext = MIME_TO_EXT[block.mimeType] ?? '.bin';
         const filename = `${randomUUID()}${ext}`;
-        const filePath = safePath(filesDir, filename);
-        writeFileSync(filePath, buf);
-
         const fileId = `files/${filename}`;
+
+        if (gcsFileStorage) {
+          gcsFileStorage.upload(fileId, buf, block.mimeType, filename).catch(err => {
+            logger.warn('gcs_image_upload_failed', { fileId, error: (err as Error).message });
+          });
+        } else {
+          const filePath = safePath(filesDir, filename);
+          writeFileSync(filePath, buf);
+        }
+
         converted.push({
           type: 'image',
           fileId,
@@ -271,6 +281,30 @@ export function extractImageDataBlocks(
         extractedFiles.push({ fileId, mimeType: block.mimeType, data: buf });
       } catch (err) {
         logger.warn('image_data_extract_failed', {
+          mimeType: block.mimeType,
+          error: (err as Error).message,
+        });
+      }
+    } else if (block.type === 'file_data') {
+      try {
+        const buf = Buffer.from(block.data, 'base64');
+        const ext = MIME_TO_EXT[block.mimeType] ?? '.bin';
+        const filename = `${randomUUID()}${ext}`;
+        const fileId = `files/${filename}`;
+
+        if (gcsFileStorage) {
+          gcsFileStorage.upload(fileId, buf, block.mimeType, block.filename).catch(err => {
+            logger.warn('gcs_file_upload_failed', { fileId, error: (err as Error).message });
+          });
+        } else {
+          const filePath = safePath(filesDir, filename);
+          writeFileSync(filePath, buf);
+        }
+
+        converted.push({ type: 'file', fileId, mimeType: block.mimeType, filename: block.filename });
+        extractedFiles.push({ fileId, mimeType: block.mimeType, data: buf });
+      } catch (err) {
+        logger.warn('file_data_extract_failed', {
           mimeType: block.mimeType,
           error: (err as Error).message,
         });
@@ -818,6 +852,40 @@ export async function processCompletion(
       userWsPath = userWsPath ?? enterpriseUserWs;
     }
 
+    // Provision uploaded files into sandbox workspace so agent can access via CLI tools
+    if (Array.isArray(content)) {
+      const fileBlocks = content.filter(b => b.type === 'file' || b.type === 'image');
+      if (fileBlocks.length > 0 && userWsPath) {
+        const provisionDir = safePath(userWsPath, 'files');
+        mkdirSync(provisionDir, { recursive: true });
+        for (const block of fileBlocks) {
+          const fid = 'fileId' in block ? (block as { fileId: string }).fileId : undefined;
+          if (!fid) continue;
+          try {
+            let data: Buffer | undefined;
+            if (deps.gcsFileStorage) {
+              data = await deps.gcsFileStorage.download(fid);
+            } else if (deps.fileStore) {
+              const entry = await deps.fileStore.lookup(fid);
+              if (entry) {
+                const segments = fid.split('/').filter(Boolean);
+                const srcPath = safePath(userWorkspaceDir(agentName, currentUserId), ...segments);
+                if (existsSync(srcPath)) data = readFileSync(srcPath);
+              }
+            }
+            if (data) {
+              const segments = fid.split('/').filter(Boolean);
+              const destPath = safePath(userWsPath, ...segments);
+              mkdirSync(dirname(destPath), { recursive: true });
+              writeFileSync(destPath, data);
+            }
+          } catch (err) {
+            reqLogger.warn('file_provision_failed', { fileId: fid, error: (err as Error).message });
+          }
+        }
+      }
+    }
+
     // Pre-load all stored credentials for this agent/user into the sandbox env.
     // When web_proxy is enabled: register as MITM proxy placeholders (the proxy
     // replaces them with real values in intercepted HTTPS traffic).
@@ -1362,7 +1430,7 @@ export async function processCompletion(
         if (b.type === 'text') return { ...b, text: outbound.content };
         return b;
       });
-      const extracted = extractImageDataBlocks(withScannedText, userWsPath, reqLogger);
+      const extracted = extractImageDataBlocks(withScannedText, userWsPath, reqLogger, deps.gcsFileStorage);
       responseBlocks = extracted.blocks;
       if (extracted.extractedFiles.length > 0) {
         extractedFiles = extracted.extractedFiles;
@@ -1392,11 +1460,15 @@ export async function processCompletion(
       // Without this, image URLs return 404 after the in-memory drain.
       for (const img of generatedImages) {
         try {
-          const filePath = safePath(userWsPath, ...img.fileId.split('/').filter(Boolean));
-          mkdirSync(join(filePath, '..'), { recursive: true });
-          writeFileSync(filePath, img.data);
+          if (deps.gcsFileStorage) {
+            await deps.gcsFileStorage.upload(img.fileId, img.data, img.mimeType, img.fileId.split('/').pop() ?? 'image');
+          } else {
+            const filePath = safePath(userWsPath, ...img.fileId.split('/').filter(Boolean));
+            mkdirSync(join(filePath, '..'), { recursive: true });
+            writeFileSync(filePath, img.data);
+          }
           deps.fileStore?.register(img.fileId, agentName, currentUserId, img.mimeType);
-          reqLogger.info('image_persisted', { fileId: img.fileId, path: filePath, bytes: img.data.length });
+          reqLogger.info('image_persisted', { fileId: img.fileId, bytes: img.data.length });
         } catch (err) {
           reqLogger.warn('image_persist_failed', { fileId: img.fileId, workspace: userWsPath, error: (err as Error).message });
         }

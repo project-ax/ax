@@ -22,6 +22,17 @@ export function buildFilesMigrations(dbType: DbDialect): MigrationSet {
         await db.schema.dropTable('files').execute();
       },
     },
+    files_002_add_filename: {
+      async up(db: Kysely<any>) {
+        await db.schema
+          .alterTable('files')
+          .addColumn('filename', 'text', col => col.notNull().defaultTo(''))
+          .execute();
+      },
+      async down(db: Kysely<any>) {
+        await db.schema.alterTable('files').dropColumn('filename').execute();
+      },
+    },
   };
 }
 

@@ -7,10 +7,12 @@ import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import type { ChannelProvider, InboundMessage, Attachment } from '../providers/channel/types.js';
 import { canonicalize } from '../providers/channel/types.js';
-import type { ContentBlock, ImageMimeType } from '../types.js';
-import { IMAGE_MIME_TYPES } from '../types.js';
+import type { ContentBlock, ImageMimeType, UploadMimeType } from '../types.js';
+import { IMAGE_MIME_TYPES, UPLOAD_MIME_TYPES } from '../types.js';
 import { userWorkspaceDir } from '../paths.js';
 import { safePath } from '../utils/safe-path.js';
+import type { GcsFileStorage } from './gcs-file-storage.js';
+import type { FileStore } from '../file-store.js';
 import type { ConversationStoreProvider, SessionStoreProvider } from '../providers/storage/types.js';
 import type { Router } from './router.js';
 import type { Logger } from '../logger.js';
@@ -24,11 +26,8 @@ const CHANNEL_RECONNECT_INITIAL_DELAY_MS = 2_000;
 const CHANNEL_RECONNECT_MAX_DELAY_MS = 60_000;
 
 /**
- * Download channel attachments that are images and embed them as inline
- * image_data content blocks (base64). No disk round-trip — the Anthropic
- * provider handles image_data blocks natively.
- *
- * Non-image attachments are ignored (for now).
+ * Download channel attachments and embed them as content blocks.
+ * Images become image_data blocks, documents become file blocks (uploaded to GCS).
  * If all downloads fail, returns the text content as-is.
  */
 export async function buildContentWithAttachments(
@@ -36,18 +35,19 @@ export async function buildContentWithAttachments(
   attachments: Attachment[],
   logger: Logger,
   downloadFn?: (att: Attachment) => Promise<Buffer | undefined>,
+  opts?: { gcsFileStorage?: GcsFileStorage; fileStore?: FileStore; agentName?: string; userId?: string },
 ): Promise<string | ContentBlock[]> {
-  const imageAttachments = attachments.filter(
-    a => IMAGE_MIME_TYPES.includes(a.mimeType as ImageMimeType),
+  const supportedAttachments = attachments.filter(
+    a => UPLOAD_MIME_TYPES.includes(a.mimeType as UploadMimeType),
   );
-  if (imageAttachments.length === 0) return textContent;
+  if (supportedAttachments.length === 0) return textContent;
 
   const blocks: ContentBlock[] = [];
   if (textContent.trim()) {
     blocks.push({ type: 'text', text: textContent });
   }
 
-  for (const att of imageAttachments) {
+  for (const att of supportedAttachments) {
     try {
       // Use provider-specific download function (handles auth), fall back to plain fetch
       let data: Buffer | undefined = att.content;
@@ -64,11 +64,36 @@ export async function buildContentWithAttachments(
       }
       if (!data || data.length === 0) continue;
 
-      blocks.push({
-        type: 'image_data',
-        data: data.toString('base64'),
-        mimeType: att.mimeType as ImageMimeType,
-      });
+      const isImage = IMAGE_MIME_TYPES.includes(att.mimeType as ImageMimeType);
+
+      // Upload to GCS if available, creating file blocks with persistent fileIds
+      if (opts?.gcsFileStorage) {
+        const ext = att.filename?.split('.').pop() ?? (isImage ? 'png' : 'bin');
+        const fileId = `files/${randomUUID()}.${ext}`;
+        await opts.gcsFileStorage.upload(fileId, data, att.mimeType, att.filename ?? fileId);
+        await opts.fileStore?.register(fileId, opts.agentName ?? 'main', opts.userId ?? 'unknown', att.mimeType, att.filename ?? '');
+
+        if (isImage) {
+          blocks.push({ type: 'image', fileId, mimeType: att.mimeType as ImageMimeType });
+        } else {
+          blocks.push({ type: 'file', fileId, mimeType: att.mimeType, filename: att.filename ?? fileId });
+        }
+      } else if (isImage) {
+        // Inline image_data for non-GCS mode (images only)
+        blocks.push({
+          type: 'image_data',
+          data: data.toString('base64'),
+          mimeType: att.mimeType as ImageMimeType,
+        });
+      } else {
+        // Non-GCS document attachments: inline as file_data
+        blocks.push({
+          type: 'file_data',
+          data: data.toString('base64'),
+          mimeType: att.mimeType,
+          filename: att.filename ?? 'attachment',
+        });
+      }
     } catch (err) {
       logger.warn('attachment_download_failed', {
         filename: att.filename,
@@ -77,7 +102,7 @@ export async function buildContentWithAttachments(
     }
   }
 
-  // If no images were downloaded, return plain text
+  // If no attachments were processed, return plain text
   if (blocks.length <= 1 && blocks[0]?.type === 'text') return textContent;
   if (blocks.length === 0) return textContent;
   return blocks;
@@ -228,10 +253,15 @@ export function registerChannelHandler(
       }
       sessionCanaries.set(result.sessionId, result.canaryToken);
 
-      // Download attachments (images) and embed as inline image_data blocks
+      // Download attachments and embed as content blocks (images + documents)
       const downloadFn = channel.downloadAttachment?.bind(channel);
       const messageContent = msg.attachments.length > 0
-        ? await buildContentWithAttachments(msg.content, msg.attachments, logger, downloadFn)
+        ? await buildContentWithAttachments(msg.content, msg.attachments, logger, downloadFn, {
+            gcsFileStorage: completionDeps.gcsFileStorage,
+            fileStore: completionDeps.fileStore,
+            agentName,
+            userId: msg.sender,
+          })
         : msg.content;
 
       // Determine if reply is optional (LLM can choose not to respond)

@@ -108,7 +108,7 @@ export async function createServer(
   // ── Shared initialization (storage, routing, IPC, templates, orchestrator) ──
   const core = await initHostCore({ config, providers, eventBus, verbose: opts.verbose });
   const {
-    completionDeps, conversationStore, sessionStore, router, taintBudget, fileStore,
+    completionDeps, conversationStore, sessionStore, router, taintBudget, fileStore, gcsFileStorage,
     ipcServer, ipcSocketDir, orchestrator, disableAutoState,
     agentRegistry, agentName, agentDirVal, identityFilesDir, sessionCanaries,
     modelId,
@@ -243,6 +243,7 @@ export async function createServer(
     eventBus,
     providers,
     fileStore,
+    gcsFileStorage,
     taintBudget,
     completionOpts: {
       modelId,

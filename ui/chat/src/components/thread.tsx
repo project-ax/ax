@@ -6,6 +6,7 @@ import {
   ChevronRightIcon,
   CopyIcon,
   LoaderIcon,
+  PaperclipIcon,
   PencilIcon,
   RefreshCwIcon,
   Square,
@@ -73,7 +74,13 @@ const Composer: FC = () => (
           rows={1}
           autoFocus
         />
-        <div className="relative mx-1 mt-2 mb-2 flex items-center justify-end">
+        <div className="relative mx-1 mt-2 mb-2 flex items-center justify-between">
+          <ComposerPrimitive.AddAttachment asChild>
+            <button className="p-1.5 text-muted-foreground hover:text-foreground transition-colors duration-150">
+              <PaperclipIcon className="size-4" />
+            </button>
+          </ComposerPrimitive.AddAttachment>
+          <div className="flex items-center">
           <ThreadPrimitive.If running={false}>
             <ComposerPrimitive.Send asChild>
               <button className="rounded-full bg-amber p-1.5 text-primary-foreground hover:bg-amber/90 transition-colors duration-150">
@@ -88,6 +95,7 @@ const Composer: FC = () => (
               </button>
             </ComposerPrimitive.Cancel>
           </ThreadPrimitive.If>
+          </div>
         </div>
       </div>
     </ComposerPrimitive.Root>
