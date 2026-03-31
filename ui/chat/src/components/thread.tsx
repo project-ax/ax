@@ -113,10 +113,6 @@ const ToolCallFallback: FC<{ toolName: string; args: unknown; status: { type: st
 
 const ChainOfThoughtTriggerContent: FC = () => {
   const statusMessage = useContext(StatusMessageContext);
-  const isActive = useAuiState((s: Record<string, unknown>) => {
-    const cot = s.chainOfThought as { status: { type: string }; parts: unknown[] };
-    return cot.status.type === 'running';
-  });
   const partsCount = useAuiState((s: Record<string, unknown>) => {
     const cot = s.chainOfThought as { parts: unknown[] };
     return cot.parts.length;
@@ -128,6 +124,14 @@ const ChainOfThoughtTriggerContent: FC = () => {
   const hasToolCalls = useAuiState((s: Record<string, unknown>) => {
     const cot = s.chainOfThought as { parts: { type: string }[] };
     return cot.parts.some(p => p.type === 'tool-call');
+  });
+  // A ChainOfThought is "active" if the message is running AND its tools don't all have results yet
+  const isActive = useAuiState((s: Record<string, unknown>) => {
+    const cot = s.chainOfThought as { status: { type: string }; parts: { type: string; result?: unknown; status?: { type: string } }[] };
+    if (cot.status.type !== 'running') return false;
+    const toolParts = cot.parts.filter(p => p.type === 'tool-call');
+    if (toolParts.length === 0) return true;
+    return !toolParts.every(p => p.result !== undefined || (p.status && p.status.type === 'complete'));
   });
 
   return (
