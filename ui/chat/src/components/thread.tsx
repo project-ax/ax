@@ -125,17 +125,21 @@ const ChainOfThoughtTriggerContent: FC = () => {
     const cot = s.chainOfThought as { collapsed: boolean };
     return cot.collapsed;
   });
+  const hasToolCalls = useAuiState((s: Record<string, unknown>) => {
+    const cot = s.chainOfThought as { parts: { type: string }[] };
+    return cot.parts.some(p => p.type === 'tool-call');
+  });
 
   return (
     <>
-      {collapsed
+      {(hasToolCalls || !isActive) && (collapsed
         ? <ChevronRightIcon className="size-3.5 shrink-0" strokeWidth={1.8} />
         : <ChevronDownIcon className="size-3.5 shrink-0" strokeWidth={1.8} />
-      }
+      )}
       {isActive ? (
         <>
           <LoaderIcon className="size-3.5 shrink-0 animate-spin text-amber" strokeWidth={1.8} />
-          <span>{'Thinking\u2026'}</span>
+          <span>{statusMessage || 'Thinking\u2026'}</span>
         </>
       ) : (
         <span>Done ({partsCount} tool {partsCount === 1 ? 'call' : 'calls'})</span>
@@ -174,7 +178,6 @@ const ThinkingChip: FC = () => {
   return (
     <div className="my-2 rounded-lg border border-border/40 bg-card/60 backdrop-blur-sm overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-2.5 text-[13px] font-medium text-muted-foreground">
-        <ChevronRightIcon className="size-3.5 shrink-0" strokeWidth={1.8} />
         <LoaderIcon className="size-3.5 shrink-0 animate-spin text-amber" strokeWidth={1.8} />
         <span>{statusMessage || 'Thinking\u2026'}</span>
       </div>

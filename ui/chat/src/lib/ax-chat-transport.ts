@@ -179,6 +179,13 @@ export class AxChatTransport extends HttpChatTransport<UIMessage> {
                   statusCallback?.({ operation: '', phase: 'clear', message: '' });
                   toolsStarted = true;
                 }
+                // Close current text part so text after tools gets its own part
+                if (started) {
+                  controller.enqueue({ type: 'text-end', id: textPartId });
+                  started = false;
+                  textPartCounter++;
+                  textPartId = `text-${textPartCounter}`;
+                }
                 for (const tc of delta.tool_calls) {
                   if (tc.function?.name) {
                     let args = {};
