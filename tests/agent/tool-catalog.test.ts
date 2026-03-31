@@ -82,6 +82,24 @@ describe('tool-catalog', () => {
     expect(keys.sort()).toEqual(['content', 'path', 'query', 'slug']);
   });
 
+  test('skill install variants each require slug or query (not both optional)', () => {
+    const skillTool = TOOL_CATALOG.find(t => t.name === 'skill')!;
+    const schema = skillTool.parameters as any;
+    const installVariants = schema.anyOf.filter(
+      (v: any) => v.properties?.type?.const === 'install',
+    );
+    // Should have two install variants: one with required slug, one with required query
+    expect(installVariants.length).toBe(2);
+    const hasSlugRequired = installVariants.some(
+      (v: any) => v.required?.includes('slug') && !v.required?.includes('query'),
+    );
+    const hasQueryRequired = installVariants.some(
+      (v: any) => v.required?.includes('query') && !v.required?.includes('slug'),
+    );
+    expect(hasSlugRequired).toBe(true);
+    expect(hasQueryRequired).toBe(true);
+  });
+
   test('request_credential tool exists in catalog as singleton', () => {
     const credTool = TOOL_CATALOG.find(t => t.name === 'request_credential');
     expect(credTool).toBeDefined();
@@ -247,9 +265,17 @@ describe('filterTools', () => {
     expect(names).not.toContain('scheduler');
   });
 
-  test('skillInstallEnabled=true includes skill tool', () => {
+  test('skillInstallEnabled=true includes skill tool with install action', () => {
     const result = filterTools({ ...NO_FLAGS, skillInstallEnabled: true });
-    expect(result.map(s => s.name)).toContain('skill');
+    const skill = result.find(s => s.name === 'skill');
+    expect(skill).toBeDefined();
+    expect(skill!.actionMap).toHaveProperty('install');
+    // Schema should contain install variants
+    const schema = skill!.parameters as any;
+    const installVariants = schema.anyOf.filter(
+      (v: any) => v.properties?.type?.const === 'install',
+    );
+    expect(installVariants.length).toBeGreaterThan(0);
   });
 
   test('skill tool always present regardless of skillInstallEnabled flag', () => {
@@ -258,10 +284,34 @@ describe('filterTools', () => {
     expect(result.map(s => s.name)).toContain('request_credential');
   });
 
-  test('skillInstallEnabled undefined defaults to including skill tool', () => {
+  test('skillInstallEnabled=false strips install variants from skill tool', () => {
+    const result = filterTools({ ...NO_FLAGS, skillInstallEnabled: false });
+    const skill = result.find(s => s.name === 'skill');
+    expect(skill).toBeDefined();
+    // actionMap should not contain install
+    expect(skill!.actionMap).not.toHaveProperty('install');
+    // create/update/delete should remain
+    expect(skill!.actionMap).toHaveProperty('create');
+    expect(skill!.actionMap).toHaveProperty('update');
+    expect(skill!.actionMap).toHaveProperty('delete');
+    // Schema should not contain install variants
+    const schema = skill!.parameters as any;
+    const installVariants = schema.anyOf.filter(
+      (v: any) => v.properties?.type?.const === 'install',
+    );
+    expect(installVariants.length).toBe(0);
+    // Description should not advertise install as an available type
+    expect(skill!.description).not.toMatch(/- install:/);
+    expect(skill!.description).not.toMatch(/Create, install,/);
+  });
+
+  test('skillInstallEnabled undefined defaults to including skill tool without install', () => {
     const ctx: ToolFilterContext = { hasHeartbeat: false, hasWorkspaceScopes: false, hasGovernance: false };
     const result = filterTools(ctx);
-    expect(result.map(s => s.name)).toContain('skill');
+    const skill = result.find(s => s.name === 'skill');
+    expect(skill).toBeDefined();
+    // undefined skillInstallEnabled should strip install (falsy)
+    expect(skill!.actionMap).not.toHaveProperty('install');
   });
 
   test('request_credential is always present regardless of flags', () => {

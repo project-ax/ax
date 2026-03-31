@@ -219,8 +219,11 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
       }),
       Type.Object({
         type: Type.Literal('install'),
-        slug: Type.Optional(Type.String({ description: 'ClawHub skill slug' })),
-        query: Type.Optional(Type.String({ description: 'Search query' })),
+        slug: Type.String({ description: 'ClawHub skill slug (owner/name or URL)' }),
+      }),
+      Type.Object({
+        type: Type.Literal('install'),
+        query: Type.String({ description: 'Search query to find skills on ClawHub' }),
       }),
       Type.Object({
         type: Type.Literal('update'),
@@ -558,18 +561,51 @@ export interface ToolFilterContext {
 /**
  * Filter the catalog to tools relevant to the current session.
  * Without a context, returns the full catalog (backward compat).
+ *
+ * When skillInstallEnabled is false, the skill tool's install variants
+ * are stripped from its parameter union so the LLM can't attempt installs.
  */
 export function filterTools(ctx: ToolFilterContext): readonly ToolSpec[] {
-  return TOOL_CATALOG.filter(spec => {
-    switch (spec.category) {
-      case 'scheduler':  return ctx.hasHeartbeat;
-      case 'skill':      return true;  // always available — delete/update shouldn't require install intent
-      case 'workspace':        return ctx.hasWorkspaceScopes;
-      case 'workspace_scopes': return ctx.hasWorkspaceScopes;
-      case 'governance': return ctx.hasGovernance;
-      default:           return true;
-    }
-  });
+  return TOOL_CATALOG
+    .filter(spec => {
+      switch (spec.category) {
+        case 'scheduler':  return ctx.hasHeartbeat;
+        case 'skill':      return true;  // always available — delete/update shouldn't require install intent
+        case 'workspace':        return ctx.hasWorkspaceScopes;
+        case 'workspace_scopes': return ctx.hasWorkspaceScopes;
+        case 'governance': return ctx.hasGovernance;
+        default:           return true;
+      }
+    })
+    .map(spec => {
+      // Strip install variants from skill tool when install intent not detected
+      if (spec.category === 'skill' && !ctx.skillInstallEnabled) {
+        return stripSkillInstall(spec);
+      }
+      return spec;
+    });
+}
+
+/** Remove install variants from skill tool's parameter union and actionMap. */
+function stripSkillInstall(spec: ToolSpec): ToolSpec {
+  const schema = spec.parameters as { anyOf?: Array<{ properties?: { type?: { const?: string } } }> };
+  if (!schema.anyOf) return spec;
+
+  const filtered = schema.anyOf.filter(
+    variant => variant.properties?.type?.const !== 'install',
+  );
+  if (filtered.length === schema.anyOf.length) return spec; // nothing to strip
+
+  const { install: _, ...remainingActions } = spec.actionMap ?? {};
+  const description = spec.description
+    .replace('Create, install, update, and delete', 'Create, update, and delete')
+    .replace(/\n- install:[^\n]*/g, '');
+  return {
+    ...spec,
+    description,
+    parameters: Type.Union(filtered as TSchema[]),
+    actionMap: remainingActions,
+  };
 }
 
 // ── Parameter normalization for weaker models ────────────────────────

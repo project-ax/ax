@@ -241,6 +241,28 @@ function text(t: string) {
  *  calls, not LLM turns, so the limit is higher). */
 const MAX_TOOL_CALLS = 50;
 
+/** Maximum consecutive failed calls to the same IPC action before circuit-breaking.
+ *  Prevents the LLM from burning tool budget retrying a failing action. */
+const MAX_CONSECUTIVE_ACTION_FAILURES = 3;
+
+/** Detect common failure indicators in a stringified IPC result. */
+function isFailureResult(resultStr: string): boolean {
+  try {
+    const parsed = JSON.parse(resultStr);
+    // unwrap text wrapper: { content: [{ text: "..." }] }
+    const inner = parsed?.content?.[0]?.text;
+    if (typeof inner === 'string') {
+      if (inner.startsWith('Error:')) return true;
+      try {
+        const obj = JSON.parse(inner);
+        if (obj.installed === false || obj.ok === false) return true;
+        if (typeof obj.error === 'string') return true;
+      } catch { /* not JSON inner — not a structured failure */ }
+    }
+  } catch { /* not JSON at all */ }
+  return false;
+}
+
 interface IPCToolDefsOptions {
   /** Current user ID — included in user_write calls for per-user scoping. */
   userId?: string;
@@ -275,6 +297,9 @@ function createIPCToolDefinitions(client: IIPCClient, opts?: IPCToolDefsOptions)
   const catalog = opts?.filter ? filterTools(opts.filter) : TOOL_CATALOG;
   let toolCallCount = 0;
 
+  // Per-action failure tracking for circuit-breaking retry loops
+  const actionFailures = new Map<string, number>();
+
   return catalog.map(spec => ({
     name: spec.name,
     label: spec.label,
@@ -301,6 +326,16 @@ function createIPCToolDefinitions(client: IIPCClient, opts?: IPCToolDefsOptions)
       } else {
         action = spec.singletonAction ?? spec.name;
         callParams = raw;
+      }
+
+      // Circuit-breaker: stop retrying an action that keeps failing
+      const priorFailures = actionFailures.get(action) ?? 0;
+      if (priorFailures >= MAX_CONSECUTIVE_ACTION_FAILURES) {
+        logger.warn('action_circuit_breaker', { action, failures: priorFailures });
+        return text(
+          `Error: "${action}" has failed ${priorFailures} consecutive times. ` +
+          'Do NOT retry — inform the user what went wrong and move on.',
+        );
       }
 
       // Route sandbox tools to local executor when in container
@@ -334,6 +369,13 @@ function createIPCToolDefinitions(client: IIPCClient, opts?: IPCToolDefsOptions)
       const toolDurationMs = Date.now() - toolStart;
       const resultStr = JSON.stringify(result);
       logger.debug('tool_result', { name: spec.name, action, durationMs: toolDurationMs, resultLength: resultStr.length });
+
+      // Track failures for circuit-breaker (check for common failure indicators)
+      if (isFailureResult(resultStr)) {
+        actionFailures.set(action, priorFailures + 1);
+      } else {
+        actionFailures.delete(action); // reset on success
+      }
       process.stderr.write(`[diag] tool_result name=${spec.name} action=${action} duration=${toolDurationMs}ms resultLen=${resultStr.length}\n`);
       return result;
     },
