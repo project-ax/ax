@@ -2,6 +2,12 @@
 
 ## Lessons
 
+### Don't call runMigrations() before createStorage() — it runs them internally
+**Date:** 2026-03-31
+**Context:** 20 tests failed with `SqliteError: no such column: "agent_id"` because test setup called `runMigrations(db, storageMigrations('sqlite'))` then `createStorage()` which runs migrations again with a different tracking table name (`storage_migration`). Migration 006 re-ran after 007 had already removed the column.
+**Lesson:** Never call `runMigrations()` manually before `createStorage()`. The `create()` factory in `src/providers/storage/database.ts` runs migrations internally with its own tracking table. Calling it twice with different table names causes double-execution where later migrations' table changes confuse re-executed earlier migrations.
+**Tags:** migrations, kysely, createStorage, double-migration, sqlite
+
 ### Module-level const from env var won't reflect runtime changes
 **Date:** 2026-03-20
 **Context:** CLAWHUB_API_URL env override didn't work because `const CLAWHUB_API = process.env.CLAWHUB_API_URL || '...'` is evaluated at module load time, not at call time.

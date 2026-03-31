@@ -2,6 +2,17 @@
 
 Kysely migration infrastructure: runner, database factory, store integration, upgrade-path tests.
 
+## [2026-03-31 06:30] — Fix 25 test failures from double-migration and stale global-MCP assumptions
+
+**Task:** Fix 25 failing tests across 8 test files
+**What I did:** Root-caused 3 distinct issues:
+1. **Double-migration collision (20 tests):** 4 test files called `runMigrations()` before `createStorage()`, which also runs migrations internally. Different tracking table names (`kysely_migration` vs `storage_migration`) caused migration 006 to re-run after 007 had already removed the `agent_id` column. Fix: removed the redundant `runMigrations()` calls.
+2. **Mock not collection-aware (2 tests):** `server-admin.test.ts` mock `documents.list` returned identity docs for ALL collections including `'skills'`. Fix: made mock collection-aware.
+3. **Stale per-agent MCP assumptions (3 tests):** `McpConnectionManager` was refactored to a global registry but tests expected per-agent isolation. Fix: updated test assertions to match global behavior.
+**Files touched:** tests/host/router.test.ts, tests/integration/e2e.test.ts, tests/integration/phase1.test.ts, tests/integration/phase2.test.ts, tests/host/server-admin.test.ts, tests/plugins/startup.test.ts, tests/plugins/install.test.ts, tests/agent/prompt/modules/skills.test.ts
+**Outcome:** Success — all 2753 tests pass
+**Notes:** All failures were pre-existing on main, not introduced by the ui-fixes branch.
+
 ## [2026-03-05 20:00] — Migrate 5 test files from deleted MessageQueue to Kysely-backed MessageQueueStore
 
 **Task:** Fix 5 test files that imported `MessageQueue` from the now-deleted `src/db.js`

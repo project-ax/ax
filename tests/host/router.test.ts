@@ -2,8 +2,6 @@ import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import type { Kysely } from 'kysely';
 import { createRouter, type Router } from '../../src/host/router.js';
 import { createKyselyDb } from '../../src/utils/database.js';
-import { runMigrations } from '../../src/utils/migrator.js';
-import { storageMigrations } from '../../src/providers/storage/migrations.js';
 import { create as createStorage } from '../../src/providers/storage/database.js';
 import type { MessageQueueStore } from '../../src/providers/storage/types.js';
 import type { ProviderRegistry, Config } from '../../src/types.js';
@@ -124,7 +122,6 @@ describe('Message Router', () => {
   beforeEach(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'ax-router-test-'));
     kyselyDb = createKyselyDb({ type: 'sqlite', path: join(tmpDir, 'messages.db') });
-    await runMigrations(kyselyDb, storageMigrations('sqlite'));
     const storage = await createStorage({} as Config, undefined, {
       database: { db: kyselyDb, type: 'sqlite', vectorsAvailable: false, close: async () => { await kyselyDb.destroy(); } },
     });

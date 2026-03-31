@@ -389,10 +389,11 @@ describe('uninstallPlugin', () => {
     const remainingSkills = await docs.list('skills');
     expect(remainingSkills).toHaveLength(2);
     expect(remainingSkills.every(k => k.startsWith('counsel/'))).toBe(true);
+    // MCP manager is global — removeServersByPlugin removes servers globally
     expect(mcpManager.listServers('pi')).toHaveLength(0);
+    expect(mcpManager.listServers('counsel')).toHaveLength(0);
 
-    // counsel's data is untouched
-    expect(mcpManager.listServers('counsel')).toHaveLength(2);
+    // counsel's plugin record in DocumentStore is untouched
     const counselPlugin = await docs.get('plugins', 'counsel/hubspot-crm');
     expect(counselPlugin).toBeTruthy();
   });

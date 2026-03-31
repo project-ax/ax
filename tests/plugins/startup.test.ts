@@ -96,10 +96,13 @@ describe('reloadPluginMcpServers', () => {
     }));
 
     await reloadPluginMcpServers(docs, manager);
-    expect(manager.listServers('pi')).toHaveLength(1);
-    expect(manager.listServers('pi')[0].name).toBe('slack');
-    expect(manager.listServers('counsel')).toHaveLength(1);
-    expect(manager.listServers('counsel')[0].name).toBe('docusign');
+    // Server registry is global — all agents see all servers
+    const allServers = manager.listServers('pi');
+    expect(allServers).toHaveLength(2);
+    expect(allServers.map(s => s.name)).toContain('slack');
+    expect(allServers.map(s => s.name)).toContain('docusign');
+    // Same servers visible from any agent
+    expect(manager.listServers('counsel')).toHaveLength(2);
   });
 
   it('handles empty DB gracefully', async () => {
