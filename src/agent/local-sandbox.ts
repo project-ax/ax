@@ -278,8 +278,9 @@ export function createLocalSandbox(opts: LocalSandboxOptions) {
           }
         });
 
-        child.on('close', () => {
-          report({ operation: 'grep', path: opts?.path ?? '.', success: true });
+        child.on('close', (code) => {
+          const success = code === 0 || code === 1;
+          report({ operation: 'grep', path: opts?.path ?? '.', success });
           resolve({ matches: output, truncated, count: lineCount });
         });
 
@@ -335,11 +336,12 @@ export function createLocalSandbox(opts: LocalSandboxOptions) {
           }
         });
 
-        child.on('close', () => {
+        child.on('close', (code) => {
           if (buffer && !truncated && files.length < maxResults) {
             files.push(buffer.startsWith(workspace) ? buffer.slice(workspace.length + 1) : buffer);
           }
-          report({ operation: 'glob', path: opts?.path ?? '.', success: true });
+          const success = code === 0 || code === 1;
+          report({ operation: 'glob', path: opts?.path ?? '.', success });
           resolve({ files, truncated, count: files.length });
         });
 

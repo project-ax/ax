@@ -341,12 +341,12 @@ export function createIPCMcpServer(client: IIPCClient, opts?: MCPServerOptions):
     // ── Grep (search file contents) ──
     tool('grep', getToolDescription('grep'),
       {
-        pattern: z.string().describe('Regex pattern to search for'),
-        path: z.string().optional().describe('Directory to search in, relative to workspace (default: ".")'),
-        glob: z.string().optional().describe('File filter pattern, e.g. "*.ts", "*.{js,jsx}"'),
-        max_results: z.number().optional().describe('Maximum matching lines to return (default: 100)'),
+        pattern: z.string().max(10_000).describe('Regex pattern to search for'),
+        path: z.string().max(1024).optional().describe('Directory to search in, relative to workspace (default: ".")'),
+        glob: z.string().max(1024).optional().describe('File filter pattern, e.g. "*.ts", "*.{js,jsx}"'),
+        max_results: z.number().int().min(1).max(10_000).optional().describe('Maximum matching lines to return (default: 100)'),
         include_line_numbers: z.boolean().optional().describe('Show line numbers (default: true)'),
-        context_lines: z.number().optional().describe('Lines of context around each match (default: 0)'),
+        context_lines: z.number().int().min(0).max(20).optional().describe('Lines of context around each match (default: 0)'),
       },
       sandbox
         ? async (args) => textResult(await sandbox.grep(args.pattern, {
@@ -365,9 +365,9 @@ export function createIPCMcpServer(client: IIPCClient, opts?: MCPServerOptions):
     // ── Glob (find files by pattern) ──
     tool('glob', getToolDescription('glob'),
       {
-        pattern: z.string().describe('Glob pattern, e.g. "**/*.ts", "src/**/*.test.*"'),
-        path: z.string().optional().describe('Base directory, relative to workspace (default: ".")'),
-        max_results: z.number().optional().describe('Maximum files to return (default: 100)'),
+        pattern: z.string().max(1024).describe('Glob pattern, e.g. "**/*.ts", "src/**/*.test.*"'),
+        path: z.string().max(1024).optional().describe('Base directory, relative to workspace (default: ".")'),
+        max_results: z.number().int().min(1).max(10_000).optional().describe('Maximum files to return (default: 100)'),
       },
       sandbox
         ? async (args) => textResult(await sandbox.glob(args.pattern, {
