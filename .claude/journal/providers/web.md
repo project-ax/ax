@@ -1,3 +1,17 @@
+## [2026-03-30 20:20] — Fix HTTPS DNS pinning TLS failure in web_fetch
+
+**Task:** Fix `web.fetch` tool failing on all HTTPS URLs due to DNS pinning replacing hostname with IP in URL
+**What I did:**
+- Diagnosed root cause: `fetch.ts` replaced URL hostname with pinned IP, breaking TLS SNI/cert validation for HTTPS
+- Replaced URL hostname rewriting with undici `Agent` custom `lookup` callback that returns the pinned IP
+- This preserves original hostname for TLS SNI while connecting to the verified IP (SSRF protection maintained)
+- Added `ca` option to `WebFetchOptions` for test self-signed cert trust
+- Added HTTPS test using node-forge self-signed cert for `localhost`
+- Key detail: undici passes `{ all: true }` in lookup options, requiring array response format
+**Files touched:** `src/providers/web/fetch.ts`, `tests/providers/web/fetch.test.ts`
+**Outcome:** Success — all 17 fetch tests pass, no regressions, clean build
+**Notes:** The bug was invisible because existing tests only used HTTP. All HTTPS fetches from the agent were silently failing.
+
 ## [2026-03-20 18:10] — Split monolithic WebProvider into fetch/extract/search
 
 **Task:** Split `WebProvider` (fetch + search) into three independent operations: raw fetch (hardcoded), configurable text extraction, and configurable web search with independent provider selection.

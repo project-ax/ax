@@ -9,13 +9,27 @@ import { PromptBuilder } from './prompt/builder.js';
 import { loadIdentityFiles } from './identity-loader.js';
 import { loadSkillsMultiDir } from './stream-utils.js';
 import { detectSkillInstallIntent } from './prompt/modules/skills.js';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import type { AgentConfig } from './runner.js';
 import type { ToolFilterContext } from './tool-catalog.js';
 
 const logger = getLogger().child({ component: 'agent-setup' });
 
 const DEFAULT_CONTEXT_WINDOW = 200000;
+
+/** Scan agentWorkspace/bin/ for MCP CLI executables. */
+function scanMcpCLIs(agentWorkspace?: string): string[] | undefined {
+  if (!agentWorkspace) return undefined;
+  const binDir = resolve(agentWorkspace, 'bin');
+  if (!existsSync(binDir)) return undefined;
+  try {
+    const entries = readdirSync(binDir).filter(f => {
+      try { return statSync(join(binDir, f)).isFile(); } catch { return false; }
+    });
+    return entries.length > 0 ? entries : undefined;
+  } catch { return undefined; }
+}
 
 export interface PromptBuildResult {
   systemPrompt: string;
@@ -63,6 +77,8 @@ export function buildSystemPrompt(config: AgentConfig): PromptBuildResult {
     skillInstallEnabled = detectSkillInstallIntent(msgText);
   }
 
+  const mcpCLIs = scanMcpCLIs(config.agentWorkspace);
+
   const promptBuilder = new PromptBuilder();
   const promptResult = promptBuilder.build({
     agentType: config.agent ?? 'pi-coding-agent',
@@ -82,6 +98,7 @@ export function buildSystemPrompt(config: AgentConfig): PromptBuildResult {
     hasAgentWorkspace: !!config.agentWorkspace,
     hasUserWorkspace: !!config.userWorkspace,
     userWorkspaceWritable: hasWorkspaceScopes && !!config.userWorkspace,
+    mcpCLIs,
     skillInstallEnabled,
   });
 

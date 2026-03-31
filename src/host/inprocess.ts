@@ -216,7 +216,26 @@ export async function runFastPath(
             return rh(JSON.stringify(h), providers.credentials);
           }
         : undefined;
-      mcpTools = await deps.mcpManager.discoverAllTools(request.agentId, { resolveHeaders });
+      const authForServer = providers.credentials
+        ? async (server: { name: string; url: string }) => {
+            const prefix = server.name.toUpperCase().replace(/-/g, '_');
+            for (const suffix of ['_API_KEY', '_ACCESS_TOKEN', '_OAUTH_TOKEN', '_TOKEN']) {
+              const value = await providers.credentials.get(`${prefix}${suffix}`);
+              if (value) return { Authorization: `Bearer ${value}` };
+            }
+            return undefined;
+          }
+        : undefined;
+      // Only discover tools from servers assigned to this agent
+      let serverFilter: Set<string> | undefined;
+      if (providers.database) {
+        try {
+          const { listAgentServerNames } = await import('../providers/mcp/database.js');
+          const assigned = await listAgentServerNames(providers.database.db, request.agentId);
+          serverFilter = new Set(assigned);
+        } catch { /* table may not exist — leave filter undefined (all servers) */ }
+      }
+      mcpTools = await deps.mcpManager.discoverAllTools(request.agentId, { resolveHeaders, authForServer, serverFilter });
     } else {
       mcpTools = await discoverTools(
         request.agentId,
@@ -280,6 +299,16 @@ export async function runFastPath(
         ? async (h: Record<string, string>) => {
             const { resolveHeaders: rh } = await import('../providers/mcp/database.js');
             return rh(JSON.stringify(h), providers.credentials);
+          }
+        : undefined,
+      authForServer: providers.credentials
+        ? async (server: { name: string; url: string }) => {
+            const prefix = server.name.toUpperCase().replace(/-/g, '_');
+            for (const suffix of ['_API_KEY', '_ACCESS_TOKEN', '_OAUTH_TOKEN', '_TOKEN']) {
+              const value = await providers.credentials.get(`${prefix}${suffix}`);
+              if (value) return { Authorization: `Bearer ${value}` };
+            }
+            return undefined;
           }
         : undefined,
       mcp: providers.mcp, // @deprecated — legacy fallback; remove when McpConnectionManager replaces all callers

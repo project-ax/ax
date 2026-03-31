@@ -11,6 +11,9 @@ import type {
   SkillContent,
   WorkspaceFileEntry,
   MemoryEntryView,
+  McpServer,
+  InstalledPlugin,
+  McpTestResult,
 } from './types';
 
 const BASE = '/admin/api';
@@ -139,6 +142,21 @@ export const api = {
     return apiFetch<SkillContent>(`/agents/${encodeURIComponent(id)}/skills/${encodeURIComponent(name)}`);
   },
 
+  /** Update a skill's content. */
+  updateSkill(id: string, name: string, content: string): Promise<{ ok: boolean }> {
+    return apiFetch<{ ok: boolean }>(`/agents/${encodeURIComponent(id)}/skills/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    });
+  },
+
+  /** Delete a skill. */
+  deleteSkill(id: string, name: string): Promise<{ ok: boolean }> {
+    return apiFetch<{ ok: boolean }>(`/agents/${encodeURIComponent(id)}/skills/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    });
+  },
+
   /** List workspace files for an agent. */
   agentWorkspace(id: string, scope = 'agent'): Promise<WorkspaceFileEntry[]> {
     return apiFetch<WorkspaceFileEntry[]>(`/agents/${encodeURIComponent(id)}/workspace?scope=${scope}`);
@@ -149,6 +167,87 @@ export const api = {
     return apiFetch<MemoryEntryView[]>(
       `/agents/${encodeURIComponent(id)}/memory?scope=${encodeURIComponent(scope)}&limit=${limit}`
     );
+  },
+
+  // ── Global MCP Servers ──
+
+  /** List all global MCP servers. */
+  mcpServers(): Promise<McpServer[]> {
+    return apiFetch<McpServer[]>('/mcp-servers');
+  },
+
+  /** Add a global MCP server. */
+  addMcpServer(data: { name: string; url: string; headers?: Record<string, string> }): Promise<McpServer> {
+    return apiFetch<McpServer>('/mcp-servers', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  },
+
+  /** Update a global MCP server. */
+  updateMcpServer(name: string, data: { url?: string; headers?: Record<string, string>; enabled?: boolean }): Promise<{ ok: boolean }> {
+    return apiFetch<{ ok: boolean }>(`/mcp-servers/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  },
+
+  /** Remove a global MCP server. */
+  removeMcpServer(name: string): Promise<{ ok: boolean }> {
+    return apiFetch<{ ok: boolean }>(`/mcp-servers/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  /** Test a global MCP server's connectivity. */
+  testMcpServer(name: string): Promise<McpTestResult> {
+    return apiFetch<McpTestResult>(`/mcp-servers/${encodeURIComponent(name)}/test`, {
+      method: 'POST',
+    });
+  },
+
+  // ── Agent MCP Server Assignment ──
+
+  /** List MCP server names assigned to an agent. */
+  agentMcpServers(id: string): Promise<string[]> {
+    return apiFetch<string[]>(`/agents/${encodeURIComponent(id)}/mcp-servers`);
+  },
+
+  /** Assign a global MCP server to an agent. */
+  assignMcpServer(id: string, serverName: string): Promise<{ ok: boolean }> {
+    return apiFetch<{ ok: boolean }>(`/agents/${encodeURIComponent(id)}/mcp-servers`, {
+      method: 'POST',
+      body: JSON.stringify({ serverName }),
+    });
+  },
+
+  /** Unassign a MCP server from an agent. */
+  unassignMcpServer(id: string, serverName: string): Promise<{ ok: boolean }> {
+    return apiFetch<{ ok: boolean }>(`/agents/${encodeURIComponent(id)}/mcp-servers/${encodeURIComponent(serverName)}`, {
+      method: 'DELETE',
+    });
+  },
+
+  // ── Agent Plugins ──
+
+  /** List installed plugins for an agent. */
+  agentPlugins(id: string): Promise<InstalledPlugin[]> {
+    return apiFetch<InstalledPlugin[]>(`/agents/${encodeURIComponent(id)}/plugins`);
+  },
+
+  /** Install a plugin for an agent. */
+  installPlugin(id: string, source: string): Promise<{ installed: boolean; pluginName?: string; error?: string }> {
+    return apiFetch(`/agents/${encodeURIComponent(id)}/plugins`, {
+      method: 'POST',
+      body: JSON.stringify({ source }),
+    });
+  },
+
+  /** Uninstall a plugin from an agent. */
+  uninstallPlugin(id: string, name: string): Promise<{ ok: boolean }> {
+    return apiFetch<{ ok: boolean }>(`/agents/${encodeURIComponent(id)}/plugins/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    });
   },
 };
 

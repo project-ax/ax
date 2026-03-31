@@ -1,4 +1,22 @@
-# Scripted Tool Execution
+# MCP CLI Tools
+
+## [2026-03-30 17:40] — Fix admin API not syncing MCP server changes to McpConnectionManager
+
+**Task:** Fix bug where MCP CLI tools aren't generated for connectors configured via the admin dashboard because the in-memory McpConnectionManager isn't updated when connectors are added/updated/deleted through the admin API.
+**What I did:** Added manager sync calls in the POST, PUT, and DELETE handlers for `/admin/api/mcp-servers` in `server-admin.ts`. POST calls `addServer`, PUT calls `removeServer` + re-reads from DB + `addServer`, DELETE calls `removeServer`. Added 2 tests verifying POST and DELETE sync to the manager.
+**Files touched:** `src/host/server-admin.ts` (modified), `tests/host/server-admin.test.ts` (modified)
+**Outcome:** Success. Connector changes via admin dashboard now take effect immediately without pod restart.
+**Notes:** Root cause: `loadDatabaseMcpServers()` only runs at startup. Admin CRUD only wrote to DB. So connectors added/modified after startup had stale (or missing) entries in the manager, causing `discoverAllTools()` to use wrong/missing headers → auth failures → no CLI generated.
+
+## [2026-03-30 15:55] — Replace TypeScript stubs with CLI executables
+
+**Task:** Replace fragile TypeScript MCP tool stubs (proxy-based, needs --experimental-strip-types) with simple CLI executables (one per MCP server, plain JS, #!/usr/bin/env node).
+**What I did:** Implemented 7-task plan: generateCLI() codegen, prepareMcpCLIs() orchestration, host payload update (mcpCLIs replaces toolStubs), runner bin/ writes, prompt update (show CLI tools in PATH), E2E testing on kind cluster, and cleanup of old stub code. Found and fixed a stdin blocking bug where the CLI hung when spawned as a subprocess.
+**Files touched:** src/host/capnweb/codegen.ts, src/host/capnweb/generate-and-cache.ts, src/host/capnweb/index.ts, src/host/server-completions.ts, src/agent/runner.ts, src/agent/agent-setup.ts, src/agent/prompt/types.ts, src/agent/prompt/modules/runtime.ts, src/plugins/mcp-manager.ts, tests/host/capnweb/codegen.test.ts, tests/host/capnweb/generate-and-cache.test.ts
+**Outcome:** Success. CLI tools work end-to-end in kind cluster. Agent runs `linear list teams` and `linear list cycles` via bash, gets real Linear API data. Old TypeScript stub code removed (~800 lines deleted, ~200 lines added).
+**Notes:** Key bug: generated CLIs hung when spawned as subprocess because `readStdin()` blocked on an open pipe. Fixed with 50ms timeout. The `json-schema-to-typescript` dependency is no longer needed by codegen.
+
+# Scripted Tool Execution (Legacy)
 
 ## [2026-03-28 21:10] — Add DB caching for generated tool stubs
 

@@ -8,6 +8,7 @@ import {
   LogOut,
   Hexagon,
   ChevronRight,
+  Globe,
 } from 'lucide-react';
 import { getToken, setToken, clearToken, apiFetch } from './lib/api';
 import type { SetupStatus } from './lib/types';
@@ -18,12 +19,14 @@ import AgentsPage from './components/pages/agents-page';
 import SecurityPage from './components/pages/security-page';
 import LogsPage from './components/pages/logs-page';
 import SettingsPage from './components/pages/settings-page';
+import ConnectorsPage from './components/pages/connectors-page';
 
-type Page = 'overview' | 'agents' | 'security' | 'logs' | 'settings';
+type Page = 'overview' | 'agents' | 'connectors' | 'security' | 'logs' | 'settings';
 
 const NAV_ITEMS: { id: Page; label: string; icon: typeof Shield }[] = [
   { id: 'overview', label: 'Overview', icon: Activity },
   { id: 'agents', label: 'Agents', icon: Users },
+  { id: 'connectors', label: 'Connectors', icon: Globe },
   { id: 'security', label: 'Security', icon: Shield },
   { id: 'logs', label: 'Logs', icon: FileText },
   { id: 'settings', label: 'Settings', icon: Settings },
@@ -58,6 +61,10 @@ export default function App() {
         const result = await apiFetch<SetupStatus>('/setup/status');
         if (!cancelled) {
           setNeedsSetup(!result.configured);
+          // If server has auth disabled, auto-authenticate
+          if (result.auth_disabled) {
+            setAuthenticated(true);
+          }
           setCheckingSetup(false);
         }
       } catch {
@@ -198,6 +205,7 @@ export default function App() {
           <div className="mx-auto max-w-[1400px] px-8 py-6">
             {activePage === 'overview' && <OverviewPage />}
             {activePage === 'agents' && <AgentsPage />}
+            {activePage === 'connectors' && <ConnectorsPage />}
             {activePage === 'security' && <SecurityPage />}
             {activePage === 'logs' && <LogsPage />}
             {activePage === 'settings' && <SettingsPage />}

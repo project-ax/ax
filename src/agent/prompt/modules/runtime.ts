@@ -60,6 +60,11 @@ export class RuntimeModule extends BasePromptModule {
         `**Agent Workspace**: ./agent (shared persistent files for this agent)`,
         `  - ./agent/identity/ — agent identity files (SOUL.md, IDENTITY.md, etc.) [read-only]`,
         `  - ./agent/skills/ — shared agent skills [read-only]`,
+        ...(ctx.mcpCLIs?.length ? [
+          `  - ./agent/bin/ — MCP tool CLIs (in PATH)`,
+          `    Run \`<tool> --help\` for usage. Available: ${ctx.mcpCLIs.join(', ')}`,
+          `    These are Node.js CLIs. When writing multi-step scripts, use sandbox_write_file to write a .js file to ./scratch/, then run it with \`node scratch/script.js\`. Do not use heredocs or cat.`,
+        ] : []),
       ] : []),
       ...(ctx.hasUserWorkspace ? [
         `**User Workspace**: ./user (persistent files for the current user)`,

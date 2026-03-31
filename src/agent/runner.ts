@@ -284,14 +284,16 @@ export interface StdinPayload {
   credentialEnv?: Record<string, string>;
   /** MITM CA cert PEM — written to disk so sandbox processes trust the proxy. */
   caCert?: string;
-  /** Pre-loaded skills from DB (loaded from DocumentStore on host).
+  /** Pre-loaded agent-level skills from DB (installed via plugins/admin dashboard).
    *  Each skill includes its full file contents so the runner can write
-   *  them to the workspace skills/ directory for installSkillDeps() and
+   *  them to agentWorkspace/skills/ for installSkillDeps() and
    *  buildSystemPrompt() to read. */
   skills?: Array<{ slug: string; files: Array<{ path: string; content: string }> }>;
-  /** Pre-generated tool stubs for scripted MCP tool execution.
-   *  Cached in DocumentStore by schema hash, written to /tools/ in workspace. */
-  toolStubs?: Array<{ path: string; content: string }>;
+  /** Pre-loaded user-scoped skills from DB (created by user via skill_create).
+   *  Written to userWorkspace/skills/ so users can test/debug before promoting to agent scope. */
+  userSkills?: Array<{ slug: string; files: Array<{ path: string; content: string }> }>;
+  /** MCP CLI executables — one file per server, written to agentWorkspace/bin/. */
+  mcpCLIs?: Array<{ path: string; content: string }>;
 }
 
 /**
@@ -345,7 +347,8 @@ export function parseStdinPayload(data: string): StdinPayload {
           : undefined,
         caCert: typeof parsed.caCert === 'string' ? parsed.caCert : undefined,
         skills: Array.isArray(parsed.skills) ? parsed.skills : undefined,
-        toolStubs: Array.isArray(parsed.toolStubs) ? parsed.toolStubs : undefined,
+        userSkills: Array.isArray(parsed.userSkills) ? parsed.userSkills : undefined,
+        mcpCLIs: Array.isArray(parsed.mcpCLIs) ? parsed.mcpCLIs : undefined,
       };
     }
   } catch {
@@ -476,10 +479,11 @@ function applyPayload(config: AgentConfig, payload: StdinPayload): void {
   config.agentWorkspace = process.env.AX_AGENT_WORKSPACE || payload.agentWorkspace;
   config.userWorkspace = process.env.AX_USER_WORKSPACE || payload.userWorkspace;
   config.workspaceProvider = payload.workspaceProvider;
-  // Write skills from DB payload to workspace skills/ directory so
-  // installSkillDeps() and buildSystemPrompt()'s loadSkillsMultiDir() find them.
-  if (Array.isArray(payload.skills) && payload.skills.length > 0 && config.userWorkspace) {
-    const skillsBase = resolve(config.userWorkspace, 'skills');
+  // Write agent-level skills (installed via plugins/admin dashboard) to
+  // agentWorkspace/skills/ so installSkillDeps() and loadSkillsMultiDir() find them.
+  // User-created skills live in userWorkspace/skills/ (written by the user, not here).
+  if (Array.isArray(payload.skills) && payload.skills.length > 0 && config.agentWorkspace) {
+    const skillsBase = resolve(config.agentWorkspace, 'skills');
     // Prune stale skills from previous turns so deleted skills don't linger on disk
     if (existsSync(skillsBase)) {
       rmSync(skillsBase, { recursive: true, force: true });
@@ -502,27 +506,48 @@ function applyPayload(config: AgentConfig, payload: StdinPayload): void {
         writeFileSync(filePath, file.content, 'utf-8');
       }
     }
-    logger.info('skills_written', { count: payload.skills.length, dir: skillsBase });
+    logger.info('skills_written', { count: payload.skills.length, dir: skillsBase, scope: 'agent' });
   }
 
-  // ── Write tool stubs to /tools/ ──
-  // Treat an explicit empty array as "clear generated stubs for this turn".
-  if (Array.isArray(payload.toolStubs)) {
-    const toolsBase = resolve(process.env.AX_WORKSPACE ?? process.cwd(), 'tools');
-    if (existsSync(toolsBase)) {
-      rmSync(toolsBase, { recursive: true, force: true });
+  // Write user-scoped skills (created via skill_create by non-admin users)
+  // to userWorkspace/skills/ so users can test and debug before promoting to agent scope.
+  if (Array.isArray(payload.userSkills) && payload.userSkills.length > 0 && config.userWorkspace) {
+    const userSkillsBase = resolve(config.userWorkspace, 'skills');
+    if (existsSync(userSkillsBase)) {
+      rmSync(userSkillsBase, { recursive: true, force: true });
     }
-    for (const file of payload.toolStubs) {
-      const filePath = resolve(toolsBase, file.path);
-      // SC-SEC-004: Constrain tool stub writes to the tools root
-      if (!filePath.startsWith(toolsBase + sep) && filePath !== toolsBase) {
-        logger.warn('tool_stub_path_traversal_blocked', { path: file.path });
+    for (const skill of payload.userSkills) {
+      const skillDir = resolve(userSkillsBase, skill.slug.replace(/[/\\]/g, '_').replace(/\.\./g, '_'));
+      if (!skillDir.startsWith(userSkillsBase + sep)) {
+        logger.warn('skill_path_traversal_blocked', { slug: skill.slug, scope: 'user' });
         continue;
       }
-      mkdirSync(dirname(filePath), { recursive: true });
-      writeFileSync(filePath, file.content, 'utf-8');
+      for (const file of skill.files) {
+        const filePath = resolve(skillDir, file.path);
+        if (!filePath.startsWith(skillDir + sep) && filePath !== skillDir) {
+          logger.warn('skill_file_path_traversal_blocked', { slug: skill.slug, path: file.path, scope: 'user' });
+          continue;
+        }
+        mkdirSync(dirname(filePath), { recursive: true });
+        writeFileSync(filePath, file.content, 'utf-8');
+      }
     }
-    logger.info('tool_stubs_written', { count: payload.toolStubs.length, dir: toolsBase });
+    logger.info('skills_written', { count: payload.userSkills.length, dir: userSkillsBase, scope: 'user' });
+  }
+
+  // ── Write MCP CLI executables to agentWorkspace/bin/ ──
+  if (Array.isArray(payload.mcpCLIs) && config.agentWorkspace) {
+    const binDir = resolve(config.agentWorkspace, 'bin');
+    mkdirSync(binDir, { recursive: true });
+    for (const file of payload.mcpCLIs) {
+      const filePath = resolve(binDir, file.path);
+      if (!filePath.startsWith(binDir + sep) && filePath !== binDir) {
+        logger.warn('mcp_cli_path_traversal_blocked', { path: file.path });
+        continue;
+      }
+      writeFileSync(filePath, file.content, { mode: 0o755 });
+    }
+    logger.info('mcp_clis_written', { count: payload.mcpCLIs.length, dir: binDir });
   }
 
   if (payload.identity) {

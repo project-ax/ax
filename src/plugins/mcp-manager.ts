@@ -16,35 +16,29 @@ export interface AddServerOpts {
 }
 
 /**
- * Per-agent MCP connection manager.
+ * Global MCP connection manager.
  *
- * Tracks MCP server endpoints per agent. This is a registry, not a connection
- * pool. The actual MCP protocol connections happen when prepareToolStubs()
- * queries each server's tools at sandbox spin-up time.
+ * Tracks MCP server endpoints globally (shared across all agents). This is a
+ * registry, not a connection pool. The actual MCP protocol connections happen
+ * when prepareMcpCLIs() queries each server's tools at sandbox spin-up time.
  *
- * Also maintains a tool name → server URL mapping so that the tool router
- * can dispatch plugin MCP tool calls to the correct remote server without
- * a second discovery round-trip.
+ * Server registry is global — all agents see the same set of MCP servers.
+ * Tool name → server URL mappings remain per-agent since each agent session
+ * discovers tools independently at runtime.
  */
 export class McpConnectionManager {
-  private readonly servers = new Map<string, Map<string, ManagedServer>>();
+  /** Global server registry (serverName → server). */
+  private readonly servers = new Map<string, ManagedServer>();
 
-  /** agentId → (toolName → serverUrl) */
+  /** agentId → (toolName → serverUrl) — per-agent tool routing */
   private readonly toolServerMap = new Map<string, Map<string, string>>();
 
-  addServer(agentId: string, server: PluginMcpServer, optsOrPluginName?: string | AddServerOpts): void {
-    let agentServers = this.servers.get(agentId);
-    if (!agentServers) {
-      agentServers = new Map();
-      this.servers.set(agentId, agentServers);
-    }
-
+  addServer(_agentId: string, server: PluginMcpServer, optsOrPluginName?: string | AddServerOpts): void {
     let pluginName: string | undefined;
     let source: string | undefined;
     let headers: Record<string, string> | undefined;
 
     if (typeof optsOrPluginName === 'string') {
-      // Backward-compat: string arg is pluginName, derive source
       pluginName = optsOrPluginName;
       source = `plugin:${optsOrPluginName}`;
     } else if (optsOrPluginName) {
@@ -53,45 +47,39 @@ export class McpConnectionManager {
       headers = optsOrPluginName.headers;
     }
 
-    agentServers.set(server.name, { ...server, pluginName, source, headers });
+    this.servers.set(server.name, { ...server, pluginName, source, headers });
   }
 
-  removeServer(agentId: string, serverName: string): boolean {
-    const agentServers = this.servers.get(agentId);
-    if (!agentServers) return false;
-    const server = agentServers.get(serverName);
+  removeServer(_agentId: string, serverName: string): boolean {
+    const server = this.servers.get(serverName);
     if (server) {
-      // Clear tool mappings for this server's URL before removing
-      this.clearToolsForUrl(agentId, server.url);
+      // Clear tool mappings for this server's URL across all agents
+      this.clearToolsForUrlGlobal(server.url);
     }
-    return agentServers.delete(serverName);
+    return this.servers.delete(serverName);
   }
 
-  removeServersByPlugin(agentId: string, pluginName: string): number {
-    return this.removeServersBySource(agentId, `plugin:${pluginName}`);
+  removeServersByPlugin(_agentId: string, pluginName: string): number {
+    return this.removeServersBySource(_agentId, `plugin:${pluginName}`);
   }
 
-  listServers(agentId: string): PluginMcpServer[] {
-    const agentServers = this.servers.get(agentId);
-    if (!agentServers) return [];
-    return [...agentServers.values()].map(({ pluginName: _, source: _s, headers: _h, ...rest }) => rest);
+  listServers(_agentId: string): PluginMcpServer[] {
+    return [...this.servers.values()].map(({ pluginName: _, source: _s, headers: _h, ...rest }) => rest);
   }
 
   /**
    * List servers with source and headers metadata exposed.
    * Used by the unified registry to pass headers through to MCP calls.
    */
-  listServersWithMeta(agentId: string): Array<PluginMcpServer & { source?: string; headers?: Record<string, string> }> {
-    const agentServers = this.servers.get(agentId);
-    if (!agentServers) return [];
-    return [...agentServers.values()].map(({ pluginName: _, ...rest }) => rest);
+  listServersWithMeta(_agentId: string): Array<PluginMcpServer & { source?: string; headers?: Record<string, string> }> {
+    return [...this.servers.values()].map(({ pluginName: _, ...rest }) => rest);
   }
 
   /**
    * Get metadata (source, headers) for a specific server.
    */
-  getServerMeta(agentId: string, name: string): { source?: string; headers?: Record<string, string> } | undefined {
-    const server = this.servers.get(agentId)?.get(name);
+  getServerMeta(_agentId: string, name: string): { source?: string; headers?: Record<string, string> } | undefined {
+    const server = this.servers.get(name);
     if (!server) return undefined;
     return { source: server.source, headers: server.headers };
   }
@@ -100,12 +88,10 @@ export class McpConnectionManager {
    * Get metadata (source, headers) for a server identified by its URL.
    * Used by the tool router which knows the server URL but not the server name.
    */
-  getServerMetaByUrl(agentId: string, url: string): { source?: string; headers?: Record<string, string> } | undefined {
-    const agentServers = this.servers.get(agentId);
-    if (!agentServers) return undefined;
-    for (const server of agentServers.values()) {
+  getServerMetaByUrl(_agentId: string, url: string): { name?: string; source?: string; headers?: Record<string, string> } | undefined {
+    for (const server of this.servers.values()) {
       if (server.url === url) {
-        return { source: server.source, headers: server.headers };
+        return { name: server.name, source: server.source, headers: server.headers };
       }
     }
     return undefined;
@@ -114,27 +100,22 @@ export class McpConnectionManager {
   /**
    * Remove all servers matching a given source tag and clear their tool mappings.
    */
-  removeServersBySource(agentId: string, source: string): number {
-    const agentServers = this.servers.get(agentId);
-    if (!agentServers) return 0;
-
-    // Clear tool mappings BEFORE removing servers (needs server URLs to find tools)
-    this.clearToolsForSource(agentId, source);
+  removeServersBySource(_agentId: string, source: string): number {
+    // Clear tool mappings BEFORE removing servers
+    this.clearToolsForSourceGlobal(source);
 
     let count = 0;
-    for (const [name, server] of agentServers) {
+    for (const [name, server] of this.servers) {
       if (server.source === source) {
-        agentServers.delete(name);
+        this.servers.delete(name);
         count++;
       }
     }
     return count;
   }
 
-  getServerUrls(agentId: string): string[] {
-    const agentServers = this.servers.get(agentId);
-    if (!agentServers) return [];
-    return [...new Set([...agentServers.values()].map(s => s.url))];
+  getServerUrls(_agentId: string): string[] {
+    return [...new Set([...this.servers.values()].map(s => s.url))];
   }
 
   // ---------------------------------------------------------------------------
@@ -171,11 +152,22 @@ export class McpConnectionManager {
    * Called when a plugin is uninstalled so stale tool routes are removed.
    */
   clearToolsForPlugin(agentId: string, pluginName: string): void {
-    this.clearToolsForSource(agentId, `plugin:${pluginName}`);
+    this.clearToolsForSourceGlobal(`plugin:${pluginName}`);
   }
 
   /**
-   * Clear tool mappings for a specific server URL.
+   * Clear tool mappings for a specific server URL across all agents.
+   */
+  private clearToolsForUrlGlobal(url: string): void {
+    for (const agentTools of this.toolServerMap.values()) {
+      for (const [toolName, toolUrl] of agentTools) {
+        if (toolUrl === url) agentTools.delete(toolName);
+      }
+    }
+  }
+
+  /**
+   * Clear tool mappings for a specific server URL for one agent.
    */
   private clearToolsForUrl(agentId: string, url: string): void {
     const agentTools = this.toolServerMap.get(agentId);
@@ -186,20 +178,18 @@ export class McpConnectionManager {
   }
 
   /**
-   * Clear tool mappings for all servers matching a given source tag.
+   * Clear tool mappings for all servers matching a given source tag across all agents.
    */
-  private clearToolsForSource(agentId: string, source: string): void {
-    const agentServers = this.servers.get(agentId);
-    const agentTools = this.toolServerMap.get(agentId);
-    if (!agentServers || !agentTools) return;
-
+  private clearToolsForSourceGlobal(source: string): void {
     const sourceUrls = new Set<string>();
-    for (const server of agentServers.values()) {
+    for (const server of this.servers.values()) {
       if (server.source === source) sourceUrls.add(server.url);
     }
 
-    for (const [toolName, url] of agentTools) {
-      if (sourceUrls.has(url)) agentTools.delete(toolName);
+    for (const agentTools of this.toolServerMap.values()) {
+      for (const [toolName, url] of agentTools) {
+        if (sourceUrls.has(url)) agentTools.delete(toolName);
+      }
     }
   }
 
@@ -208,32 +198,45 @@ export class McpConnectionManager {
   // ---------------------------------------------------------------------------
 
   /**
-   * Discover tools from ALL registered MCP servers for an agent.
+   * Discover tools from ALL registered global MCP servers.
    * Resolves credential placeholders in headers if a resolver is provided.
-   * Registers tool->server URL mappings for later routing.
+   * For servers without explicit headers, calls `authForServer` to attempt
+   * credential-based auth from the credential store.
+   * Registers tool->server URL mappings for the given agent.
    */
   async discoverAllTools(
     agentId: string,
     opts?: {
       resolveHeaders?: (headers: Record<string, string>) => Promise<Record<string, string>>;
+      /** Provide auth headers for servers that have no explicit headers configured.
+       *  Called with the server name and URL; should return headers or undefined. */
+      authForServer?: (server: { name: string; url: string }) => Promise<Record<string, string> | undefined>;
+      /** When set, only discover tools from servers whose name is in this set.
+       *  Used to respect per-agent connector assignments (agent_mcp_servers). */
+      serverFilter?: Set<string>;
     },
   ): Promise<McpToolSchema[]> {
     const allTools: McpToolSchema[] = [];
-    const agentServers = this.servers.get(agentId);
-    if (!agentServers) return allTools;
 
-    for (const [, server] of agentServers) {
+    for (const [, server] of this.servers) {
+      if (opts?.serverFilter && !opts.serverFilter.has(server.name)) continue;
       try {
-        const resolvedHeaders = server.headers && opts?.resolveHeaders
-          ? await opts.resolveHeaders(server.headers)
-          : server.headers;
+        let resolvedHeaders: Record<string, string> | undefined;
+        if (server.headers && opts?.resolveHeaders) {
+          resolvedHeaders = await opts.resolveHeaders(server.headers);
+        } else if (!server.headers && opts?.authForServer) {
+          resolvedHeaders = await opts.authForServer({ name: server.name, url: server.url });
+        } else {
+          resolvedHeaders = server.headers;
+        }
 
         const tools = await listToolsFromServer(server.url, resolvedHeaders ? { headers: resolvedHeaders } : undefined);
         // Clear stale tool mappings for this server URL before registering new ones
         this.clearToolsForUrl(agentId, server.url);
         if (tools.length > 0) {
           this.registerTools(agentId, server.url, tools.map(t => t.name));
-          allTools.push(...tools);
+          // Tag each tool with its source server name for codegen grouping
+          allTools.push(...tools.map(t => ({ ...t, server: server.name })));
         }
       } catch {
         // One server failing doesn't affect others

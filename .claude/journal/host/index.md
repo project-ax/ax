@@ -4,9 +4,13 @@ Host process work: server, router, IPC handlers, event console, event bus, deleg
 
 ## Entries
 
+- 2026-03-31 01:30 — Fix chat UI markdown rendering (tables, code, headings) and transport text-appending bug [chat-ui.md](chat-ui.md)
+- 2026-03-29 22:35 — Fix MCP Streamable HTTP client: missing Accept header and 406 handling [plugin.md](plugin.md)
+- 2026-03-29 22:25 — Fix MCP tool stub provisioning: McpConnectionManager + credential auto-discovery [plugin.md](plugin.md)
 - 2026-03-29 15:35 — Fix CodeRabbitAI + github-code-quality review comments on PR #135 [plugin.md](plugin.md)
 - 2026-03-29 15:00 — Unified tool routing via resolveServer + mcpCallTool [plugin.md](plugin.md)
 - 2026-03-29 14:30 — Admin API for Cowork plugins + DB-MCP sync [plugin.md](plugin.md)
+- 2026-03-30 15:55 — Replace TypeScript stubs with CLI executables for MCP tools [capnweb.md](capnweb.md)
 - 2026-03-28 18:30 — Implement Cap'n Web RPC server and codegen for MCP tools [capnweb.md](capnweb.md)
 - 2026-03-26 08:37 — Add scheduler sandbox timeout override [scheduler.md](scheduler.md)
 - 2026-03-26 05:48 — Fix session pod idle timeout race with watchPodExit [server-k8s.md](server-k8s.md)

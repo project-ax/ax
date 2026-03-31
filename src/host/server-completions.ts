@@ -867,22 +867,35 @@ export async function processCompletion(
     const identityPayload = await loadIdentityFromDB(providers.storage.documents, agentName, currentUserId, reqLogger);
 
     // ── Load installed skills from DB ──
-    let skillsPayload: Array<{ slug: string; files: Array<{ path: string; content: string }> }> = [];
+    // Agent-scoped skills (from plugins/admin) and user-scoped skills (personal sandbox) are
+    // loaded separately and delivered as distinct payload fields so the agent writes them to
+    // the correct workspace tier (agentWorkspace/skills/ vs userWorkspace/skills/).
+    type SkillPayloadEntry = { slug: string; files: Array<{ path: string; content: string }> };
+    let skillsPayload: SkillPayloadEntry[] = [];
+    let userSkillsPayload: SkillPayloadEntry[] = [];
     if (providers.storage?.documents) {
       try {
-        const { listSkills } = await import('../providers/storage/skills.js');
+        const { listSkills, listUserSkills } = await import('../providers/storage/skills.js');
         const dbSkills = await listSkills(providers.storage.documents, agentName);
         skillsPayload = dbSkills.map(s => ({
           slug: s.id,
           files: s.files ?? [{ path: 'SKILL.md', content: s.instructions }],
         }));
+        // Load user-scoped skills for the current user
+        if (currentUserId) {
+          const dbUserSkills = await listUserSkills(providers.storage.documents, agentName, currentUserId);
+          userSkillsPayload = dbUserSkills.map(s => ({
+            slug: s.id,
+            files: s.files ?? [{ path: 'SKILL.md', content: s.instructions }],
+          }));
+        }
       } catch (err) {
         reqLogger.warn('skills_load_failed', { error: (err as Error).message });
       }
     }
 
-    // ── Load or generate tool stubs (cached by schema hash) ──
-    let toolStubsPayload: Array<{ path: string; content: string }> | undefined;
+    // ── Generate MCP CLI tools ──
+    let mcpCLIsPayload: Array<{ path: string; content: string }> | undefined;
     if (deps.mcpManager) {
       try {
         const resolveHeaders = providers.credentials
@@ -891,33 +904,52 @@ export async function processCompletion(
               return rh(JSON.stringify(h), providers.credentials);
             }
           : undefined;
-        const mcpTools = await deps.mcpManager.discoverAllTools(agentName, { resolveHeaders });
+        // For servers without explicit headers, try to find a matching credential
+        // by convention: SERVER_NAME_API_KEY, SERVER_NAME_ACCESS_TOKEN, etc.
+        const authForServer = providers.credentials
+          ? async (server: { name: string; url: string }) => {
+              const prefix = server.name.toUpperCase().replace(/-/g, '_');
+              const candidates = [
+                `${prefix}_API_KEY`,
+                `${prefix}_ACCESS_TOKEN`,
+                `${prefix}_OAUTH_TOKEN`,
+                `${prefix}_TOKEN`,
+              ];
+              for (const envName of candidates) {
+                const value = await providers.credentials.get(envName);
+                if (value) return { Authorization: `Bearer ${value}` };
+              }
+              return undefined;
+            }
+          : undefined;
+        // Only discover tools from servers assigned to this agent (agent_mcp_servers).
+        // If no assignments exist, discover from all servers (backward compat).
+        let serverFilter: Set<string> | undefined;
+        if (providers.database) {
+          try {
+            const { listAgentServerNames } = await import('../providers/mcp/database.js');
+            const assigned = await listAgentServerNames(providers.database.db, agentName);
+            serverFilter = new Set(assigned);
+          } catch { /* table may not exist yet — leave filter undefined (all servers) */ }
+        }
+        const mcpTools = await deps.mcpManager.discoverAllTools(agentName, { resolveHeaders, authForServer, serverFilter });
         if (mcpTools.length > 0) {
-          const { prepareToolStubs } = await import('./capnweb/generate-and-cache.js');
-          const stubs = await prepareToolStubs({
-            documents: providers.storage?.documents,
-            agentName,
-            tools: mcpTools,
-          });
-          if (stubs && stubs.length > 0) toolStubsPayload = stubs;
+          const { prepareMcpCLIs } = await import('./capnweb/generate-and-cache.js');
+          const clis = await prepareMcpCLIs({ agentName, tools: mcpTools });
+          if (clis && clis.length > 0) mcpCLIsPayload = clis;
         }
       } catch (err) {
-        reqLogger.warn('mcp_tool_discovery_failed', { error: (err as Error).message });
+        reqLogger.warn('mcp_cli_generation_failed', { error: (err as Error).message });
       }
     } else if (providers.mcp && providers.mcp.listTools) {
       // @deprecated Legacy fallback: no manager, use providers.mcp directly.
-      // Remove when McpConnectionManager fully replaces providers.mcp.
       try {
-        const { prepareToolStubs } = await import('./capnweb/generate-and-cache.js');
+        const { prepareMcpCLIs } = await import('./capnweb/generate-and-cache.js');
         const mcpTools = await providers.mcp.listTools();
-        const stubs = await prepareToolStubs({
-          documents: providers.storage?.documents,
-          agentName,
-          tools: mcpTools,
-        });
-        if (stubs && stubs.length > 0) toolStubsPayload = stubs;
+        const clis = await prepareMcpCLIs({ agentName, tools: mcpTools });
+        if (clis && clis.length > 0) mcpCLIsPayload = clis;
       } catch (err) {
-        reqLogger.warn('tool_stubs_load_failed', { error: (err as Error).message });
+        reqLogger.warn('mcp_cli_generation_failed', { error: (err as Error).message });
       }
     }
 
@@ -950,7 +982,8 @@ export async function processCompletion(
       // Identity, skills, and tool stubs from DocumentStore
       identity: identityPayload,
       skills: skillsPayload.length > 0 ? skillsPayload : undefined,
-      toolStubs: toolStubsPayload,
+      userSkills: userSkillsPayload.length > 0 ? userSkillsPayload : undefined,
+      mcpCLIs: mcpCLIsPayload,
       agentReadOnly: !agentWorkspaceWritable,
       // Credential placeholders — warm pool pods don't have these in their pod spec,
       // so include them in the payload for the agent to set via process.env.

@@ -5,10 +5,43 @@ import type { FetchRequest, FetchResponse } from '../../../src/providers/web/typ
 type WebFetchProvider = { fetch(req: FetchRequest): Promise<FetchResponse> };
 import type { Config } from '../../../src/types.js';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https';
+import forge from 'node-forge';
 
-// ── Test HTTP server ──
+// ── Self-signed TLS cert for 'localhost' using node-forge ──
 
-let server: Server;
+function createSelfSignedCert(): { key: string; cert: string } {
+  const keys = forge.pki.rsa.generateKeyPair(2048);
+  const cert = forge.pki.createCertificate();
+  cert.publicKey = keys.publicKey;
+  cert.serialNumber = '01';
+  cert.validity.notBefore = new Date();
+  cert.validity.notAfter = new Date();
+  cert.validity.notAfter.setFullYear(cert.validity.notBefore.getFullYear() + 1);
+
+  const attrs = [{ name: 'commonName', value: 'localhost' }];
+  cert.setSubject(attrs);
+  cert.setIssuer(attrs);
+  cert.setExtensions([
+    { name: 'subjectAltName', altNames: [
+      { type: 2, value: 'localhost' },   // DNS
+      { type: 7, ip: '127.0.0.1' },     // IPv4
+      { type: 7, ip: '::1' },           // IPv6
+    ] },
+    { name: 'keyUsage', digitalSignature: true, keyEncipherment: true },
+    { name: 'extKeyUsage', serverAuth: true },
+  ]);
+  cert.sign(keys.privateKey, forge.md.sha256.create());
+
+  return {
+    key: forge.pki.privateKeyToPem(keys.privateKey),
+    cert: forge.pki.certificateToPem(cert),
+  };
+}
+
+// ── Test HTTP/HTTPS servers ──
+
+let server: Server | HttpsServer;
 let baseUrl: string;
 
 function startServer(handler: (req: IncomingMessage, res: ServerResponse) => void): Promise<void> {
@@ -18,6 +51,20 @@ function startServer(handler: (req: IncomingMessage, res: ServerResponse) => voi
       const addr = server.address() as { port: number };
       baseUrl = `http://127.0.0.1:${addr.port}`;
       resolve();
+    });
+  });
+}
+
+function startHttpsServer(
+  handler: (req: IncomingMessage, res: ServerResponse) => void,
+): Promise<{ port: number; ca: string }> {
+  const { key, cert } = createSelfSignedCert();
+  return new Promise((resolve) => {
+    server = createHttpsServer({ key, cert }, handler);
+    server.listen(0, 'localhost', () => {
+      const addr = server.address() as { port: number };
+      baseUrl = `https://localhost:${addr.port}`;
+      resolve({ port: addr.port, ca: cert });
     });
   });
 }
@@ -134,6 +181,28 @@ describe('web-fetch provider', () => {
         const resp = await web.fetch({ url: baseUrl });
         expect(resp.status).toBe(404);
         expect(resp.body).toBe('not found');
+        expect(resp.taint.trust).toBe('external');
+      } finally {
+        await stopServer();
+      }
+    });
+  });
+
+  // ── HTTPS with DNS pinning ──
+
+  describe('HTTPS fetch with DNS pinning', () => {
+    test('fetches HTTPS URL when hostname resolves to IP (TLS SNI preserved)', async () => {
+      const { ca } = await startHttpsServer((_req, res) => {
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('secure hello');
+      });
+      try {
+        // localhost resolves to 127.0.0.1 or ::1 — DNS pinning must preserve
+        // the original hostname for TLS SNI/cert validation
+        const web = await create(config, { allowedIPs: new Set(['127.0.0.1', '::1']), ca });
+        const resp = await web.fetch({ url: baseUrl }); // https://localhost:PORT
+        expect(resp.status).toBe(200);
+        expect(resp.body).toBe('secure hello');
         expect(resp.taint.trust).toBe('external');
       } finally {
         await stopServer();

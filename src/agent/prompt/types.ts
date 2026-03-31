@@ -50,6 +50,8 @@ export interface PromptContext {
   hasUserWorkspace?: boolean;
   /** Whether the user workspace is writable (workspace provider is active). */
   userWorkspaceWritable?: boolean;
+  /** MCP CLI tool names available in PATH (e.g. ['linear', 'github']). */
+  mcpCLIs?: string[];
   /** Whether to show skill install instructions (detected from user message). */
   skillInstallEnabled?: boolean;
 

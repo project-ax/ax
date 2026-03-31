@@ -303,7 +303,49 @@ async function handleAdminAPI(
     return;
   }
 
-  // GET /admin/api/agents/:id/skills — list skills from workspace directories
+  // PUT /admin/api/agents/:id/skills/:name — update a skill's content
+  if (skillContentMatch && method === 'PUT') {
+    const id = decodeURIComponent(skillContentMatch[1]);
+    const skillName = decodeURIComponent(skillContentMatch[2]);
+    if (!providers.storage?.documents) { sendError(res, 500, 'No storage provider'); return; }
+    try {
+      const body = JSON.parse(await readBody(req));
+      const { content } = body;
+      if (typeof content !== 'string') { sendError(res, 400, 'Missing required field: content'); return; }
+      const { upsertSkill } = await import('../providers/storage/skills.js');
+      const { inferMcpApps } = await import('../providers/storage/skills.js');
+      const mcpApps = inferMcpApps(content);
+      await upsertSkill(providers.storage.documents, {
+        id: skillName,
+        agentId: id,
+        version: '1.0',
+        instructions: content,
+        mcpApps,
+      });
+      sendJSON(res, { ok: true });
+    } catch (err) {
+      sendError(res, 400, `Failed to update skill: ${(err as Error).message}`);
+    }
+    return;
+  }
+
+  // DELETE /admin/api/agents/:id/skills/:name — delete a skill
+  if (skillContentMatch && method === 'DELETE') {
+    const id = decodeURIComponent(skillContentMatch[1]);
+    const skillName = decodeURIComponent(skillContentMatch[2]);
+    if (!providers.storage?.documents) { sendError(res, 500, 'No storage provider'); return; }
+    try {
+      const { deleteSkill } = await import('../providers/storage/skills.js');
+      const deleted = await deleteSkill(providers.storage.documents, id, skillName);
+      if (!deleted) { sendError(res, 404, 'Skill not found'); return; }
+      sendJSON(res, { ok: true });
+    } catch (err) {
+      sendError(res, 500, `Failed to delete skill: ${(err as Error).message}`);
+    }
+    return;
+  }
+
+  // GET /admin/api/agents/:id/skills — list skills from workspace + plugins
   const skillsListMatch = pathname.match(/^\/admin\/api\/agents\/([^/]+)\/skills$/);
   if (skillsListMatch && method === 'GET') {
     const id = decodeURIComponent(skillsListMatch[1]);
@@ -311,6 +353,35 @@ async function handleAdminAPI(
     if (!agent) { sendError(res, 404, 'Agent not found'); return; }
     try {
       const skills = await listWorkspaceSkills(providers, id);
+      // Also include plugin-installed skills from DocumentStore
+      if (providers.storage?.documents) {
+        const allKeys = await providers.storage.documents.list('skills');
+        const prefix = `${id}/`;
+        for (const key of allKeys) {
+          if (!key.startsWith(prefix)) continue;
+          const raw = await providers.storage.documents.get('skills', key);
+          if (!raw) continue;
+          const skillId = key.slice(prefix.length);
+          // Parse stored skill JSON to extract name/description
+          try {
+            const stored = JSON.parse(raw);
+            const content = stored.instructions ?? raw;
+            const parsed = parseAgentSkill(content);
+            const name = parsed.name || skillId;
+            // Avoid duplicates (workspace skills take precedence)
+            if (!skills.some(s => s.name === name)) {
+              skills.push({ name, description: parsed.description, path: `plugin/${skillId}` });
+            }
+          } catch {
+            // Not JSON — try parsing as raw skill content
+            const parsed = parseAgentSkill(raw);
+            const name = parsed.name || skillId;
+            if (!skills.some(s => s.name === name)) {
+              skills.push({ name, description: parsed.description, path: `plugin/${skillId}` });
+            }
+          }
+        }
+      }
       sendJSON(res, skills);
     } catch (err) {
       logger.error('admin_skills_list_failed', { agentId: id, error: (err as Error).message });
@@ -469,34 +540,29 @@ async function handleAdminAPI(
     return;
   }
 
-  // ── MCP Server Management ──
+  // ── Global MCP Server Management ──
 
-  // GET /admin/api/agents/:id/mcp-servers
-  const mcpListMatch = pathname.match(/^\/admin\/api\/agents\/([^/]+)\/mcp-servers$/);
-  if (mcpListMatch && method === 'GET') {
-    const id = decodeURIComponent(mcpListMatch[1]);
+  // GET /admin/api/mcp-servers
+  if (pathname === '/admin/api/mcp-servers' && method === 'GET') {
     if (!providers.database) { sendError(res, 500, 'Database not configured'); return; }
-    const { listMcpServers } = await import('../providers/mcp/database.js');
-    const servers = await listMcpServers(providers.database.db, id);
+    const { listAllMcpServers } = await import('../providers/mcp/database.js');
+    const servers = await listAllMcpServers(providers.database.db);
     sendJSON(res, servers);
     return;
   }
 
-  // POST /admin/api/agents/:id/mcp-servers
-  if (mcpListMatch && method === 'POST') {
-    const id = decodeURIComponent(mcpListMatch[1]);
+  // POST /admin/api/mcp-servers
+  if (pathname === '/admin/api/mcp-servers' && method === 'POST') {
     if (!providers.database) { sendError(res, 500, 'Database not configured'); return; }
     try {
       const body = JSON.parse(await readBody(req));
       const { name, url, headers } = body;
       if (!name || !url) { sendError(res, 400, 'Missing required fields: name, url'); return; }
-      const { addMcpServer } = await import('../providers/mcp/database.js');
-      const server = await addMcpServer(providers.database.db, id, name, url, headers);
+      const { addGlobalMcpServer } = await import('../providers/mcp/database.js');
+      const server = await addGlobalMcpServer(providers.database.db, name, url, headers);
+      // Sync to in-memory manager so tool discovery picks it up without restart
       if (deps.mcpManager) {
-        deps.mcpManager.addServer(id, { name, type: 'http', url }, {
-          source: 'database',
-          headers,
-        });
+        deps.mcpManager.addServer('_', { name, type: 'http', url }, { source: 'database', headers });
       }
       sendJSON(res, server, 201);
     } catch (err) {
@@ -505,32 +571,27 @@ async function handleAdminAPI(
     return;
   }
 
-  // DELETE /admin/api/agents/:id/mcp-servers/:name
-  const mcpDeleteMatch = pathname.match(/^\/admin\/api\/agents\/([^/]+)\/mcp-servers\/([^/]+)$/);
-  if (mcpDeleteMatch && method === 'DELETE') {
-    const id = decodeURIComponent(mcpDeleteMatch[1]);
-    const name = decodeURIComponent(mcpDeleteMatch[2]);
-    if (!providers.database) { sendError(res, 500, 'Database not configured'); return; }
-    const { removeMcpServer } = await import('../providers/mcp/database.js');
-    const removed = await removeMcpServer(providers.database.db, id, name);
-    if (!removed) { sendError(res, 404, 'MCP server not found'); return; }
-    if (deps.mcpManager) {
-      deps.mcpManager.removeServer(id, name);
-    }
-    sendJSON(res, { ok: true });
-    return;
-  }
-
-  // PUT /admin/api/agents/:id/mcp-servers/:name
-  if (mcpDeleteMatch && method === 'PUT') {
-    const id = decodeURIComponent(mcpDeleteMatch[1]);
-    const name = decodeURIComponent(mcpDeleteMatch[2]);
+  // PUT /admin/api/mcp-servers/:name
+  const globalMcpMatch = pathname.match(/^\/admin\/api\/mcp-servers\/([^/]+)$/);
+  if (globalMcpMatch && method === 'PUT') {
+    const name = decodeURIComponent(globalMcpMatch[1]);
     if (!providers.database) { sendError(res, 500, 'Database not configured'); return; }
     try {
       const body = JSON.parse(await readBody(req));
-      const { updateMcpServer } = await import('../providers/mcp/database.js');
-      const updated = await updateMcpServer(providers.database.db, id, name, body);
+      const { updateGlobalMcpServer, listAllMcpServers } = await import('../providers/mcp/database.js');
+      const updated = await updateGlobalMcpServer(providers.database.db, name, body);
       if (!updated) { sendError(res, 404, 'MCP server not found'); return; }
+      // Sync to in-memory manager so tool discovery picks up changes without restart
+      if (deps.mcpManager) {
+        deps.mcpManager.removeServer('_', name);
+        const rows = await listAllMcpServers(providers.database.db);
+        const row = rows.find(r => r.name === name);
+        if (row && row.enabled) {
+          let headers: Record<string, string> | undefined;
+          if (row.headers) { try { headers = JSON.parse(row.headers); } catch { /* malformed */ } }
+          deps.mcpManager.addServer('_', { name, type: 'http', url: row.url }, { source: 'database', headers });
+        }
+      }
       sendJSON(res, { ok: true });
     } catch (err) {
       sendError(res, 400, `Invalid request: ${(err as Error).message}`);
@@ -538,16 +599,71 @@ async function handleAdminAPI(
     return;
   }
 
-  // POST /admin/api/agents/:id/mcp-servers/:name/test
-  const mcpTestMatch = pathname.match(/^\/admin\/api\/agents\/([^/]+)\/mcp-servers\/([^/]+)\/test$/);
-  if (mcpTestMatch && method === 'POST') {
-    const id = decodeURIComponent(mcpTestMatch[1]);
-    const name = decodeURIComponent(mcpTestMatch[2]);
+  // DELETE /admin/api/mcp-servers/:name
+  if (globalMcpMatch && method === 'DELETE') {
+    const name = decodeURIComponent(globalMcpMatch[1]);
+    if (!providers.database) { sendError(res, 500, 'Database not configured'); return; }
+    const { removeGlobalMcpServer } = await import('../providers/mcp/database.js');
+    const removed = await removeGlobalMcpServer(providers.database.db, name);
+    if (!removed) { sendError(res, 404, 'MCP server not found'); return; }
+    // Sync to in-memory manager
+    if (deps.mcpManager) { deps.mcpManager.removeServer('_', name); }
+    sendJSON(res, { ok: true });
+    return;
+  }
+
+  // POST /admin/api/mcp-servers/:name/test
+  const globalMcpTestMatch = pathname.match(/^\/admin\/api\/mcp-servers\/([^/]+)\/test$/);
+  if (globalMcpTestMatch && method === 'POST') {
+    const name = decodeURIComponent(globalMcpTestMatch[1]);
     if (!providers.database) { sendError(res, 500, 'Database not configured'); return; }
     if (!providers.credentials) { sendError(res, 500, 'Credentials provider not configured'); return; }
-    const { testMcpServer } = await import('../providers/mcp/database.js');
-    const result = await testMcpServer(providers.database.db, id, name, providers.credentials);
+    const { testGlobalMcpServer } = await import('../providers/mcp/database.js');
+    const result = await testGlobalMcpServer(providers.database.db, name, providers.credentials);
     sendJSON(res, result);
+    return;
+  }
+
+  // ── Per-Agent MCP Server Assignment ──
+
+  // GET /admin/api/agents/:id/mcp-servers — list assigned server names
+  const mcpListMatch = pathname.match(/^\/admin\/api\/agents\/([^/]+)\/mcp-servers$/);
+  if (mcpListMatch && method === 'GET') {
+    const id = decodeURIComponent(mcpListMatch[1]);
+    if (!providers.database) { sendError(res, 500, 'Database not configured'); return; }
+    const { listAgentServerNames } = await import('../providers/mcp/database.js');
+    const names = await listAgentServerNames(providers.database.db, id);
+    sendJSON(res, names);
+    return;
+  }
+
+  // POST /admin/api/agents/:id/mcp-servers — assign a server to this agent
+  if (mcpListMatch && method === 'POST') {
+    const id = decodeURIComponent(mcpListMatch[1]);
+    if (!providers.database) { sendError(res, 500, 'Database not configured'); return; }
+    try {
+      const body = JSON.parse(await readBody(req));
+      const { serverName } = body;
+      if (typeof serverName !== 'string' || !serverName) { sendError(res, 400, 'Missing required field: serverName'); return; }
+      const { assignServerToAgent } = await import('../providers/mcp/database.js');
+      await assignServerToAgent(providers.database.db, id, serverName);
+      sendJSON(res, { ok: true });
+    } catch (err) {
+      sendError(res, 400, `Invalid request: ${(err as Error).message}`);
+    }
+    return;
+  }
+
+  // DELETE /admin/api/agents/:id/mcp-servers/:name — unassign a server from this agent
+  const mcpDeleteMatch = pathname.match(/^\/admin\/api\/agents\/([^/]+)\/mcp-servers\/([^/]+)$/);
+  if (mcpDeleteMatch && method === 'DELETE') {
+    const id = decodeURIComponent(mcpDeleteMatch[1]);
+    const name = decodeURIComponent(mcpDeleteMatch[2]);
+    if (!providers.database) { sendError(res, 500, 'Database not configured'); return; }
+    const { unassignServerFromAgent } = await import('../providers/mcp/database.js');
+    const removed = await unassignServerFromAgent(providers.database.db, id, name);
+    if (!removed) { sendError(res, 404, 'Server not assigned to this agent'); return; }
+    sendJSON(res, { ok: true });
     return;
   }
 
@@ -595,6 +711,7 @@ async function handleAdminAPI(
         audit: providers.audit,
         domainList: deps.domainList,
         sessionId: 'admin',
+        database: providers.database,
       });
       sendJSON(res, result, result.installed ? 201 : 400);
     } catch (err) {
@@ -623,6 +740,7 @@ async function handleAdminAPI(
       audit: providers.audit,
       domainList: deps.domainList,
       sessionId: 'admin',
+      database: providers.database,
     });
     if (!result.ok) { sendError(res, 404, result.reason ?? 'Not found'); return; }
     sendJSON(res, { ok: true });
@@ -694,6 +812,31 @@ async function findSkillContent(
       // Scope not mounted or not available — skip
     }
   }
+  // Search plugin skills in DocumentStore
+  if (providers.storage?.documents) {
+    const allKeys = await providers.storage.documents.list('skills');
+    const prefix = `${agentId}/`;
+    for (const key of allKeys) {
+      if (!key.startsWith(prefix)) continue;
+      const raw = await providers.storage.documents.get('skills', key);
+      if (!raw) continue;
+      try {
+        const stored = JSON.parse(raw);
+        const content = stored.instructions ?? raw;
+        const parsed = parseAgentSkill(content);
+        const name = parsed.name || key.slice(prefix.length);
+        if (name === skillName) {
+          return { name, content };
+        }
+      } catch {
+        const parsed = parseAgentSkill(raw);
+        const name = parsed.name || key.slice(prefix.length);
+        if (name === skillName) {
+          return { name, content: raw };
+        }
+      }
+    }
+  }
   return undefined;
 }
 
@@ -756,6 +899,7 @@ async function handleSetupAPI(
     sendJSON(res, {
       configured: configExists,
       profile: deps.config?.profile,
+      auth_disabled: deps.config.admin.disable_auth === true,
     });
     return;
   }

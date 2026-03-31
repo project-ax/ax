@@ -1,4 +1,5 @@
 import { lookup } from 'node:dns/promises';
+import { Agent } from 'undici';
 import type { FetchRequest, FetchResponse } from './types.js';
 import type { Config, TaintTag } from '../../types.js';
 
@@ -47,10 +48,13 @@ async function resolveSafe(hostname: string, allowedIPs?: Set<string>): Promise<
 export interface WebFetchOptions {
   /** IPs exempt from private-range blocking (for testing). */
   allowedIPs?: Set<string>;
+  /** PEM CA certificate to trust (for testing with self-signed certs). */
+  ca?: string;
 }
 
 export async function create(_config: Config, opts?: WebFetchOptions): Promise<{ fetch(req: FetchRequest): Promise<FetchResponse> }> {
   const allowedIPs = opts?.allowedIPs;
+  const ca = opts?.ca;
 
   function isBlocked(ip: string): boolean {
     if (allowedIPs?.has(ip)) return false;
@@ -79,29 +83,36 @@ export async function create(_config: Config, opts?: WebFetchOptions): Promise<{
 
       // DNS pinning — resolve and verify
       const pinnedIP = await resolveSafe(hostname, allowedIPs);
+      const family = pinnedIP.includes(':') ? 6 : 4;
 
-      // Build fetch URL using pinned IP
-      const pinnedUrl = new URL(req.url);
-      if (pinnedIP.includes(':')) {
-        pinnedUrl.hostname = `[${pinnedIP}]`;
-      } else {
-        pinnedUrl.hostname = pinnedIP;
-      }
+      // Use a custom undici Agent that forces DNS to the pinned IP.
+      // This preserves the original hostname in the URL for TLS SNI
+      // and certificate validation, while connecting to the verified IP.
+      const dispatcher = new Agent({
+        connect: {
+          lookup: (_host, _opts: any, cb: any) => {
+            if (_opts.all) {
+              cb(null, [{ address: pinnedIP, family }]);
+            } else {
+              cb(null, pinnedIP, family);
+            }
+          },
+          ...(ca ? { ca } : {}),
+        },
+      });
 
       const timeoutMs = req.timeoutMs ?? DEFAULT_TIMEOUT_MS;
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
 
       try {
-        const resp = await globalThis.fetch(pinnedUrl.toString(), {
+        const resp = await globalThis.fetch(req.url, {
           method: req.method ?? 'GET',
-          headers: {
-            ...req.headers,
-            Host: url.host, // Original host for SNI / virtual hosting
-          },
+          headers: req.headers,
           signal: controller.signal,
           redirect: 'follow',
-        });
+          dispatcher,
+        } as RequestInit);
 
         // Read body with size limit
         const reader = resp.body?.getReader();
@@ -149,6 +160,7 @@ export async function create(_config: Config, opts?: WebFetchOptions): Promise<{
         throw err;
       } finally {
         clearTimeout(timer);
+        dispatcher.close();
       }
     },
 

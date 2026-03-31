@@ -1,3 +1,27 @@
+### Admin API must sync MCP server changes to McpConnectionManager
+**Date:** 2026-03-30
+**Context:** Linear connector was configured via admin dashboard with correct auth headers, but CLI tool wasn't generated because `discoverAllTools()` sent requests without auth. Root cause: admin CRUD only wrote to DB; the in-memory McpConnectionManager was only populated at startup via `loadDatabaseMcpServers()`.
+**Lesson:** Any admin API endpoint that modifies persistent state consumed by an in-memory registry must ALSO update the registry. For MCP servers: POST must call `mcpManager.addServer()`, PUT must `removeServer()` + re-read from DB + `addServer()`, DELETE must `removeServer()`. This pattern applies to any DB-backed registry with in-memory caching.
+**Tags:** admin-api, mcp, mcpManager, live-sync, server-admin
+
+### MCP tool stubs must support HTTP IPC for k8s mode
+**Date:** 2026-03-30
+**Context:** "get all linear issues in this cycle" prompt triggered 40+ bash/read_file calls. The generated `_runtime.ts` in `./agent/tools/` only supported Unix socket IPC (`AX_IPC_SOCKET`), which is empty in k8s HTTP IPC mode. The stubs are intentional — they save tokens by keeping MCP tool schemas out of every LLM turn. Do NOT register MCP tools as first-class LLM tools.
+**Lesson:** The `_runtime.ts` template must auto-detect transport: check `AX_HOST_URL` for HTTP mode (POST to `/internal/ipc` with Bearer token from `AX_IPC_TOKEN`), fall back to Unix socket. Import paths must use `.ts` extensions (not `.js`) for `node --experimental-strip-types` compatibility. The system prompt must give explicit execution instructions. After changing the runtime template, clear the `tool-stubs` cache in DB (`DELETE FROM documents WHERE collection = 'tool-stubs'`) because the schema hash doesn't cover template changes.
+**Tags:** mcp, tool-stubs, codegen, runtime, http-ipc, k8s, experimental-strip-types
+
+### initHostCore must create McpConnectionManager by default
+**Date:** 2026-03-29
+**Context:** Debugging why /workspace/agent/tools directory was missing in k8s despite 10 MCP connectors being activated. Traced through server-completions.ts → deps.mcpManager was always undefined because neither server-k8s.ts nor server-local.ts passed it to initHostCore, and initHostCore just destructured `undefined` from opts.
+**Lesson:** When `initHostCore` creates shared infrastructure (completionDeps) used by both server-local.ts and server-k8s.ts, it must provide sensible defaults for optional deps that are needed at runtime. The `mcpManager` was marked optional in HostCoreOptions but required for tool stub generation. Always create a default instance in the shared init function rather than relying on each caller to create it. Check that optional deps are actually being wired through by searching for all consumers.
+**Tags:** server-init, mcp, tool-stubs, optional-deps, completionDeps
+
+### Plugin MCP servers need credential auto-discovery for tool discovery
+**Date:** 2026-03-29
+**Context:** After fixing McpConnectionManager creation, tool discovery still failed because all plugin-registered MCP servers had NULL headers. The plugin install creates server records without auth configuration, but the servers need Bearer tokens.
+**Lesson:** When plugins register MCP servers, they only store `{name, type, url}` — no auth. The `discoverAllTools` method needs an `authForServer` callback that looks up credentials by server name convention (e.g., server "linear" → `LINEAR_API_KEY`). Same pattern needed in tool-router.ts and tool-batch.ts for tool execution. Always wire auth through ALL paths: discovery, execution (tool-router), and batch execution (tool-batch). The `getServerMetaByUrl` return type must include `name` so the tool router can pass server name to `authForServer`.
+**Tags:** mcp, auth, credential-discovery, tool-router, tool-batch, plugins
+
 ### GCS downloadScope must use parallel downloads, not sequential
 **Date:** 2026-03-23
 **Context:** User workspace provisioning for 473 files (7.4MB) took ~50 seconds per request because `downloadScope()` downloaded files sequentially — each `file.download()` is a separate GCS API call at ~100ms.

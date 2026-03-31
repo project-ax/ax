@@ -1,9 +1,8 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   Users,
   RefreshCw,
   AlertTriangle,
-  ChevronRight,
   Terminal,
   Clock,
   XCircle,
@@ -12,7 +11,16 @@ import {
   Sparkles,
   FolderOpen,
   Brain,
-  Info,
+  Activity,
+  User,
+  Puzzle,
+  Package,
+  Plus,
+  Globe,
+  Pencil,
+  Trash2,
+  Save,
+  X,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
@@ -24,7 +32,15 @@ import type {
   SkillEntry,
   WorkspaceFileEntry,
   MemoryEntryView,
+  InstalledPlugin,
+  McpServer,
 } from '../../lib/types';
+
+// ── Types ──
+
+type SectionId = 'overview' | 'identity' | 'skills' | 'plugins' | 'connectors' | 'workspace' | 'memory';
+
+// ── Helpers ──
 
 function StatusBadge({ status }: { status: string }) {
   switch (status) {
@@ -52,17 +68,241 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-type TabId = 'info' | 'identity' | 'skills' | 'workspace' | 'memory';
+function timeAgo(dateStr: string): string {
+  const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
+  if (seconds < 60) return 'just now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
-const TABS: { id: TabId; label: string; icon: typeof Info }[] = [
-  { id: 'info', label: 'Info', icon: Info },
-  { id: 'identity', label: 'Identity', icon: FileText },
-  { id: 'skills', label: 'Skills', icon: Sparkles },
-  { id: 'workspace', label: 'Workspace', icon: FolderOpen },
-  { id: 'memory', label: 'Memory', icon: Brain },
+// ── Shared helpers ──
+
+function TabSkeleton() {
+  return (
+    <div className="space-y-2">
+      {[1, 2, 3].map((i) => (
+        <div key={i} className="skeleton h-10 w-full" />
+      ))}
+    </div>
+  );
+}
+
+function TabError({ message }: { message: string }) {
+  return (
+    <div className="flex items-center gap-2 p-3 rounded-lg bg-rose/5 border border-rose/15">
+      <AlertTriangle size={14} className="text-rose shrink-0" />
+      <p className="text-[12px] text-rose">{message}</p>
+    </div>
+  );
+}
+
+function TabEmpty({ label }: { label: string }) {
+  return (
+    <div className="text-center py-8 text-[13px] text-muted-foreground">{label}</div>
+  );
+}
+
+// ── Agent Selector Dropdown ──
+
+function AgentSelector({
+  agents,
+  selectedId,
+  onSelect,
+  onKill,
+}: {
+  agents: Agent[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onKill: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const selected = agents.find((a) => a.id === selectedId);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    if (open) {
+      document.addEventListener('mousedown', handleClick);
+      return () => document.removeEventListener('mousedown', handleClick);
+    }
+  }, [open]);
+
+  return (
+    <div ref={containerRef} className="relative">
+      {/* Selector bar */}
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between bg-card/80 border border-border/40 rounded-lg backdrop-blur-sm px-2.5 py-1.5 text-left transition-colors hover:bg-foreground/[0.02]"
+      >
+        {selected ? (
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div
+              className={`w-2 h-2 rounded-full shrink-0 ${
+                selected.status === 'running'
+                  ? 'bg-emerald animate-pulse-live'
+                  : 'bg-muted-foreground/50'
+              }`}
+            />
+            <span className="font-medium text-[13px] text-foreground truncate">
+              {selected.name}
+            </span>
+          </div>
+        ) : (
+          <span className="text-[13px] text-muted-foreground">Select an agent...</span>
+        )}
+        <ChevronDown
+          size={14}
+          strokeWidth={1.8}
+          className={`text-muted-foreground shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {/* Dropdown */}
+      {open && (
+        <div className="absolute z-10 left-0 min-w-full w-max bg-card border border-border/40 rounded-xl mt-1 shadow-lg overflow-hidden">
+          {agents.map((agent) => (
+            <div
+              key={agent.id}
+              className={`flex items-center justify-between px-4 py-2.5 cursor-pointer transition-colors ${
+                agent.id === selectedId
+                  ? 'bg-amber/5'
+                  : 'hover:bg-foreground/[0.03]'
+              }`}
+            >
+              <div
+                className="flex items-center gap-2.5 min-w-0 flex-1"
+                onClick={() => {
+                  onSelect(agent.id);
+                  setOpen(false);
+                }}
+              >
+                <div
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    agent.status === 'running'
+                      ? 'bg-emerald animate-pulse-live'
+                      : 'bg-muted-foreground/50'
+                  }`}
+                />
+                <span className="text-[13px] font-medium text-foreground truncate">
+                  {agent.name}
+                </span>
+              </div>
+              {(agent.status === 'running' || agent.status === 'idle') && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onKill(agent.id);
+                  }}
+                  className="btn-danger text-[11px] px-2 py-0.5 shrink-0 ml-2"
+                >
+                  Kill
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Vertical Sub-Nav ──
+
+const NAV_GROUPS: {
+  label: string;
+  items: { id: SectionId; label: string; icon: typeof Activity }[];
+}[] = [
+  {
+    label: 'AGENT',
+    items: [
+      { id: 'overview', label: 'Overview', icon: Activity },
+      { id: 'identity', label: 'Identity', icon: User },
+    ],
+  },
+  {
+    label: 'TOOLS',
+    items: [
+      { id: 'skills', label: 'Skills', icon: Sparkles },
+      { id: 'plugins', label: 'Plugins', icon: Puzzle },
+      { id: 'connectors', label: 'Connectors', icon: Globe },
+    ],
+  },
+  {
+    label: 'DATA',
+    items: [
+      { id: 'workspace', label: 'Workspace', icon: FolderOpen },
+      { id: 'memory', label: 'Memory', icon: Brain },
+    ],
+  },
 ];
 
-// ── Tab Content Components ──
+function SubNav({
+  activeSection,
+  onSelect,
+  agents,
+  selectedId,
+  onSelectAgent,
+  onKill,
+}: {
+  activeSection: SectionId;
+  onSelect: (id: SectionId) => void;
+  agents: Agent[];
+  selectedId: string | null;
+  onSelectAgent: (id: string) => void;
+  onKill: (id: string) => void;
+}) {
+  return (
+    <div className="w-[180px] shrink-0 border-r border-border/30">
+      {/* Agent selector above nav groups */}
+      <div className="px-3 pt-3 pb-2">
+        <AgentSelector
+          agents={agents}
+          selectedId={selectedId}
+          onSelect={onSelectAgent}
+          onKill={onKill}
+        />
+      </div>
+      <div className="mx-3 h-px bg-border/30" />
+
+      {NAV_GROUPS.map((group) => (
+        <div key={group.label}>
+          <p className="text-[10px] uppercase tracking-widest text-muted-foreground px-3 pt-4 pb-1 font-medium">
+            {group.label}
+          </p>
+          {group.items.map((item) => {
+            const Icon = item.icon;
+            const isActive = activeSection === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => onSelect(item.id)}
+                className={`flex items-center gap-2 w-full px-3 py-1.5 rounded-md text-[13px] font-medium transition-colors ${
+                  isActive
+                    ? 'text-amber bg-amber/5 border-l-2 border-amber'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-foreground/[0.03]'
+                }`}
+              >
+                <Icon size={14} strokeWidth={1.8} />
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Section Content Components ──
 
 function InfoTab({
   agent,
@@ -254,13 +494,22 @@ function IdentityTab({ agentId }: { agentId: string }) {
 }
 
 function SkillsTab({ agentId }: { agentId: string }) {
-  const { data: skills, loading, error } = useApi<SkillEntry[]>(
+  const { data: skills, loading, error, refresh } = useApi<SkillEntry[]>(
     () => api.agentSkills(agentId),
     [agentId]
   );
   const [expanded, setExpanded] = useState<string | null>(null);
   const [skillContent, setSkillContent] = useState<Record<string, string>>({});
   const [loadingSkill, setLoadingSkill] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
+  const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => { if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current); };
+  }, []);
 
   const toggleSkill = async (name: string) => {
     if (expanded === name) {
@@ -281,6 +530,48 @@ function SkillsTab({ agentId }: { agentId: string }) {
     }
   };
 
+  const startEdit = (name: string) => {
+    setEditing(name);
+    setEditContent(skillContent[name] ?? '');
+  };
+
+  const cancelEdit = () => {
+    setEditing(null);
+    setEditContent('');
+  };
+
+  const saveEdit = async (name: string) => {
+    setSaving(true);
+    try {
+      await api.updateSkill(agentId, name, editContent);
+      setSkillContent((prev) => ({ ...prev, [name]: editContent }));
+      setEditing(null);
+      setEditContent('');
+    } catch {
+      // stay in edit mode on failure
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (name: string) => {
+    if (confirmingDelete !== name) {
+      setConfirmingDelete(name);
+      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+      confirmTimerRef.current = setTimeout(() => setConfirmingDelete(null), 3000);
+      return;
+    }
+    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+    setConfirmingDelete(null);
+    try {
+      await api.deleteSkill(agentId, name);
+      if (expanded === name) setExpanded(null);
+      refresh();
+    } catch {
+      refresh();
+    }
+  };
+
   if (loading) return <TabSkeleton />;
   if (error) return <TabError message={error.message} />;
   if (!skills || skills.length === 0) return <TabEmpty label="No skills" />;
@@ -289,20 +580,49 @@ function SkillsTab({ agentId }: { agentId: string }) {
     <div className="space-y-2">
       {skills.map((skill) => (
         <div key={skill.name} className="rounded-lg border border-border/30 overflow-hidden">
-          <button
-            onClick={() => toggleSkill(skill.name)}
-            className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-foreground/[0.02] transition-colors"
+          <div
+            className="flex items-center justify-between px-3 py-2 hover:bg-foreground/[0.02] transition-colors"
           >
-            <div className="flex items-center gap-2 min-w-0">
+            <button
+              onClick={() => toggleSkill(skill.name)}
+              className="flex items-center gap-2 min-w-0 flex-1 text-left"
+            >
               <Sparkles size={12} className="text-violet shrink-0" />
               <span className="text-[13px] font-medium text-foreground truncate">{skill.name}</span>
+            </button>
+            <div className="flex items-center gap-1 shrink-0 ml-2">
+              {expanded === skill.name && editing !== skill.name && (
+                <button
+                  onClick={() => startEdit(skill.name)}
+                  className="p-1 text-muted-foreground hover:text-foreground transition-colors rounded"
+                  title="Edit"
+                >
+                  <Pencil size={12} />
+                </button>
+              )}
+              <button
+                onClick={() => handleDelete(skill.name)}
+                className={`p-1 transition-colors rounded ${
+                  confirmingDelete === skill.name
+                    ? 'text-rose'
+                    : 'text-muted-foreground hover:text-rose'
+                }`}
+                title={confirmingDelete === skill.name ? 'Click again to confirm' : 'Delete'}
+              >
+                <Trash2 size={12} />
+              </button>
+              <button
+                onClick={() => toggleSkill(skill.name)}
+                className="p-1 text-muted-foreground"
+              >
+                {expanded === skill.name ? (
+                  <ChevronUp size={12} />
+                ) : (
+                  <ChevronDown size={12} />
+                )}
+              </button>
             </div>
-            {expanded === skill.name ? (
-              <ChevronUp size={12} className="text-muted-foreground shrink-0" />
-            ) : (
-              <ChevronDown size={12} className="text-muted-foreground shrink-0" />
-            )}
-          </button>
+          </div>
           {skill.description && expanded !== skill.name && (
             <p className="px-3 pb-2 text-[11px] text-muted-foreground truncate">{skill.description}</p>
           )}
@@ -310,6 +630,33 @@ function SkillsTab({ agentId }: { agentId: string }) {
             <div className="px-3 pb-3 border-t border-border/20">
               {loadingSkill === skill.name ? (
                 <div className="skeleton h-20 w-full mt-2" />
+              ) : editing === skill.name ? (
+                <div className="mt-2 space-y-2">
+                  <textarea
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    className="input w-full h-[300px] text-[11px] font-mono resize-y"
+                    disabled={saving}
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => saveEdit(skill.name)}
+                      disabled={saving}
+                      className="btn-primary text-[12px] px-3 py-1 flex items-center gap-1.5"
+                    >
+                      <Save size={12} />
+                      {saving ? 'Saving...' : 'Save'}
+                    </button>
+                    <button
+                      onClick={cancelEdit}
+                      disabled={saving}
+                      className="btn-secondary text-[12px] px-3 py-1 flex items-center gap-1.5"
+                    >
+                      <X size={12} />
+                      Cancel
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <pre className="text-[11px] text-foreground/70 font-mono whitespace-pre-wrap mt-2 max-h-[300px] overflow-y-auto">
                   {skillContent[skill.name] ?? ''}
@@ -418,45 +765,325 @@ function MemoryTab({ agentId }: { agentId: string }) {
   );
 }
 
-// ── Shared helpers ──
+// ── Plugins Section (Task 6) ──
 
-function TabSkeleton() {
+function PluginsSection({ agentId }: { agentId: string }) {
+  const { data: plugins, loading, error, refresh } = useApi<InstalledPlugin[]>(
+    () => api.agentPlugins(agentId),
+    [agentId]
+  );
+
+  const [showInstallForm, setShowInstallForm] = useState(false);
+  const [installSource, setInstallSource] = useState('');
+  const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState('');
+  const [unconfirming, setUnconfirming] = useState<string | null>(null);
+  const unconfirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cleanup unconfirm timer on unmount
+  useEffect(() => {
+    return () => {
+      if (unconfirmTimerRef.current) clearTimeout(unconfirmTimerRef.current);
+    };
+  }, []);
+
+  const handleInstall = async () => {
+    if (!installSource.trim()) return;
+    setInstalling(true);
+    setInstallError('');
+    try {
+      const result = await api.installPlugin(agentId, installSource.trim());
+      if (result.error) {
+        setInstallError(result.error);
+      } else {
+        setInstallSource('');
+        setShowInstallForm(false);
+        refresh();
+      }
+    } catch (err) {
+      setInstallError(err instanceof Error ? err.message : 'Install failed');
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  const handleUninstall = async (name: string) => {
+    if (unconfirming !== name) {
+      // First click: enter confirm state
+      setUnconfirming(name);
+      if (unconfirmTimerRef.current) clearTimeout(unconfirmTimerRef.current);
+      unconfirmTimerRef.current = setTimeout(() => setUnconfirming(null), 3000);
+      return;
+    }
+    // Second click: proceed
+    if (unconfirmTimerRef.current) clearTimeout(unconfirmTimerRef.current);
+    setUnconfirming(null);
+    try {
+      await api.uninstallPlugin(agentId, name);
+      refresh();
+    } catch {
+      // Silently fail — refresh will show current state
+      refresh();
+    }
+  };
+
+  if (loading) return <TabSkeleton />;
+  if (error) return <TabError message={error.message} />;
+
   return (
-    <div className="space-y-2">
-      {[1, 2, 3].map((i) => (
-        <div key={i} className="skeleton h-10 w-full" />
-      ))}
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h4 className="text-[14px] font-semibold text-foreground">Plugins</h4>
+        {!showInstallForm && (
+          <button
+            onClick={() => setShowInstallForm(true)}
+            className="btn-primary text-[12px] px-3 py-1 flex items-center gap-1.5"
+          >
+            <Plus size={14} strokeWidth={1.8} />
+            Install Plugin
+          </button>
+        )}
+      </div>
+
+      {/* Install form */}
+      {showInstallForm && (
+        <div className="p-3 rounded-lg border border-border/30 space-y-3">
+          <input
+            type="text"
+            value={installSource}
+            onChange={(e) => setInstallSource(e.target.value)}
+            className="input w-full text-[13px]"
+            placeholder="github:owner/repo, local path, or URL"
+            disabled={installing}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleInstall();
+            }}
+          />
+          {installError && (
+            <p className="text-[12px] text-rose">{installError}</p>
+          )}
+          <div className="flex items-center gap-2">
+            {installing ? (
+              <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
+                <div className="w-3.5 h-3.5 border-2 border-amber border-t-transparent rounded-full animate-spin" />
+                Installing...
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={handleInstall}
+                  className="btn-primary text-[12px] px-3 py-1"
+                >
+                  Install
+                </button>
+                <button
+                  onClick={() => {
+                    setShowInstallForm(false);
+                    setInstallSource('');
+                    setInstallError('');
+                  }}
+                  className="btn-secondary text-[12px] px-3 py-1"
+                >
+                  Cancel
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Plugin cards */}
+      {!plugins || plugins.length === 0 ? (
+        <div className="text-center py-12">
+          <Package size={32} className="text-muted-foreground/30 mx-auto mb-3" />
+          <p className="text-[13px] text-muted-foreground mb-3">No plugins installed</p>
+          {!showInstallForm && (
+            <button
+              onClick={() => setShowInstallForm(true)}
+              className="btn-primary text-[12px] px-3 py-1 inline-flex items-center gap-1.5"
+            >
+              <Plus size={14} strokeWidth={1.8} />
+              Install Plugin
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          {plugins.map((plugin) => (
+            <div
+              key={plugin.name}
+              className="rounded-lg border border-border/30 p-4 space-y-2"
+            >
+              {/* Row 1: name + version */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Package size={14} className="text-amber shrink-0" strokeWidth={1.8} />
+                  <span className="font-semibold text-[14px] text-foreground truncate">
+                    {plugin.name}
+                  </span>
+                </div>
+                <span className="badge-zinc shrink-0 ml-2">{plugin.version}</span>
+              </div>
+
+              {/* Row 2: description */}
+              {plugin.description && (
+                <p className="text-[12px] text-muted-foreground">{plugin.description}</p>
+              )}
+
+              {/* Row 3: stat badges */}
+              <div className="flex flex-wrap gap-1.5">
+                <span className="badge-blue">
+                  {plugin.skills} skill{plugin.skills !== 1 ? 's' : ''}
+                </span>
+                <span className="badge-yellow">
+                  {plugin.commands} command{plugin.commands !== 1 ? 's' : ''}
+                </span>
+                {plugin.mcpServers.length > 0 && (
+                  <span className="badge-green">
+                    {plugin.mcpServers.length} MCP server{plugin.mcpServers.length !== 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
+
+              {/* Row 4: source + install date */}
+              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                <span className="font-mono truncate">{plugin.source}</span>
+                <span className="shrink-0 ml-2">{timeAgo(plugin.installedAt)}</span>
+              </div>
+
+              {/* Row 5: uninstall */}
+              <div className="flex justify-end pt-1">
+                <button
+                  onClick={() => handleUninstall(plugin.name)}
+                  className="btn-danger text-[11px] px-2.5 py-1"
+                >
+                  {unconfirming === plugin.name ? 'Confirm?' : 'Uninstall'}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function TabError({ message }: { message: string }) {
+// ── Agent Connectors Section ──
+
+function ConnectorsSection({ agentId }: { agentId: string }) {
+  const { data: allServers, loading: loadingServers, error: serversError } = useApi<McpServer[]>(
+    () => api.mcpServers(),
+    []
+  );
+  const { data: assignedNames, loading: loadingAssigned, error: assignedError, refresh } = useApi<string[]>(
+    () => api.agentMcpServers(agentId),
+    [agentId]
+  );
+
+  const [toggling, setToggling] = useState<string | null>(null);
+
+  const loading = loadingServers || loadingAssigned;
+  const error = serversError || assignedError;
+
+  const handleToggle = async (serverName: string, assigned: boolean) => {
+    setToggling(serverName);
+    try {
+      if (assigned) {
+        await api.unassignMcpServer(agentId, serverName);
+      } else {
+        await api.assignMcpServer(agentId, serverName);
+      }
+      refresh();
+    } catch {
+      // refresh will show current state
+      refresh();
+    } finally {
+      setToggling(null);
+    }
+  };
+
+  if (loading) return <TabSkeleton />;
+  if (error) return <TabError message={error.message} />;
+  if (!allServers || allServers.length === 0) {
+    return (
+      <div className="text-center py-12">
+        <Globe size={32} className="text-muted-foreground/30 mx-auto mb-3" />
+        <p className="text-[13px] text-muted-foreground mb-1">No MCP servers configured</p>
+        <p className="text-[11px] text-muted-foreground">
+          Add servers from the Connectors page first.
+        </p>
+      </div>
+    );
+  }
+
+  const assignedSet = new Set(assignedNames ?? []);
+
   return (
-    <div className="flex items-center gap-2 p-3 rounded-lg bg-rose/5 border border-rose/15">
-      <AlertTriangle size={14} className="text-rose shrink-0" />
-      <p className="text-[12px] text-rose">{message}</p>
+    <div className="space-y-4">
+      <div>
+        <h4 className="text-[14px] font-semibold text-foreground">Connectors</h4>
+        <p className="text-[11px] text-muted-foreground mt-0.5">
+          Toggle which MCP servers this agent can access.
+        </p>
+      </div>
+
+      <div className="space-y-1.5">
+        {allServers.map((server) => {
+          const assigned = assignedSet.has(server.name);
+          const isToggling = toggling === server.name;
+
+          return (
+            <div
+              key={server.name}
+              className="flex items-center justify-between px-3 py-2.5 rounded-lg border border-border/30 hover:bg-foreground/[0.02] transition-colors"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <div
+                  className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                    assigned ? 'bg-emerald' : 'bg-muted-foreground/30'
+                  }`}
+                />
+                <div className="min-w-0">
+                  <span className="text-[13px] font-medium text-foreground block truncate">
+                    {server.name}
+                  </span>
+                  <span className="text-[11px] font-mono text-muted-foreground block truncate">
+                    {server.url}
+                  </span>
+                </div>
+              </div>
+
+              <button
+                onClick={() => handleToggle(server.name, assigned)}
+                disabled={isToggling}
+                className={`shrink-0 ml-3 relative w-9 h-5 rounded-full transition-colors ${
+                  assigned ? 'bg-emerald' : 'bg-muted-foreground/20'
+                } ${isToggling ? 'opacity-50' : ''}`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                    assigned ? 'translate-x-4' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-function TabEmpty({ label }: { label: string }) {
-  return (
-    <div className="text-center py-8 text-[13px] text-muted-foreground">{label}</div>
-  );
-}
+// ── Content Area ──
 
-// ── Agent Detail Panel ──
-
-function AgentDetail({
+function ContentArea({
   agent,
-  onClose,
-  onKill,
+  activeSection,
 }: {
   agent: Agent;
-  onClose: () => void;
-  onKill: (id: string) => void;
+  activeSection: SectionId;
 }) {
-  const [activeTab, setActiveTab] = useState<TabId>('info');
   const [killing, setKilling] = useState(false);
   const [killError, setKillError] = useState('');
   const [killed, setKilled] = useState(false);
@@ -475,67 +1102,25 @@ function AgentDetail({
   };
 
   return (
-    <div className="card">
-      {/* Header */}
-      <div className="card-header flex items-center justify-between">
-        <div className="flex items-center gap-2 min-w-0">
-          <Terminal size={14} className="text-amber shrink-0" />
-          <h3 className="text-[14px] font-semibold tracking-tight text-foreground truncate">
-            {agent.name}
-          </h3>
-          <StatusBadge status={killed ? 'stopped' : agent.status} />
+    <div className="flex-1 min-w-0 pl-6">
+      <div className="bg-card/80 border border-border/40 rounded-xl backdrop-blur-sm shadow-sm overflow-hidden">
+        <div className="px-6 py-4 overflow-x-auto">
+          {activeSection === 'overview' && (
+            <InfoTab
+              agent={agent}
+              killed={killed}
+              killing={killing}
+              killError={killError}
+              onKill={handleKill}
+            />
+          )}
+          {activeSection === 'identity' && <IdentityTab agentId={agent.id} />}
+          {activeSection === 'skills' && <SkillsTab agentId={agent.id} />}
+          {activeSection === 'plugins' && <PluginsSection agentId={agent.id} />}
+          {activeSection === 'connectors' && <ConnectorsSection agentId={agent.id} />}
+          {activeSection === 'workspace' && <WorkspaceTab agentId={agent.id} />}
+          {activeSection === 'memory' && <MemoryTab agentId={agent.id} />}
         </div>
-        <button
-          onClick={onClose}
-          className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-        >
-          <XCircle size={16} />
-        </button>
-      </div>
-
-      {agent.description && (
-        <p className="px-6 pt-2 text-[12px] text-muted-foreground">{agent.description}</p>
-      )}
-
-      {/* Tab bar */}
-      <div className="border-b border-border/30 px-4 pt-2">
-        <div className="flex gap-0.5">
-          {TABS.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium rounded-t-md transition-colors ${
-                  isActive
-                    ? 'text-amber border-b-2 border-amber bg-amber/5'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-foreground/[0.03]'
-                }`}
-              >
-                <Icon size={11} strokeWidth={1.8} />
-                {tab.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Tab content */}
-      <div className="card-body">
-        {activeTab === 'info' && (
-          <InfoTab
-            agent={agent}
-            killed={killed}
-            killing={killing}
-            killError={killError}
-            onKill={handleKill}
-          />
-        )}
-        {activeTab === 'identity' && <IdentityTab agentId={agent.id} />}
-        {activeTab === 'skills' && <SkillsTab agentId={agent.id} />}
-        {activeTab === 'workspace' && <WorkspaceTab agentId={agent.id} />}
-        {activeTab === 'memory' && <MemoryTab agentId={agent.id} />}
       </div>
     </div>
   );
@@ -545,6 +1130,7 @@ function AgentDetail({
 
 export default function AgentsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [activeSection, setActiveSection] = useState<SectionId>('overview');
 
   const {
     data: agents,
@@ -552,6 +1138,13 @@ export default function AgentsPage() {
     error,
     refresh,
   } = useApi<Agent[]>(() => api.agents(), []);
+
+  // Auto-select first agent when list loads and nothing selected
+  useEffect(() => {
+    if (agents && agents.length > 0 && !selectedId) {
+      setSelectedId(agents[0].id);
+    }
+  }, [agents, selectedId]);
 
   const handleKill = useCallback(
     (id: string) => {
@@ -581,7 +1174,7 @@ export default function AgentsPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* Page header */}
       <div className="flex items-end justify-between animate-fade-in-up">
         <div>
@@ -599,127 +1192,57 @@ export default function AgentsPage() {
         </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Agent list */}
-        <div className="lg:col-span-2">
-          <div className="card animate-fade-in-up" style={{ animationDelay: '80ms' }}>
-            <div className="card-header flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Users size={16} className="text-amber" strokeWidth={1.8} />
-                <h3 className="text-[14px] font-semibold tracking-tight text-foreground">
-                  All Agents
-                </h3>
-              </div>
-              {agents && (
-                <span className="text-[11px] font-medium text-muted-foreground">
-                  {agents.length} total
-                </span>
-              )}
-            </div>
-            <div className="overflow-x-auto">
-              {loading && !agents ? (
-                <div className="p-4 space-y-3">
-                  {[1, 2, 3, 4].map((i) => (
-                    <div key={i} className="skeleton h-12 w-full" />
-                  ))}
-                </div>
-              ) : !agents || agents.length === 0 ? (
-                <div className="text-center py-12 text-[13px] text-muted-foreground">
-                  No agents registered
-                </div>
-              ) : (
-                <table className="w-full text-[13px]">
-                  <thead>
-                    <tr className="border-b border-border/50 text-left">
-                      <th className="px-6 py-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
-                        Name
-                      </th>
-                      <th className="px-6 py-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
-                        Type
-                      </th>
-                      <th className="px-6 py-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
-                        Status
-                      </th>
-                      <th className="px-6 py-3 text-[10px] font-medium text-muted-foreground uppercase tracking-wide">
-                        Created
-                      </th>
-                      <th className="px-6 py-3" />
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/30">
-                    {agents.map((agent) => (
-                      <tr
-                        key={agent.id}
-                        onClick={() => setSelectedId(agent.id)}
-                        className={`cursor-pointer transition-colors ${
-                          selectedId === agent.id
-                            ? 'bg-foreground/[0.04]'
-                            : 'hover:bg-foreground/[0.02]'
-                        }`}
-                      >
-                        <td className="px-6 py-3">
-                          <div className="flex items-center gap-2">
-                            <div
-                              className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                                agent.status === 'running'
-                                  ? 'bg-emerald animate-pulse-live'
-                                  : agent.status === 'error'
-                                    ? 'bg-rose'
-                                    : 'bg-muted-foreground/50'
-                              }`}
-                            />
-                            <span className="font-medium text-foreground">
-                              {agent.name}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-6 py-3 text-muted-foreground">
-                          {agent.agentType}
-                        </td>
-                        <td className="px-6 py-3">
-                          <StatusBadge status={agent.status} />
-                        </td>
-                        <td className="px-6 py-3 text-muted-foreground">
-                          <div className="flex items-center gap-1.5">
-                            <Clock size={12} className="text-muted-foreground/50" />
-                            {formatDate(agent.createdAt)}
-                          </div>
-                        </td>
-                        <td className="px-6 py-3">
-                          <ChevronRight
-                            size={14}
-                            className="text-muted-foreground/30"
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+      {/* Loading state */}
+      {loading && !agents && (
+        <div className="animate-fade-in-up" style={{ animationDelay: '80ms' }}>
+          <div className="space-y-3">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="skeleton h-12 w-full" />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!loading && (!agents || agents.length === 0) && (
+        <div className="animate-fade-in-up" style={{ animationDelay: '80ms' }}>
+          <div className="bg-card/80 border border-border/40 rounded-xl backdrop-blur-sm shadow-sm">
+            <div className="text-center py-12">
+              <Users size={32} className="text-muted-foreground/30 mx-auto mb-3" />
+              <p className="text-[13px] text-muted-foreground">No agents registered</p>
             </div>
           </div>
         </div>
+      )}
 
-        {/* Detail panel */}
-        <div className="animate-fade-in-up" style={{ animationDelay: '160ms' }}>
+      {/* Sub-nav + Content */}
+      {agents && agents.length > 0 && (
+        <div
+          className="flex gap-0 min-w-0 animate-fade-in-up"
+          style={{ animationDelay: '80ms' }}
+        >
+          <SubNav
+            activeSection={activeSection}
+            onSelect={setActiveSection}
+            agents={agents}
+            selectedId={selectedId}
+            onSelectAgent={setSelectedId}
+            onKill={handleKill}
+          />
           {selectedAgent ? (
-            <AgentDetail
-              agent={selectedAgent}
-              onClose={() => setSelectedId(null)}
-              onKill={handleKill}
-            />
+            <ContentArea agent={selectedAgent} activeSection={activeSection} />
           ) : (
-            <div className="card">
-              <div className="card-body text-center py-12">
-                <Users size={32} className="text-muted-foreground/30 mx-auto mb-3" />
-                <p className="text-[13px] text-muted-foreground">
-                  Select an agent to view details
-                </p>
+            <div className="flex-1 min-w-0 pl-6">
+              <div className="bg-card/80 border border-border/40 rounded-xl backdrop-blur-sm shadow-sm">
+                <div className="text-center py-12">
+                  <Users size={32} className="text-muted-foreground/30 mx-auto mb-3" />
+                  <p className="text-[13px] text-muted-foreground">Select an agent to view details</p>
+                </div>
               </div>
             </div>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 }

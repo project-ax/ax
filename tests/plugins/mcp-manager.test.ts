@@ -20,13 +20,13 @@ describe('McpConnectionManager', () => {
     expect(servers[0].url).toBe('https://mcp.slack.com/mcp');
   });
 
-  it('scopes servers to agents', () => {
+  it('shares global server registry across agents', () => {
     manager.addServer('pi', { name: 'slack', type: 'http', url: 'https://mcp.slack.com/mcp' });
     manager.addServer('counsel', { name: 'docusign', type: 'http', url: 'https://mcp.docusign.com/mcp' });
-    expect(manager.listServers('pi')).toHaveLength(1);
-    expect(manager.listServers('counsel')).toHaveLength(1);
-    expect(manager.listServers('pi')[0].name).toBe('slack');
-    expect(manager.listServers('counsel')[0].name).toBe('docusign');
+    // Server registry is global — all agents see every server.
+    // Per-agent filtering happens at discovery time via serverFilter.
+    expect(manager.listServers('pi')).toHaveLength(2);
+    expect(manager.listServers('counsel')).toHaveLength(2);
   });
 
   it('removes a server', () => {
@@ -190,5 +190,32 @@ describe('McpConnectionManager', () => {
 
   it('getServerMeta returns undefined for unknown server', () => {
     expect(manager.getServerMeta('pi', 'nonexistent')).toBeUndefined();
+  });
+
+  it('discoverAllTools respects serverFilter', async () => {
+    // Register multiple servers
+    manager.addServer('_', { name: 'linear', type: 'http', url: 'https://mcp.linear.app/mcp' }, { source: 'database' });
+    manager.addServer('_', { name: 'slack', type: 'http', url: 'https://mcp.slack.com/mcp' }, { source: 'database' });
+    manager.addServer('_', { name: 'github', type: 'http', url: 'https://api.github.com/mcp' }, { source: 'database' });
+
+    // Mock listToolsFromServer to track which URLs were called
+    const calledUrls: string[] = [];
+    const { vi } = await import('vitest');
+    const mcpClient = await import('../../src/plugins/mcp-client.js');
+    const spy = vi.spyOn(mcpClient, 'listToolsFromServer').mockImplementation(async (url) => {
+      calledUrls.push(url);
+      return [{ name: 'test_tool', description: 'test', inputSchema: {} }];
+    });
+
+    // With filter: only linear
+    await manager.discoverAllTools('pi', { serverFilter: new Set(['linear']) });
+    expect(calledUrls).toEqual(['https://mcp.linear.app/mcp']);
+
+    // Without filter: all servers
+    calledUrls.length = 0;
+    await manager.discoverAllTools('pi', {});
+    expect(calledUrls).toHaveLength(3);
+
+    spy.mockRestore();
   });
 });

@@ -7,6 +7,7 @@ import type {
 } from './types.js';
 import type { DatabaseProvider } from '../database/types.js';
 import type { CredentialProvider } from '../credentials/types.js';
+import { connectAndListTools, callToolOnServer } from '../../plugins/mcp-client.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -14,7 +15,6 @@ import type { CredentialProvider } from '../credentials/types.js';
 
 interface McpServerRow {
   id: string;
-  agent_id: string;
   name: string;
   url: string;
   headers: string | null;
@@ -108,47 +108,6 @@ export function parseServerFromToolName(name: string): { server: string; tool: s
 }
 
 // ---------------------------------------------------------------------------
-// JSON-RPC helpers
-// ---------------------------------------------------------------------------
-
-interface JsonRpcResponse {
-  jsonrpc: '2.0';
-  id: number;
-  result?: unknown;
-  error?: { code: number; message: string };
-}
-
-async function jsonRpcCall(
-  url: string,
-  method: string,
-  params: unknown,
-  headers: Record<string, string>,
-  timeoutMs = 30_000,
-): Promise<unknown> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...headers },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-      signal: controller.signal,
-    });
-    if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`MCP server HTTP ${res.status}: ${text}`);
-    }
-    const data = await res.json() as JsonRpcResponse;
-    if (data.error) {
-      throw new Error(`MCP JSON-RPC error ${data.error.code}: ${data.error.message}`);
-    }
-    return data.result;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Provider
 // ---------------------------------------------------------------------------
 
@@ -196,8 +155,8 @@ class DatabaseMcpProvider implements McpProvider {
 
       try {
         const headers = await resolveHeaders(server.headers, this.credentials);
-        const result = await jsonRpcCall(server.url, 'tools/list', {}, headers) as { tools?: McpToolSchema[] };
-        const tools = (result?.tools ?? []).map(t => ({
+        const rawTools = await connectAndListTools(server.url, { headers });
+        const tools = rawTools.map(t => ({
           ...t,
           name: `${server.name}__${t.name}`,
         }));
@@ -236,10 +195,7 @@ class DatabaseMcpProvider implements McpProvider {
 
     try {
       const headers = await resolveHeaders(server.headers, this.credentials);
-      const result = await jsonRpcCall(server.url, 'tools/call', {
-        name: parsed.tool,
-        arguments: call.arguments,
-      }, headers) as { content: Array<{ type: string; text?: string }> ; isError?: boolean };
+      const result = await callToolOnServer(server.url, parsed.tool, call.arguments ?? {}, { headers });
 
       breaker.reset();
 
@@ -252,15 +208,9 @@ class DatabaseMcpProvider implements McpProvider {
         timestamp: new Date(),
       };
 
-      // Extract text content from MCP response
-      const textContent = result?.content
-        ?.filter((c: { type: string }) => c.type === 'text')
-        .map((c: { text?: string }) => c.text ?? '')
-        .join('\n') ?? '';
-
       return {
-        content: textContent,
-        isError: result?.isError,
+        content: result.content,
+        isError: result.isError,
         taint,
       };
     } catch (err) {
@@ -288,21 +238,23 @@ class DatabaseMcpProvider implements McpProvider {
 }
 
 // ---------------------------------------------------------------------------
-// CRUD helpers (exported for CLI/admin)
+// Global MCP Server CRUD
 // ---------------------------------------------------------------------------
 
 async function getEnabledServers(db: Kysely<any>, agentId: string): Promise<McpServerRow[]> {
+  return listAgentServers(db, agentId);
+}
+
+export async function listAllMcpServers(db: Kysely<any>): Promise<McpServerRow[]> {
   return db
     .selectFrom('mcp_servers')
     .selectAll()
-    .where('agent_id', '=', agentId)
-    .where('enabled', '=', 1)
+    .orderBy('name')
     .execute() as Promise<McpServerRow[]>;
 }
 
-export async function addMcpServer(
+export async function addGlobalMcpServer(
   db: Kysely<any>,
-  agentId: string,
   name: string,
   url: string,
   headers?: Record<string, string>,
@@ -313,7 +265,6 @@ export async function addMcpServer(
     .insertInto('mcp_servers')
     .values({
       id,
-      agent_id: agentId,
       name,
       url,
       headers: headers ? JSON.stringify(headers) : null,
@@ -322,30 +273,21 @@ export async function addMcpServer(
       updated_at: now,
     })
     .execute();
-  return { id, agent_id: agentId, name, url, headers: headers ? JSON.stringify(headers) : null, enabled: 1, created_at: now, updated_at: now };
+  return { id, name, url, headers: headers ? JSON.stringify(headers) : null, enabled: 1, created_at: now, updated_at: now };
 }
 
-export async function removeMcpServer(db: Kysely<any>, agentId: string, name: string): Promise<boolean> {
+export async function removeGlobalMcpServer(db: Kysely<any>, name: string): Promise<boolean> {
+  // Also remove agent assignments
+  try { await db.deleteFrom('agent_mcp_servers').where('server_name', '=', name).execute(); } catch { /* table may not exist yet */ }
   const result = await db
     .deleteFrom('mcp_servers')
-    .where('agent_id', '=', agentId)
     .where('name', '=', name)
     .executeTakeFirst();
   return (result?.numDeletedRows ?? 0n) > 0n;
 }
 
-export async function listMcpServers(db: Kysely<any>, agentId: string): Promise<McpServerRow[]> {
-  return db
-    .selectFrom('mcp_servers')
-    .selectAll()
-    .where('agent_id', '=', agentId)
-    .orderBy('name')
-    .execute() as Promise<McpServerRow[]>;
-}
-
-export async function updateMcpServer(
+export async function updateGlobalMcpServer(
   db: Kysely<any>,
-  agentId: string,
   name: string,
   updates: { url?: string; headers?: Record<string, string>; enabled?: boolean },
 ): Promise<boolean> {
@@ -357,22 +299,19 @@ export async function updateMcpServer(
   const result = await db
     .updateTable('mcp_servers')
     .set(set)
-    .where('agent_id', '=', agentId)
     .where('name', '=', name)
     .executeTakeFirst();
   return (result?.numUpdatedRows ?? 0n) > 0n;
 }
 
-export async function testMcpServer(
+export async function testGlobalMcpServer(
   db: Kysely<any>,
-  agentId: string,
   name: string,
   credentials: CredentialProvider,
 ): Promise<{ ok: boolean; tools?: McpToolSchema[]; error?: string }> {
   const rows = await db
     .selectFrom('mcp_servers')
     .selectAll()
-    .where('agent_id', '=', agentId)
     .where('name', '=', name)
     .execute() as McpServerRow[];
 
@@ -381,12 +320,81 @@ export async function testMcpServer(
 
   try {
     const headers = await resolveHeaders(server.headers, credentials);
-    const result = await jsonRpcCall(server.url, 'tools/list', {}, headers) as { tools?: McpToolSchema[] };
-    return { ok: true, tools: result?.tools ?? [] };
+    const tools = await connectAndListTools(server.url, { headers });
+    return { ok: true, tools };
   } catch (err) {
     return { ok: false, error: (err as Error).message };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Agent ↔ MCP Server assignment
+// ---------------------------------------------------------------------------
+
+/** Assign a global MCP server to an agent. */
+export async function assignServerToAgent(db: Kysely<any>, agentId: string, serverName: string): Promise<void> {
+  try {
+    await db
+      .insertInto('agent_mcp_servers')
+      .values({ agent_id: agentId, server_name: serverName })
+      .execute();
+  } catch {
+    // Already assigned (unique constraint) — that's fine
+  }
+}
+
+/** Remove an agent's assignment to an MCP server. */
+export async function unassignServerFromAgent(db: Kysely<any>, agentId: string, serverName: string): Promise<boolean> {
+  const result = await db
+    .deleteFrom('agent_mcp_servers')
+    .where('agent_id', '=', agentId)
+    .where('server_name', '=', serverName)
+    .executeTakeFirst();
+  return (result?.numDeletedRows ?? 0n) > 0n;
+}
+
+/** Count how many agents are assigned to a given server. */
+export async function countServerAssignments(db: Kysely<any>, serverName: string): Promise<number> {
+  const result = await db
+    .selectFrom('agent_mcp_servers')
+    .select(db.fn.countAll<number>().as('count'))
+    .where('server_name', '=', serverName)
+    .executeTakeFirst();
+  return Number(result?.count ?? 0);
+}
+
+/** List MCP server names assigned to an agent. */
+export async function listAgentServerNames(db: Kysely<any>, agentId: string): Promise<string[]> {
+  const rows = await db
+    .selectFrom('agent_mcp_servers')
+    .select('server_name')
+    .where('agent_id', '=', agentId)
+    .execute() as Array<{ server_name: string }>;
+  return rows.map(r => r.server_name);
+}
+
+/** List full MCP server records assigned to an agent. */
+export async function listAgentServers(db: Kysely<any>, agentId: string): Promise<McpServerRow[]> {
+  return db
+    .selectFrom('mcp_servers')
+    .innerJoin('agent_mcp_servers', 'mcp_servers.name', 'agent_mcp_servers.server_name')
+    .selectAll('mcp_servers')
+    .where('agent_mcp_servers.agent_id', '=', agentId)
+    .where('mcp_servers.enabled', '=', 1)
+    .execute() as Promise<McpServerRow[]>;
+}
+
+// Legacy compat wrappers (used by CLI, old admin routes)
+/** @deprecated Use addGlobalMcpServer */
+export const addMcpServer = (_db: Kysely<any>, _agentId: string, name: string, url: string, headers?: Record<string, string>) => addGlobalMcpServer(_db, name, url, headers);
+/** @deprecated Use removeGlobalMcpServer */
+export const removeMcpServer = (_db: Kysely<any>, _agentId: string, name: string) => removeGlobalMcpServer(_db, name);
+/** @deprecated Use listAllMcpServers */
+export const listMcpServers = (_db: Kysely<any>, _agentId: string) => listAllMcpServers(_db);
+/** @deprecated Use updateGlobalMcpServer */
+export const updateMcpServer = (_db: Kysely<any>, _agentId: string, name: string, updates: { url?: string; headers?: Record<string, string>; enabled?: boolean }) => updateGlobalMcpServer(_db, name, updates);
+/** @deprecated Use testGlobalMcpServer */
+export const testMcpServer = (_db: Kysely<any>, _agentId: string, name: string, credentials: CredentialProvider) => testGlobalMcpServer(_db, name, credentials);
 
 // ---------------------------------------------------------------------------
 // Factory

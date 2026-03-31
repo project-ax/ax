@@ -25,7 +25,8 @@ export async function reloadPluginMcpServers(
     const plugins = await listPlugins(documents, agentId);
     for (const plugin of plugins) {
       for (const server of plugin.mcpServers) {
-        mcpManager.addServer(agentId, server, plugin.pluginName);
+        // Register globally (agentId is ignored for server storage)
+        mcpManager.addServer('__global__', server, plugin.pluginName);
         totalServers++;
       }
     }
@@ -91,7 +92,6 @@ export async function loadDatabaseMcpServers(
       .selectAll()
       .where('enabled', '=', 1)
       .execute() as Array<{
-        agent_id: string;
         name: string;
         url: string;
         headers: string | null;
@@ -104,10 +104,10 @@ export async function loadDatabaseMcpServers(
         try {
           headers = JSON.parse(row.headers);
         } catch {
-          logger.warn('database_mcp_server_malformed_headers', { name: row.name, agentId: row.agent_id });
+          logger.warn('database_mcp_server_malformed_headers', { name: row.name });
         }
       }
-      mcpManager.addServer(row.agent_id, {
+      mcpManager.addServer('_', {
         name: row.name,
         type: 'http',
         url: row.url,
