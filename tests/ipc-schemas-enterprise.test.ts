@@ -130,7 +130,7 @@ describe('Enterprise IPC Schemas', () => {
 
   test('all enterprise actions are registered in IPC_SCHEMAS', () => {
     const enterpriseActions = [
-      'workspace_mount', 'workspace_write',
+      'workspace_mount', 'workspace_write', 'save_artifact',
       'identity_propose', 'proposal_list', 'proposal_review',
       'agent_registry_list', 'agent_registry_get',
     ];

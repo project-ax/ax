@@ -187,7 +187,8 @@ describe('tool-catalog <-> IPC schemas sync', () => {
       'browser_click', 'browser_type', 'browser_screenshot', 'browser_close',
       // Enterprise admin-only actions (not in tool catalog, used via direct IPC)
       'proposal_review', 'agent_registry_get',
-      // (workspace_write is now in the tool catalog)
+      // workspace_write kept as backward-compat alias (save_artifact is the catalog name)
+      'workspace_write',
       // Plugin management (host-internal, not agent-facing)
       'plugin_list', 'plugin_status',
       // Orchestration (host-internal, agents interact via IPC handlers)

@@ -200,13 +200,13 @@ export function createIPCMcpServer(client: IIPCClient, opts?: MCPServerOptions):
     ),
 
     // ── Workspace ──
-    tool('workspace_write', getToolDescription('workspace_write'),
+    tool('save_artifact', getToolDescription('save_artifact'),
       {
         tier: z.string().describe('"agent", "user", or "session"'),
-        path: z.string().describe('Relative path within the tier (e.g. "docs/notes.md")'),
+        path: z.string().describe('Filename with extension (e.g. "report.md", "poem.txt")'),
         content: z.string().describe('File content to write'),
       },
-      (args) => ipcCall('workspace_write', args),
+      (args) => ipcCall('save_artifact', args),
     ),
 
     // ── Workspace Read ──

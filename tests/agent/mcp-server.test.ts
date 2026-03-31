@@ -175,7 +175,7 @@ describe('IPC MCP Server', () => {
       'memory', 'web', 'audit', 'identity',
       'scheduler', 'skill', 'request_credential',
       'agent', 'image',
-      'workspace_write', 'workspace_read', 'workspace_list',
+      'save_artifact', 'workspace_read', 'workspace_list',
       'workspace_mount', 'governance',
       'bash', 'read_file', 'write_file', 'edit_file',
       'grep', 'glob',

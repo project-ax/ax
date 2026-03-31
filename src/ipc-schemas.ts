@@ -296,6 +296,12 @@ export const WorkspaceWriteSchema = ipcAction('workspace_write', {
   content: safeString(500_000),
 });
 
+export const SaveArtifactSchema = ipcAction('save_artifact', {
+  tier: z.enum(['agent', 'user', 'session']),
+  path: safeString(1024),
+  content: safeString(500_000),
+});
+
 export const WorkspaceListSchema = ipcAction('workspace_list', {
   scope: z.enum(['agent', 'user', 'session']),
   prefix: safeString(1024).optional(),

@@ -56,6 +56,51 @@ export async function toAnthropicContent(
       }
       // Fallback: tell the LLM an image was attached but couldn't be loaded
       result.push({ type: 'text', text: `[Image: ${block.fileId} (could not be loaded)]` });
+    } else if (block.type === 'file') {
+      // Resolve file to bytes and send as Anthropic document block
+      if (resolveFile) {
+        try {
+          const file = await resolveFile(block.fileId);
+          if (file) {
+            const DOCUMENT_MIME_TYPES = ['application/pdf', 'text/plain', 'text/csv', 'text/html', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'] as const;
+            type DocMime = typeof DOCUMENT_MIME_TYPES[number];
+            if (DOCUMENT_MIME_TYPES.includes(file.mimeType as DocMime)) {
+              result.push({
+                type: 'document',
+                source: {
+                  type: 'base64',
+                  media_type: file.mimeType as DocMime,
+                  data: file.data.toString('base64'),
+                },
+              } as any);
+            } else {
+              // For text-like types (markdown, json), inline as text
+              result.push({ type: 'text', text: `--- ${block.filename} ---\n${file.data.toString('utf-8')}\n--- end ---` });
+            }
+            continue;
+          }
+        } catch (err) {
+          logger.warn('file_resolve_failed', { fileId: block.fileId, error: (err as Error).message });
+        }
+      }
+      result.push({ type: 'text', text: `[File: ${block.filename} (could not be loaded)]` });
+    } else if (block.type === 'file_data') {
+      // Inline file data — same handling as resolved file blocks
+      const DOCUMENT_MIME_TYPES = ['application/pdf', 'text/plain', 'text/csv', 'text/html', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'] as const;
+      type DocMime = typeof DOCUMENT_MIME_TYPES[number];
+      if (DOCUMENT_MIME_TYPES.includes(block.mimeType as DocMime)) {
+        result.push({
+          type: 'document',
+          source: {
+            type: 'base64',
+            media_type: block.mimeType as DocMime,
+            data: block.data,
+          },
+        } as any);
+      } else {
+        const text = Buffer.from(block.data, 'base64').toString('utf-8');
+        result.push({ type: 'text', text: `--- ${block.filename} ---\n${text}\n--- end ---` });
+      }
     }
   }
   return result;

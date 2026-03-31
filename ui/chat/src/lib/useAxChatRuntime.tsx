@@ -7,6 +7,7 @@ import {
 } from '@assistant-ui/react';
 import { useAISDKRuntime } from '@assistant-ui/react-ai-sdk';
 import { useChat } from '@ai-sdk/react';
+import { generateId } from 'ai';
 import { axThreadListAdapter } from './thread-list-adapter';
 import { createAxHistoryAdapter } from './history-adapter';
 import { AxChatTransport, type CredentialRequiredEvent, type StatusEvent } from './ax-chat-transport';
@@ -31,15 +32,37 @@ const useChatThreadRuntime = (transport: AxChatTransport): AssistantRuntime => {
       history,
       attachments: {
         accept: 'image/*,.pdf,.txt,.csv,.md,.json,.xlsx',
+        async add({ file }) {
+          return {
+            id: generateId(),
+            type: file.type.startsWith('image/') ? 'image' : 'file',
+            name: file.name,
+            file,
+            contentType: file.type,
+            content: [],
+            status: { type: 'requires-action' as const, reason: 'composer-send' as const },
+          };
+        },
         async send(attachment) {
+          const mimeType = attachment.contentType ?? attachment.file.type;
           const resp = await fetch(`/v1/files?agent=main&user=chat-ui&filename=${encodeURIComponent(attachment.name)}`, {
             method: 'POST',
-            headers: { 'Content-Type': attachment.type },
+            headers: { 'Content-Type': mimeType },
             body: attachment.file,
           });
           const { fileId } = await resp.json();
-          return { ...attachment, url: fileId, contentType: attachment.type };
+          return {
+            id: attachment.id,
+            type: attachment.type,
+            name: attachment.name,
+            contentType: mimeType,
+            status: { type: 'complete' as const },
+            content: mimeType.startsWith('image/')
+              ? [{ type: 'image' as const, image: fileId }]
+              : [{ type: 'file' as const, data: fileId, mimeType, filename: attachment.name }],
+          };
         },
+        async remove() {},
       },
     },
   });

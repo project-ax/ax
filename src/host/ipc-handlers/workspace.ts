@@ -31,6 +31,69 @@ export interface WorkspaceHandlerOptions {
   profile: string;
   gcsFileStorage?: GcsFileStorage;
   fileStore?: FileStore;
+  /** Callback invoked when a file is written and uploaded to GCS, so the response can include it. */
+  onArtifactWritten?: (fileId: string, mimeType: string, filename: string) => void;
+}
+
+/**
+ * Core write+upload logic shared by workspace_write and save_artifact handlers.
+ */
+async function writeAndUpload(
+  providers: ProviderRegistry,
+  opts: WorkspaceHandlerOptions,
+  req: { tier: string; path: string; content: string },
+  ctx: IPCContext,
+  actionName: string,
+): Promise<Record<string, unknown>> {
+  const tier = req.tier as WorkspaceScope;
+
+  // Auto-mount the tier (returns existing paths if already mounted)
+  const mounts = await providers.workspace.mount(ctx.sessionId, [tier], { userId: ctx.userId });
+  const tierPath = mounts.paths[tier];
+
+  // Write locally when a local path is available (subprocess / local dev).
+  // In k8s/GCS mode, tierPath may be '' (empty) — skip local write.
+  if (tierPath) {
+    const segments = req.path.split(/[/\\]/).filter(Boolean);
+    const filePath = safePath(tierPath, ...segments);
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, req.content, 'utf-8');
+  }
+
+  // Upload to GCS for persistent access via /v1/files
+  if (opts.gcsFileStorage) {
+    const ext = req.path.split('.').pop() ?? '';
+    const fileId = `files/${randomUUID()}.${ext}`;
+    const buf = Buffer.from(req.content, 'utf-8');
+    const mimeType = EXT_TO_MIME[ext] ?? 'application/octet-stream';
+    const originalFilename = req.path.split('/').pop() ?? req.path;
+    await opts.gcsFileStorage.upload(fileId, buf, mimeType, originalFilename);
+    await opts.fileStore?.register(fileId, opts.agentName, ctx.userId ?? 'unknown', mimeType, originalFilename);
+    opts.onArtifactWritten?.(fileId, mimeType, originalFilename);
+
+    await providers.audit.log({
+      action: actionName,
+      sessionId: ctx.sessionId,
+      args: { tier, path: req.path, bytes: req.content.length },
+      result: 'success',
+    });
+
+    return { written: true, tier, path: req.path, fileId };
+  }
+
+  // No GCS and no local path — can't write anywhere
+  if (!tierPath) {
+    return { ok: false, error: `Failed to resolve workspace tier "${tier}"` };
+  }
+
+  await providers.audit.log({
+    action: actionName,
+    sessionId: ctx.sessionId,
+    args: { tier, path: req.path, bytes: req.content.length },
+    result: 'success',
+  });
+
+  return { written: true, tier, path: req.path };
 }
 
 export function createWorkspaceHandlers(providers: ProviderRegistry, opts: WorkspaceHandlerOptions) {
@@ -65,46 +128,13 @@ export function createWorkspaceHandlers(providers: ProviderRegistry, opts: Works
       };
     },
 
-    workspace_write: async (req: any, ctx: IPCContext) => {
-      const tier = req.tier as WorkspaceScope;
+    // Legacy name — kept for backward compatibility
+    workspace_write: async (req: any, ctx: IPCContext) =>
+      writeAndUpload(providers, opts, req, ctx, 'workspace_write'),
 
-      // Auto-mount the tier (returns existing paths if already mounted)
-      const mounts = await providers.workspace.mount(ctx.sessionId, [tier], { userId: ctx.userId });
-      const tierPath = mounts.paths[tier];
-
-      if (!tierPath) {
-        return { ok: false, error: `Failed to resolve workspace tier "${tier}"` };
-      }
-
-      // Write the file using safePath for traversal protection.
-      // safePath treats its arguments as individual path segments, not relative paths —
-      // split the path first so each component is sanitized independently.
-      const segments = req.path.split(/[/\\]/).filter(Boolean);
-      const filePath = safePath(tierPath, ...segments);
-      mkdirSync(dirname(filePath), { recursive: true });
-      writeFileSync(filePath, req.content, 'utf-8');
-
-      await providers.audit.log({
-        action: 'workspace_write',
-        sessionId: ctx.sessionId,
-        args: { tier, path: req.path, bytes: req.content.length },
-        result: 'success',
-      });
-
-      // Upload to GCS for persistent access via /v1/files
-      if (opts.gcsFileStorage) {
-        const ext = req.path.split('.').pop() ?? '';
-        const fileId = `files/${randomUUID()}.${ext}`;
-        const buf = Buffer.from(req.content, 'utf-8');
-        const mimeType = EXT_TO_MIME[ext] ?? 'application/octet-stream';
-        const originalFilename = req.path.split('/').pop() ?? req.path;
-        await opts.gcsFileStorage.upload(fileId, buf, mimeType, originalFilename);
-        await opts.fileStore?.register(fileId, opts.agentName, ctx.userId ?? 'unknown', mimeType, originalFilename);
-        return { written: true, tier, path: req.path, fileId };
-      }
-
-      return { written: true, tier, path: req.path };
-    },
+    // New name — clearer for LLM tool selection
+    save_artifact: async (req: any, ctx: IPCContext) =>
+      writeAndUpload(providers, opts, req, ctx, 'save_artifact'),
 
     workspace_list: async (req: any, ctx: IPCContext) => {
       if (!providers.workspace?.listFiles) {

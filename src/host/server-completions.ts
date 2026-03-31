@@ -852,38 +852,77 @@ export async function processCompletion(
       userWsPath = userWsPath ?? enterpriseUserWs;
     }
 
-    // Provision uploaded files into sandbox workspace so agent can access via CLI tools
+    // Resolve uploaded file/image references: download from GCS (or local), provision
+    // to sandbox workspace, and convert file blocks to inline data so the LLM can
+    // see the content regardless of which pod processes the request.
     if (Array.isArray(content)) {
-      const fileBlocks = content.filter(b => b.type === 'file' || b.type === 'image');
-      if (fileBlocks.length > 0 && userWsPath) {
-        const provisionDir = safePath(userWsPath, 'files');
-        mkdirSync(provisionDir, { recursive: true });
-        for (const block of fileBlocks) {
-          const fid = 'fileId' in block ? (block as { fileId: string }).fileId : undefined;
-          if (!fid) continue;
-          try {
-            let data: Buffer | undefined;
-            if (deps.gcsFileStorage) {
-              data = await deps.gcsFileStorage.download(fid);
-            } else if (deps.fileStore) {
-              const entry = await deps.fileStore.lookup(fid);
-              if (entry) {
-                const segments = fid.split('/').filter(Boolean);
-                const srcPath = safePath(userWorkspaceDir(agentName, currentUserId), ...segments);
-                if (existsSync(srcPath)) data = readFileSync(srcPath);
-              }
+      const resolvedContent: ContentBlock[] = [];
+      for (const block of content) {
+        if (block.type !== 'file' && block.type !== 'image') {
+          resolvedContent.push(block);
+          continue;
+        }
+        const fid = 'fileId' in block ? (block as { fileId: string }).fileId : undefined;
+        if (!fid) { resolvedContent.push(block); continue; }
+        try {
+          let data: Buffer | undefined;
+          if (deps.gcsFileStorage) {
+            data = await deps.gcsFileStorage.download(fid);
+          } else if (deps.fileStore) {
+            const entry = await deps.fileStore.lookup(fid);
+            if (entry) {
+              const segments = fid.split('/').filter(Boolean);
+              const srcPath = safePath(userWorkspaceDir(agentName, currentUserId), ...segments);
+              if (existsSync(srcPath)) data = readFileSync(srcPath);
             }
-            if (data) {
+          }
+          if (data) {
+            // Write to local workspace for agent tool access (subprocess mode)
+            if (userWsPath) {
               const segments = fid.split('/').filter(Boolean);
               const destPath = safePath(userWsPath, ...segments);
               mkdirSync(dirname(destPath), { recursive: true });
               writeFileSync(destPath, data);
             }
-          } catch (err) {
-            reqLogger.warn('file_provision_failed', { fileId: fid, error: (err as Error).message });
+            // Convert to inline content so the LLM sees the file.
+            // Text-based files become text blocks (pi-session runner only reads text blocks).
+            // Binary files (images, PDFs) become base64 data blocks for toAnthropicContent.
+            if (block.type === 'file') {
+              const fb = block as { fileId: string; mimeType: string; filename: string };
+              const TEXT_MIMES = ['text/plain', 'text/csv', 'text/markdown', 'text/html', 'application/json'];
+              if (TEXT_MIMES.includes(fb.mimeType)) {
+                resolvedContent.push({
+                  type: 'text',
+                  text: `--- ${fb.filename} ---\n${data.toString('utf-8')}\n--- end ${fb.filename} ---`,
+                });
+              } else {
+                resolvedContent.push({
+                  type: 'file_data',
+                  data: data.toString('base64'),
+                  mimeType: fb.mimeType,
+                  filename: fb.filename,
+                });
+              }
+            } else {
+              // image block → image_data
+              const ib = block as { fileId: string; mimeType: string };
+              resolvedContent.push({
+                type: 'image_data',
+                data: data.toString('base64'),
+                mimeType: ib.mimeType as import('../types.js').ImageMimeType,
+              });
+            }
+            reqLogger.info('file_resolved_inline', { fileId: fid, type: block.type, bytes: data.length });
+          } else {
+            resolvedContent.push(block);
+            reqLogger.warn('file_resolve_no_data', { fileId: fid });
           }
+        } catch (err) {
+          resolvedContent.push(block);
+          reqLogger.warn('file_resolve_failed', { fileId: fid, error: (err as Error).message });
         }
       }
+      content = resolvedContent;
     }
 
     // Pre-load all stored credentials for this agent/user into the sandbox env.

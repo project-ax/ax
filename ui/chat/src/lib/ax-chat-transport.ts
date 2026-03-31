@@ -68,13 +68,16 @@ export class AxChatTransport extends HttpChatTransport<UIMessage> {
             const parts: any[] = [];
             const text = extractText(m);
             if (text) parts.push({ type: 'text', text });
-            // Include file attachments as content blocks
-            if ((m as any).experimental_attachments) {
-              for (const att of (m as any).experimental_attachments) {
-                if (att.contentType?.startsWith('image/')) {
-                  parts.push({ type: 'image', fileId: att.url, mimeType: att.contentType });
-                } else {
-                  parts.push({ type: 'file', fileId: att.url, mimeType: att.contentType, filename: att.name });
+            // Include file attachments from message parts (AI SDK FileUIPart)
+            if (m.parts) {
+              for (const p of m.parts) {
+                if (p.type === 'file') {
+                  const fp = p as { url: string; mediaType?: string; filename?: string };
+                  if (fp.mediaType?.startsWith('image/')) {
+                    parts.push({ type: 'image', fileId: fp.url, mimeType: fp.mediaType });
+                  } else {
+                    parts.push({ type: 'file', fileId: fp.url, mimeType: fp.mediaType, filename: fp.filename });
+                  }
                 }
               }
             }
