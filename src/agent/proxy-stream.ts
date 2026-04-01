@@ -16,12 +16,36 @@ import type {
   ToolCall,
 } from '@mariozechner/pi-ai';
 import type { MessageParam, Tool as AnthropicTool } from '@anthropic-ai/sdk/resources/messages';
-import { convertPiMessages, emitStreamEvents, createLazyAnthropicClient } from './stream-utils.js';
+import { convertPiMessages, emitStreamEvents, createLazyAnthropicClient, injectFileBlocks } from './stream-utils.js';
 import { getLogger } from '../logger.js';
+import type { ContentBlock } from '../types.js';
 
 const DEFAULT_MODEL_ID = 'claude-sonnet-4-5-20250929';
 
 const logger = getLogger().child({ component: 'proxy-stream' });
+
+const DOCUMENT_MIME_TYPES = new Set([
+  'application/pdf', 'text/plain', 'text/csv', 'text/html',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+]);
+
+/** Convert internal file_data blocks to Anthropic document content blocks. */
+function fileBlocksToAnthropicDocs(blocks: ContentBlock[]): Array<{ type: string; [k: string]: unknown }> {
+  return blocks
+    .filter(b => b.type === 'file_data')
+    .map(b => {
+      const fb = b as { type: 'file_data'; data: string; mimeType: string; filename: string };
+      if (DOCUMENT_MIME_TYPES.has(fb.mimeType)) {
+        return {
+          type: 'document',
+          source: { type: 'base64', media_type: fb.mimeType, data: fb.data },
+        };
+      }
+      // Non-document files: inline as text
+      const text = Buffer.from(fb.data, 'base64').toString('utf-8');
+      return { type: 'text', text: `--- ${fb.filename} ---\n${text}\n--- end ---` };
+    });
+}
 
 /**
  * Create a stub AssistantMessage for error reporting.
@@ -48,8 +72,9 @@ export function makeProxyErrorMessage(errorText: string, api = 'anthropic-messag
  * Works as both sync (returns stream) and async (returns Promise<stream>)
  * StreamFn — pi-coding-agent accepts either.
  */
-export function createProxyStreamFn(proxySocket: string) {
+export function createProxyStreamFn(proxySocket: string, fileBlocks: ContentBlock[] = []) {
   const getClient = createLazyAnthropicClient(proxySocket);
+  let fileBlocksInjected = false;
 
   return (model: Model<any>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream => {
     const stream = createAssistantMessageEventStream();
@@ -64,6 +89,13 @@ export function createProxyStreamFn(proxySocket: string) {
     });
 
     const messages = convertPiMessages(context.messages) as MessageParam[];
+    // Inject file_data blocks (PDFs, etc.) into the user message on the first LLM call.
+    // The proxy sends directly to the Anthropic API, so convert to Anthropic document format.
+    if (!fileBlocksInjected && fileBlocks.length > 0) {
+      const anthropicBlocks = fileBlocksToAnthropicDocs(fileBlocks);
+      injectFileBlocks(messages as any[], anthropicBlocks as any[]);
+      fileBlocksInjected = true;
+    }
 
     // Convert pi-ai tools to Anthropic SDK Tool[] format.
     const tools: AnthropicTool[] | undefined = context.tools?.map((t: any) => ({

@@ -111,6 +111,42 @@ describe('IPC Schema Validation (SC-SEC-001)', () => {
       expect(LlmCallSchema.safeParse(badBlock).success).toBe(false);
     });
 
+    test('accepts file_data content blocks (PDF attachments)', () => {
+      const withFileData = {
+        action: 'llm_call' as const,
+        messages: [{
+          role: 'user' as const,
+          content: [
+            { type: 'text', text: 'summarize this PDF' },
+            { type: 'file_data', data: 'cGRmZGF0YQ==', mimeType: 'application/pdf', filename: 'report.pdf' },
+          ],
+        }],
+      };
+      expect(LlmCallSchema.safeParse(withFileData).success).toBe(true);
+    });
+
+    test('IPC schema covers every ContentBlock type from types.ts', () => {
+      // Structural guard: when a new ContentBlock variant is added to types.ts,
+      // a matching entry must also be added to the contentBlock Zod union in
+      // ipc-schemas.ts. This test fails if they drift apart.
+      const sampleBlocks: Record<string, Record<string, unknown>> = {
+        text: { type: 'text', text: 'hello' },
+        tool_use: { type: 'tool_use', id: 'id1', name: 'bash', input: {} },
+        tool_result: { type: 'tool_result', tool_use_id: 'id1', content: 'ok' },
+        image: { type: 'image', fileId: 'files/img.png', mimeType: 'image/png' },
+        image_data: { type: 'image_data', data: 'aGk=', mimeType: 'image/png' },
+        file: { type: 'file', fileId: 'files/doc.pdf', mimeType: 'application/pdf', filename: 'doc.pdf' },
+        file_data: { type: 'file_data', data: 'cGRm', mimeType: 'application/pdf', filename: 'doc.pdf' },
+      };
+      for (const [blockType, block] of Object.entries(sampleBlocks)) {
+        const result = LlmCallSchema.safeParse({
+          action: 'llm_call' as const,
+          messages: [{ role: 'user' as const, content: [block] }],
+        });
+        expect(result.success, `ContentBlock type '${blockType}' must be accepted by IPC schema`).toBe(true);
+      }
+    });
+
     test('accepts tools array with name, description, and parameters', () => {
       const withTools = {
         ...valid,

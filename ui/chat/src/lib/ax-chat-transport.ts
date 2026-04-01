@@ -81,9 +81,11 @@ export class AxChatTransport extends HttpChatTransport<UIMessage> {
                 }
               }
             }
+            // Send as array when there are non-text parts (file/image attachments)
+            const hasAttachments = parts.some((p: any) => p.type !== 'text');
             return {
               role: m.role,
-              content: parts.length > 1 ? parts : text,
+              content: hasAttachments ? parts : text,
             };
           }),
         },

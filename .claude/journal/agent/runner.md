@@ -2,6 +2,31 @@
 
 Agent runner implementations, process management, dev/production mode split.
 
+## [2026-04-01 00:54] — Fix PDF file attachments dropped by OpenAI-compat LLM provider
+
+**Task:** PDF file attachments were still not being summarized by the agent despite runner-side fixes. Debugging via k8s cluster + Playwright showed the agent received `file_data` blocks and injected them into IPC messages, but the LLM responded as if no PDF was attached.
+**What I did:**
+- Root-caused to `toOpenAIMessages()` in `src/providers/llm/openai.ts` — the OpenAI-compatible provider (used by OpenRouter/Gemini) only extracted `text` blocks, silently dropping `image_data` and `file_data`
+- Added multipart content handling for user messages: `image_data` → `image_url` with data URI, `file_data` → OpenAI `file` content part with `file_data` data URI
+- Verified end-to-end via Playwright: chat UI → file upload → agent → LLM → PDF summary response
+**Files touched:** src/providers/llm/openai.ts
+**Outcome:** Success — all 2790 tests pass, PDF summarization works in k8s cluster via browser
+**Notes:** The Anthropic provider already handled `file_data` via `toAnthropicContent()`, but the deployed config used `openrouter/google/gemini-3-flash-preview` which routes through the OpenAI-compat provider. Two separate debugging red herrings: (1) stale Vite proxy from worktree returning 500, (2) sandbox pods using old Docker image without runner fixes.
+
+## [2026-03-31 18:31] — Fix PDF file attachments not reaching LLM in pi-session/claude-code runners
+
+**Task:** PDF file attachments uploaded via chat UI were silently dropped by agent runners. Markdown files worked because the server converts them to `text` blocks, but PDFs became `file_data` blocks which runners discarded.
+**What I did:**
+- Added `file_data` block extraction in pi-session and claude-code runners
+- Created `injectFileBlocks()` helper in stream-utils.ts to inject file content into user messages
+- Updated proxy-stream.ts to convert `file_data` → Anthropic `document` blocks for direct SDK calls
+- Updated `buildSDKPrompt()` in claude-code runner to handle `file_data` alongside `image_data`
+- Fixed frontend `ax-chat-transport.ts` to send array content when non-text parts exist (was dropping file-only attachments)
+- Added 9 tests for new functionality
+**Files touched:** src/agent/runners/pi-session.ts, src/agent/runners/claude-code.ts, src/agent/proxy-stream.ts, src/agent/stream-utils.ts, src/ipc-schemas.ts, ui/chat/src/lib/ax-chat-transport.ts, tests/agent/stream-utils.test.ts, tests/agent/runners/claude-code.test.ts, tests/ipc-schemas.test.ts
+**Outcome:** Success — all 2789 tests pass including new tests
+**Notes:** Three issues: (1) runners dropped `file_data` blocks, (2) IPC Zod schema for `contentBlock` was missing `file_data` variant causing strict validation rejection, (3) frontend condition dropped file-only attachments. The proxy path needed explicit conversion to Anthropic `document` format.
+
 ## [2026-03-30 13:45] — Fix MCP tool stubs for HTTP IPC (k8s mode)
 
 **Task:** Fix "get all linear issues in this cycle" prompt making 40+ tool calls. Tool stubs in `./agent/tools/` couldn't execute because they only supported Unix socket IPC, but k8s uses HTTP IPC.

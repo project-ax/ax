@@ -31,9 +31,10 @@ import { IPCClient } from '../ipc-client.js';
 import { startWebProxyBridge, type WebProxyBridge } from '../web-proxy-bridge.js';
 import { compactHistory, historyToPiMessages } from '../runner.js';
 import type { AgentConfig, IIPCClient } from '../runner.js';
-import { convertPiMessages, emitStreamEvents } from '../stream-utils.js';
+import { convertPiMessages, emitStreamEvents, injectFileBlocks } from '../stream-utils.js';
 import { createProxyStreamFn } from '../proxy-stream.js';
 import { makeProxyErrorMessage } from '../proxy-stream.js';
+import type { ContentBlock } from '../../types.js';
 import { buildSystemPrompt, subscribeAgentEvents } from '../agent-setup.js';
 import { installSkillDeps } from '../skill-installer.js';
 import { getLogger, truncate } from '../../logger.js';
@@ -93,7 +94,8 @@ interface IPCResponse {
 
 // ── IPC-based pi-ai StreamFunction ──────────────────────────────────
 
-function createIPCStreamFunction(client: IIPCClient) {
+function createIPCStreamFunction(client: IIPCClient, fileBlocks: ContentBlock[] = []) {
+  let fileBlocksInjected = false;
   return (model: Model<any>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream => {
     const stream = createAssistantMessageEventStream();
 
@@ -107,6 +109,11 @@ function createIPCStreamFunction(client: IIPCClient) {
     });
 
     const messages = convertPiMessages(context.messages);
+    // Inject file_data blocks (PDFs, etc.) into the user message on the first LLM call
+    if (!fileBlocksInjected && fileBlocks.length > 0) {
+      injectFileBlocks(messages, fileBlocks);
+      fileBlocksInjected = true;
+    }
 
     const tools = context.tools?.map(t => ({
       name: t.name,
@@ -394,6 +401,11 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
     return;
   }
 
+  // Extract inline file_data blocks (PDFs, etc.) for forwarding to the LLM
+  const fileBlocks = Array.isArray(rawMsg)
+    ? rawMsg.filter(b => b.type === 'file_data')
+    : [];
+
   // Start web proxy bridge for outbound HTTP/HTTPS access if available
   let webProxyBridge: WebProxyBridge | undefined;
   const webProxySocket = process.env.AX_WEB_PROXY_SOCKET;
@@ -465,14 +477,14 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
   // Register LLM provider (replaces built-in providers — no network in sandbox)
   clearApiProviders();
   if (useProxy) {
-    const proxyStreamFn = createProxyStreamFn(config.proxySocket!);
+    const proxyStreamFn = createProxyStreamFn(config.proxySocket!, fileBlocks);
     registerApiProvider({
       api: 'ax-proxy',
       stream: proxyStreamFn,
       streamSimple: proxyStreamFn,
     });
   } else {
-    const ipcStreamFn = createIPCStreamFunction(client);
+    const ipcStreamFn = createIPCStreamFunction(client, fileBlocks);
     registerApiProvider({
       api: 'ax-ipc',
       stream: ipcStreamFn,

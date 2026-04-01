@@ -67,6 +67,35 @@ function toOpenAIMessages(msg: Message): ChatCompletionMessageParam[] {
     }];
   }
 
+  // Check for media blocks (image_data, file_data) — build multipart content for user messages
+  const hasMedia = blocks.some(b => b.type === 'image_data' || b.type === 'file_data');
+
+  if (hasMedia && msg.role === 'user') {
+    const parts: Array<{ type: string; [k: string]: unknown }> = [];
+    for (const b of blocks) {
+      if (b.type === 'text') {
+        parts.push({ type: 'text', text: (b as Extract<ContentBlock, { type: 'text' }>).text });
+      } else if (b.type === 'image_data') {
+        const ib = b as Extract<ContentBlock, { type: 'image_data' }>;
+        parts.push({
+          type: 'image_url',
+          image_url: { url: `data:${ib.mimeType};base64,${ib.data}` },
+        });
+      } else if (b.type === 'file_data') {
+        const fb = b as Extract<ContentBlock, { type: 'file_data' }>;
+        // Use OpenAI file content part for PDFs and documents
+        parts.push({
+          type: 'file',
+          file: {
+            file_data: `data:${fb.mimeType};base64,${fb.data}`,
+            filename: fb.filename,
+          },
+        });
+      }
+    }
+    return [{ role: 'user', content: parts } as any];
+  }
+
   // Plain text ContentBlock[] — join text parts
   const text = blocks
     .filter(b => b.type === 'text')
