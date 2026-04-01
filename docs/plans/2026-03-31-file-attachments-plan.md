@@ -10,7 +10,7 @@
 
 ---
 
-### Task 1: Expand ContentBlock types and MIME type support
+## Task 1: Expand ContentBlock types and MIME type support
 
 **Files:**
 - Modify: `src/types.ts:28-37`
@@ -64,7 +64,7 @@ git commit -m "feat: add file/file_data ContentBlock types and document MIME typ
 
 ---
 
-### Task 2: Add `filename` column to FileStore
+## Task 2: Add `filename` column to FileStore
 
 **Files:**
 - Modify: `src/migrations/files.ts`
@@ -181,7 +181,7 @@ git commit -m "feat: add filename column to FileStore"
 
 ---
 
-### Task 3: Create GCS file storage module
+## Task 3: Create GCS file storage module
 
 **Files:**
 - Create: `src/host/gcs-file-storage.ts`
@@ -355,7 +355,7 @@ git commit -m "feat: add GCS file storage module for upload and signed URL gener
 
 ---
 
-### Task 4: Update server-files.ts — GCS upload on POST, signed URL redirect on GET
+## Task 4: Update server-files.ts — GCS upload on POST, signed URL redirect on GET
 
 **Files:**
 - Modify: `src/host/server-files.ts`
@@ -525,7 +525,7 @@ git commit -m "feat: GCS upload/signed-URL-redirect for /v1/files endpoint, supp
 
 ---
 
-### Task 5: Wire GCS file storage into the server
+## Task 5: Wire GCS file storage into the server
 
 **Files:**
 - Modify: `src/host/server-request-handlers.ts:536-549` (pass gcsFileStorage to handleFileUpload/Download)
@@ -580,7 +580,7 @@ git commit -m "feat: wire GCS file storage into server request handlers"
 
 ---
 
-### Task 6: Upload generated images/artifacts to GCS in server-completions.ts
+## Task 6: Upload generated images/artifacts to GCS in server-completions.ts
 
 **Files:**
 - Modify: `src/host/server-completions.ts:1357-1403`
@@ -647,7 +647,7 @@ git commit -m "feat: upload generated images/artifacts to GCS when configured"
 
 ---
 
-### Task 7: Immediate GCS upload on workspace_write IPC
+## Task 7: Immediate GCS upload on workspace_write IPC
 
 **Files:**
 - Modify: `src/host/ipc-handlers/workspace.ts:56-83`
@@ -717,7 +717,7 @@ git commit -m "feat: immediate GCS upload on workspace_write IPC"
 
 ---
 
-### Task 8: Provision uploaded files into sandbox workspace
+## Task 8: Provision uploaded files into sandbox workspace
 
 **Files:**
 - Modify: `src/host/server-completions.ts` (in processCompletion, before agent spawn)
@@ -776,7 +776,7 @@ git commit -m "feat: provision uploaded files into sandbox workspace before agen
 
 ---
 
-### Task 9: Update Slack channel handler to use GCS pipeline
+## Task 9: Update Slack channel handler to use GCS pipeline
 
 **Files:**
 - Modify: `src/host/server-channels.ts:34-84`
@@ -833,7 +833,7 @@ git commit -m "feat: Slack attachments upload to GCS and produce file content bl
 
 ---
 
-### Task 10: Web chat UI — file attachments in composer
+## Task 10: Web chat UI — file attachments in composer
 
 **Files:**
 - Modify: `ui/chat/src/components/thread.tsx`
@@ -922,7 +922,7 @@ git commit -m "feat: file attachment support in web chat composer with upload to
 
 ---
 
-### Task 11: Web chat UI — render file/image artifacts in messages
+## Task 11: Web chat UI — render file/image artifacts in messages
 
 **Files:**
 - Modify: `ui/chat/src/components/thread.tsx`
@@ -979,7 +979,7 @@ git commit -m "feat: render image artifacts and file download chips in chat mess
 
 ---
 
-### Task 12: Handle file_data stripping in content serialization
+## Task 12: Handle file_data stripping in content serialization
 
 **Files:**
 - Modify: `src/utils/content-serialization.ts` (if it exists — ensure `file_data` blocks are stripped before persistence, same as `image_data`)
@@ -1017,7 +1017,7 @@ git commit -m "feat: strip file_data blocks before persistence, same as image_da
 
 ---
 
-### Task 13: End-to-end integration test
+## Task 13: End-to-end integration test
 
 **Files:**
 - Create: `tests/host/file-attachments-e2e.test.ts`
@@ -1073,7 +1073,7 @@ git commit -m "test: add file attachments E2E integration tests"
 
 ---
 
-### Task 14: Final build verification and cleanup
+## Task 14: Final build verification and cleanup
 
 **Step 1: Run full build**
 

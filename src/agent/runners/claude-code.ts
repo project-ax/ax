@@ -39,8 +39,7 @@ const logger = getLogger().child({ component: 'claude-code' });
 type AnthropicMediaType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
 
 const DOCUMENT_MIME_TYPES = new Set([
-  'application/pdf', 'text/plain', 'text/csv', 'text/html',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/pdf', 'text/plain',
 ]);
 
 /**
@@ -79,9 +78,15 @@ export function buildSDKPrompt(
           },
         });
       } else {
-        // Non-document files: inline as text
-        const text = Buffer.from(block.data, 'base64').toString('utf-8');
-        contentParts.push({ type: 'text', text: `--- ${block.filename} ---\n${text}\n--- end ---` });
+        // Non-document files: inline as text only if text-like MIME
+        const TEXT_MIMES = ['text/', 'application/json', 'application/xml', 'application/javascript'];
+        const isTextLike = TEXT_MIMES.some(prefix => block.mimeType.startsWith(prefix));
+        if (isTextLike) {
+          const text = Buffer.from(block.data, 'base64').toString('utf-8');
+          contentParts.push({ type: 'text', text: `--- ${block.filename} ---\n${text}\n--- end ---` });
+        } else {
+          contentParts.push({ type: 'text', text: `[File: ${block.filename} (${block.mimeType}, binary — not inlined)]` });
+        }
       }
     }
   }

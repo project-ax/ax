@@ -241,12 +241,12 @@ function parseAgentResponse(raw: string): { text: string; blocks?: ContentBlock[
  * conversation store or sent to clients. This function is the single
  * conversion point from inline data to file references.
  */
-export function extractImageDataBlocks(
+export async function extractImageDataBlocks(
   blocks: ContentBlock[],
   wsDir: string,
   logger: Logger,
   gcsFileStorage?: GcsFileStorage,
-): { blocks: ContentBlock[]; extractedFiles: ExtractedFile[] } {
+): Promise<{ blocks: ContentBlock[]; extractedFiles: ExtractedFile[] }> {
   const hasTransientData = blocks.some(b => b.type === 'image_data' || b.type === 'file_data');
   if (!hasTransientData) return { blocks, extractedFiles: [] };
 
@@ -265,9 +265,7 @@ export function extractImageDataBlocks(
         const fileId = `files/${filename}`;
 
         if (gcsFileStorage) {
-          gcsFileStorage.upload(fileId, buf, block.mimeType, filename).catch(err => {
-            logger.warn('gcs_image_upload_failed', { fileId, error: (err as Error).message });
-          });
+          await gcsFileStorage.upload(fileId, buf, block.mimeType, filename);
         } else {
           const filePath = safePath(filesDir, filename);
           writeFileSync(filePath, buf);
@@ -293,9 +291,7 @@ export function extractImageDataBlocks(
         const fileId = `files/${filename}`;
 
         if (gcsFileStorage) {
-          gcsFileStorage.upload(fileId, buf, block.mimeType, block.filename).catch(err => {
-            logger.warn('gcs_file_upload_failed', { fileId, error: (err as Error).message });
-          });
+          await gcsFileStorage.upload(fileId, buf, block.mimeType, block.filename);
         } else {
           const filePath = safePath(filesDir, filename);
           writeFileSync(filePath, buf);
@@ -867,6 +863,15 @@ export async function processCompletion(
         try {
           let data: Buffer | undefined;
           if (deps.gcsFileStorage) {
+            // Verify file exists in our store before downloading from GCS
+            if (deps.fileStore) {
+              const entry = await deps.fileStore.lookup(fid);
+              if (!entry) {
+                resolvedContent.push(block);
+                reqLogger.warn('file_resolve_unauthorized', { fileId: fid });
+                continue;
+              }
+            }
             data = await deps.gcsFileStorage.download(fid);
           } else if (deps.fileStore) {
             const entry = await deps.fileStore.lookup(fid);
@@ -1469,7 +1474,7 @@ export async function processCompletion(
         if (b.type === 'text') return { ...b, text: outbound.content };
         return b;
       });
-      const extracted = extractImageDataBlocks(withScannedText, userWsPath, reqLogger, deps.gcsFileStorage);
+      const extracted = await extractImageDataBlocks(withScannedText, userWsPath, reqLogger, deps.gcsFileStorage);
       responseBlocks = extracted.blocks;
       if (extracted.extractedFiles.length > 0) {
         extractedFiles = extracted.extractedFiles;

@@ -28,8 +28,18 @@ function contentToParts(content: string | ContentBlock[]): Array<Record<string, 
     if (block.type === 'image_data') {
       return { type: 'image' as const, image: `data:${block.mimeType};base64,${block.data}` };
     }
+    if (block.type === 'image') {
+      // Persisted image ref — resolve via /v1/files endpoint
+      const fileId = (block as any).fileId as string;
+      return { type: 'image' as const, image: `/v1/files/${fileId}` };
+    }
     if (block.type === 'file_data') {
-      return { type: 'file' as const, data: `data:${block.mimeType};base64,${block.data}`, mimeType: block.mimeType };
+      return { type: 'file' as const, data: `data:${block.mimeType};base64,${block.data}`, mimeType: block.mimeType, filename: block.filename };
+    }
+    if (block.type === 'file') {
+      // Persisted file ref
+      const fileId = (block as any).fileId as string;
+      return { type: 'file' as const, data: `/v1/files/${fileId}`, mimeType: block.mimeType, filename: block.filename };
     }
     // tool_use, tool_result, etc. — pass through as text fallback
     return { type: 'text' as const, text: JSON.stringify(block) };

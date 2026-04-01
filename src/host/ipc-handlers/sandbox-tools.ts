@@ -111,7 +111,32 @@ const EXT_TO_MIME: Record<string, string> = {
   pdf: 'application/pdf', txt: 'text/plain', csv: 'text/csv', md: 'text/markdown',
   json: 'application/json', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+  html: 'text/html', htm: 'text/html', css: 'text/css', js: 'application/javascript',
+  ts: 'text/typescript', svg: 'image/svg+xml', xml: 'application/xml', yaml: 'text/yaml', yml: 'text/yaml',
 };
+
+/** Upload an artifact to GCS and register it in the file store. Returns fileId if uploaded, undefined otherwise. */
+async function uploadArtifactIfNeeded(
+  path: string,
+  content: string,
+  opts: SandboxToolHandlerOptions,
+  ctx: IPCContext,
+): Promise<string | undefined> {
+  const isArtifact = path.split(/[/\\]/).filter(Boolean)[0] === 'artifacts';
+  if (!isArtifact || !opts.gcsFileStorage) return undefined;
+
+  const ext = path.split('.').pop() ?? '';
+  const fileId = `files/${randomUUID()}.${ext}`;
+  const buf = Buffer.from(content, 'utf-8');
+  const mimeType = EXT_TO_MIME[ext] ?? 'application/octet-stream';
+  const originalFilename = path.split('/').pop() ?? path;
+
+  await opts.gcsFileStorage.upload(fileId, buf, mimeType, originalFilename);
+  await opts.fileStore?.register(fileId, opts.agentName ?? 'main', ctx.userId ?? 'unknown', mimeType, originalFilename);
+  opts.onArtifactWritten?.(fileId, mimeType, originalFilename);
+
+  return fileId;
+}
 
 export interface SandboxToolHandlerOptions {
   /**
@@ -250,18 +275,7 @@ export function createSandboxToolHandlers(providers: ProviderRegistry, opts: San
         });
 
         // Upload to GCS when writing to artifacts/ so the file is downloadable from the chat UI
-        let fileId: string | undefined;
-        const isArtifact = req.path.split(/[/\\]/).filter(Boolean)[0] === 'artifacts';
-        if (isArtifact && opts.gcsFileStorage) {
-          const ext = req.path.split('.').pop() ?? '';
-          fileId = `files/${randomUUID()}.${ext}`;
-          const buf = Buffer.from(req.content, 'utf-8');
-          const mimeType = EXT_TO_MIME[ext] ?? 'application/octet-stream';
-          const originalFilename = req.path.split('/').pop() ?? req.path;
-          await opts.gcsFileStorage.upload(fileId, buf, mimeType, originalFilename);
-          await opts.fileStore?.register(fileId, opts.agentName ?? 'main', ctx.userId ?? 'unknown', mimeType, originalFilename);
-          opts.onArtifactWritten?.(fileId, mimeType, originalFilename);
-        }
+        const fileId = await uploadArtifactIfNeeded(req.path, req.content, opts, ctx);
 
         return { written: true, path: req.path, ...(fileId ? { fileId } : {}) };
       } catch (err: unknown) {
@@ -485,17 +499,8 @@ export function createSandboxToolHandlers(providers: ProviderRegistry, opts: San
 
       // Upload to GCS in container mode when writing to artifacts/
       let fileId: string | undefined;
-      const isArtifact = req.operation === 'write' && req.content
-        && (req.path ?? '').split(/[/\\]/).filter(Boolean)[0] === 'artifacts';
-      if (isArtifact && opts.gcsFileStorage) {
-        const ext = (req.path ?? '').split('.').pop() ?? '';
-        fileId = `files/${randomUUID()}.${ext}`;
-        const buf = Buffer.from(req.content, 'utf-8');
-        const mimeType = EXT_TO_MIME[ext] ?? 'application/octet-stream';
-        const originalFilename = (req.path ?? '').split('/').pop() ?? req.path ?? 'file';
-        await opts.gcsFileStorage.upload(fileId, buf, mimeType, originalFilename);
-        await opts.fileStore?.register(fileId, opts.agentName ?? 'main', ctx.userId ?? 'unknown', mimeType, originalFilename);
-        opts.onArtifactWritten?.(fileId, mimeType, originalFilename);
+      if (req.operation === 'write' && req.content && req.path) {
+        fileId = await uploadArtifactIfNeeded(req.path, req.content, opts, ctx);
       }
 
       return { approved: true, ...(fileId ? { fileId } : {}) };

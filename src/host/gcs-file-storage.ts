@@ -10,6 +10,7 @@ export interface GcsFileStorage {
   getSignedUrl(fileId: string, filename: string): Promise<string>;
   exists(fileId: string): Promise<boolean>;
   download(fileId: string): Promise<Buffer>;
+  close(): Promise<void>;
 }
 
 function normalizePrefix(prefix: string): string {
@@ -31,10 +32,13 @@ export function createGcsFileStorage(bucket: any, prefix: string): GcsFileStorag
 
     async getSignedUrl(fileId, filename) {
       const key = `${norm}${fileId}`;
+      // Sanitize filename for Content-Disposition: strip CR/LF, escape quotes
+      const safe = filename.replace(/[\r\n]/g, '').replace(/["\\]/g, '\\$&');
+      const encoded = encodeURIComponent(filename);
       const [url] = await bucket.file(key).getSignedUrl({
         action: 'read',
         expires: Date.now() + 60 * 60 * 1000, // 1 hour
-        responseDisposition: `inline; filename="${filename}"`,
+        responseDisposition: `inline; filename="${safe}"; filename*=UTF-8''${encoded}`,
         responseType: undefined, // use stored content-type
       });
       return url;
@@ -50,6 +54,10 @@ export function createGcsFileStorage(bucket: any, prefix: string): GcsFileStorag
       const key = `${norm}${fileId}`;
       const [content] = await bucket.file(key).download();
       return content;
+    },
+
+    async close() {
+      // No-op: GCS client does not hold persistent connections that need explicit teardown.
     },
   };
 }

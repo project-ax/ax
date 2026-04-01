@@ -4,8 +4,10 @@ import { createGcsFileStorage } from '../../src/host/gcs-file-storage.js';
 /** Mock GCS bucket that stores files in memory. */
 function mockBucket() {
   const store = new Map<string, { content: Buffer; metadata?: Record<string, string> }>();
+  let lastSignedUrlConfig: any = null;
   return {
     store,
+    get lastSignedUrlConfig() { return lastSignedUrlConfig; },
     file(name: string) {
       return {
         save(content: Buffer, opts?: { metadata?: { metadata?: Record<string, string> }; contentType?: string }) {
@@ -16,6 +18,7 @@ function mockBucket() {
           return Promise.resolve([store.has(name)]);
         },
         getSignedUrl(config: any) {
+          lastSignedUrlConfig = config;
           return Promise.resolve([`https://storage.googleapis.com/test-bucket/${name}?signed=true&expires=${config.expires}`]);
         },
         download() {
@@ -38,7 +41,7 @@ describe('GcsFileStorage', () => {
     expect(bucket.store.get('workspace/files/abc.pdf')!.content).toEqual(Buffer.from('pdf-data'));
   });
 
-  test('getSignedUrl returns URL with filename', async () => {
+  test('getSignedUrl returns URL with filename disposition', async () => {
     const bucket = mockBucket();
     const gcs = createGcsFileStorage(bucket as any, 'workspace/');
 
@@ -47,6 +50,8 @@ describe('GcsFileStorage', () => {
 
     expect(url).toContain('storage.googleapis.com');
     expect(url).toContain('signed=true');
+    // Verify filename is included in the signed URL config
+    expect(bucket.lastSignedUrlConfig.responseDisposition).toContain('report.pdf');
   });
 
   test('exists returns true for uploaded file', async () => {

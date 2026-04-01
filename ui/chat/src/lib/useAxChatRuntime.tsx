@@ -44,7 +44,14 @@ const useChatThreadRuntime = (transport: AxChatTransport): AssistantRuntime => {
           };
         },
         async send(attachment) {
-          const mimeType = attachment.contentType ?? attachment.file.type;
+          const EXT_MIME: Record<string, string> = {
+            pdf: 'application/pdf', txt: 'text/plain', csv: 'text/csv', md: 'text/markdown',
+            json: 'application/json', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+            html: 'text/html', xml: 'application/xml',
+          };
+          const ext = attachment.name.split('.').pop()?.toLowerCase() ?? '';
+          const mimeType = attachment.contentType || attachment.file.type || EXT_MIME[ext] || 'application/octet-stream';
           const resp = await fetch(`/v1/files?agent=main&user=chat-ui&filename=${encodeURIComponent(attachment.name)}`, {
             method: 'POST',
             headers: { 'Content-Type': mimeType },

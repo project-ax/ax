@@ -10,7 +10,9 @@ export function serializeContent(content: string | ContentBlock[]): string {
   // persisting. These should already be converted to file-ref blocks
   // upstream, but guard against accidental leakage.
   const safe = content.filter(b => b.type !== 'image_data' && b.type !== 'file_data');
-  return JSON.stringify(safe);
+  // If all blocks were transient data, serialize original blocks to avoid "[]"
+  // which deserializeContent would treat as a raw string.
+  return JSON.stringify(safe.length > 0 ? safe : content);
 }
 
 /**

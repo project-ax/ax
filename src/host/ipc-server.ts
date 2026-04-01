@@ -143,7 +143,7 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
       workspaceMap: opts.workspaceMap,
       gcsFileStorage: opts?.gcsFileStorage,
       fileStore: opts?.fileStore,
-      agentName: opts?.agentName,
+      agentName,
       onArtifactWritten: opts?.onArtifactWritten,
     }) : {}),
     ...(opts?.toolBatchProvider ? createToolBatchHandlers(opts.toolBatchProvider) : {}),

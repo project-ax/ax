@@ -143,7 +143,7 @@ export async function handleFileUpload(
     writeFileSync(filePath, body);
   }
 
-  deps?.fileStore?.register(fileId, agent, user, contentType, originalFilename);
+  await deps?.fileStore?.register(fileId, agent, user, contentType, originalFilename);
   const responseBody = JSON.stringify({ fileId, mimeType: contentType, filename: originalFilename, size: body.length });
   res.writeHead(200, {
     'Content-Type': 'application/json',

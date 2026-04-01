@@ -16,12 +16,12 @@
 11. Added image/file rendering via SSE `content_block` events in transport and markdown rendering
 12. Extended content serialization to strip `file_data` blocks before persistence
 13. Created E2E integration tests for upload→download flow
-14. Full build + full test suite verification (2777 tests pass)
+14. Full build + full test suite verification (2792 tests pass)
 
 **Files touched:**
 - Modified: `src/types.ts`, `src/file-store.ts`, `src/migrations/files.ts`, `src/host/server-files.ts`, `src/host/server-request-handlers.ts`, `src/host/server-completions.ts`, `src/host/server-init.ts`, `src/host/server-local.ts`, `src/host/server-k8s.ts`, `src/host/ipc-server.ts`, `src/host/ipc-handlers/workspace.ts`, `src/host/server-channels.ts`, `src/utils/content-serialization.ts`, `ui/chat/src/components/thread.tsx`, `ui/chat/src/lib/ax-chat-transport.ts`, `ui/chat/src/lib/useAxChatRuntime.tsx`
 - Created: `src/host/gcs-file-storage.ts`, `tests/file-store.test.ts`, `tests/host/gcs-file-storage.test.ts`, `tests/host/file-attachments-e2e.test.ts`
 
-**Outcome:** Success — all 14 tasks completed, build clean, all 2777 tests pass.
+**Outcome:** Success — all 14 tasks completed, build clean, all 2792 tests pass.
 
 **Notes:** UI build (`cd ui/chat && npm run build`) cannot be verified in this worktree because UI dependencies (react, assistant-ui, etc.) are not installed. The UI code changes are syntactically correct and follow the assistant-ui patterns used in the existing codebase.

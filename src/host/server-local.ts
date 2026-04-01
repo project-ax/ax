@@ -429,6 +429,9 @@ export async function createServer(
     try { await fileStore.close(); } catch {
       logger.debug('file_store_close_failed');
     }
+    try { await gcsFileStorage?.close(); } catch {
+      logger.debug('gcs_file_storage_close_failed');
+    }
 
     // Flush and shut down OTel tracing
     await shutdownTracing();

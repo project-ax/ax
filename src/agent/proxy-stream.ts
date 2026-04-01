@@ -81,7 +81,6 @@ export function makeProxyErrorMessage(errorText: string, api = 'anthropic-messag
  */
 export function createProxyStreamFn(proxySocket: string, fileBlocks: ContentBlock[] = []) {
   const getClient = createLazyAnthropicClient(proxySocket);
-  let fileBlocksInjected = false;
 
   return (model: Model<any>, context: Context, options?: SimpleStreamOptions): AssistantMessageEventStream => {
     const stream = createAssistantMessageEventStream();
@@ -96,12 +95,11 @@ export function createProxyStreamFn(proxySocket: string, fileBlocks: ContentBloc
     });
 
     const messages = convertPiMessages(context.messages) as MessageParam[];
-    // Inject file_data blocks (PDFs, etc.) into the user message on the first LLM call.
-    // The proxy sends directly to the Anthropic API, so convert to Anthropic document format.
-    if (!fileBlocksInjected && fileBlocks.length > 0) {
+    // Inject file_data blocks (PDFs, etc.) into the first user message on every LLM call.
+    // Messages are rebuilt from context.messages each invocation, so injection must be repeated.
+    if (fileBlocks.length > 0) {
       const anthropicBlocks = fileBlocksToAnthropicDocs(fileBlocks);
       injectFileBlocks(messages as any[], anthropicBlocks as any[]);
-      fileBlocksInjected = true;
     }
 
     // Convert pi-ai tools to Anthropic SDK Tool[] format.

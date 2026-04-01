@@ -69,7 +69,7 @@ export interface GcsFileStorage {
 ```
 
 **GCS object layout:**
-```
+```text
 <prefix>files/<fileId>
 ```
 
@@ -128,9 +128,9 @@ Uploaded files must be available on the sandbox filesystem so the agent can proc
 
 ## Agent Artifact Flow
 
-### workspace_write (immediate GCS upload)
+### save_artifact (alias: workspace_write) — immediate GCS upload
 
-When the agent calls `workspace_write`:
+When the agent calls `save_artifact` (or legacy alias `workspace_write`):
 
 1. Host-side IPC handler receives the write
 2. **GCS configured:** upload to GCS immediately (no local write)
@@ -157,7 +157,7 @@ Existing flow (image providers generate images) continues to work. `drainGenerat
 
 ### Assistant Message Rendering
 
-- `image` blocks: render as `<img src="/v1/files/<fileId}">`
+- `image` blocks: render as `<img src="/v1/files/<fileId>">`
 - `file` blocks: render as a downloadable file chip with filename; clicking opens `/v1/files/<fileId>` in new tab
 
 ### User Message Rendering
@@ -180,8 +180,8 @@ No special handling — fileIds persisted in conversation history, `/v1/files/<f
 - `src/host/server-files.ts` — accept all file types, GCS upload, signed URL redirect
 - `src/host/server-completions.ts` — provision uploaded files to sandbox, handle `file_data` blocks
 - `src/host/server-channels.ts` — upload Slack attachments to GCS pipeline
-- `src/host/ipc-handlers/workspace.ts` — immediate GCS upload on `workspace_write`, return fileId
-- `src/ipc-schemas.ts` — update workspace_write response schema if needed
+- `src/host/ipc-handlers/workspace.ts` — immediate GCS upload on `save_artifact` (alias: `workspace_write`), return fileId
+- `src/ipc-schemas.ts` — update `save_artifact` response schema if needed
 - `ui/chat/src/components/thread.tsx` — render image/file blocks in messages
 - `ui/chat/src/lib/ax-chat-transport.ts` — include file content blocks in messages
 

@@ -203,7 +203,9 @@ export function createIPCMcpServer(client: IIPCClient, opts?: MCPServerOptions):
     tool('save_artifact', getToolDescription('save_artifact'),
       {
         tier: z.string().describe('"agent", "user", or "session"'),
-        path: z.string().describe('Filename with extension (e.g. "report.md", "poem.txt")'),
+        path: z.string()
+          .regex(/^[^/\\]+\.[^/\\]+$/, 'Must be a filename with extension, not a path')
+          .describe('Filename with extension (e.g. "report.md", "poem.txt")'),
         content: z.string().describe('File content to write'),
       },
       (args) => ipcCall('save_artifact', args),

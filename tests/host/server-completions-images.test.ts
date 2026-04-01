@@ -10,14 +10,14 @@ import type { ContentBlock } from '../../src/types.js';
 describe('extractImageDataBlocks', () => {
   const logger = { warn: vi.fn(), debug: vi.fn(), info: vi.fn(), error: vi.fn(), child: () => logger } as any;
 
-  test('passes through blocks unchanged when no image_data present', () => {
+  test('passes through blocks unchanged when no image_data present', async () => {
     const blocks: ContentBlock[] = [
       { type: 'text', text: 'Hello' },
       { type: 'image', fileId: 'files/abc.png', mimeType: 'image/png' },
     ];
     const wsDir = mkdtempSync(join(tmpdir(), 'ax-test-'));
     try {
-      const result = extractImageDataBlocks(blocks, wsDir, logger);
+      const result = await extractImageDataBlocks(blocks, wsDir, logger);
       expect(result.blocks).toBe(blocks); // same reference — no copy
       expect(result.extractedFiles).toEqual([]);
     } finally {
@@ -25,7 +25,7 @@ describe('extractImageDataBlocks', () => {
     }
   });
 
-  test('converts image_data to image file ref and writes to disk', () => {
+  test('converts image_data to image file ref and writes to disk', async () => {
     // 1x1 red PNG pixel (base64)
     const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==';
     const blocks: ContentBlock[] = [
@@ -34,7 +34,7 @@ describe('extractImageDataBlocks', () => {
     ];
     const wsDir = mkdtempSync(join(tmpdir(), 'ax-test-'));
     try {
-      const result = extractImageDataBlocks(blocks, wsDir, logger);
+      const result = await extractImageDataBlocks(blocks, wsDir, logger);
 
       // First block preserved
       expect(result.blocks[0]).toEqual({ type: 'text', text: 'Generated chart:' });
@@ -60,7 +60,7 @@ describe('extractImageDataBlocks', () => {
     }
   });
 
-  test('handles multiple image_data blocks interspersed with text', () => {
+  test('handles multiple image_data blocks interspersed with text', async () => {
     const blocks: ContentBlock[] = [
       { type: 'text', text: 'First image:' },
       { type: 'image_data', data: 'AAAA', mimeType: 'image/png' },
@@ -69,7 +69,7 @@ describe('extractImageDataBlocks', () => {
     ];
     const wsDir = mkdtempSync(join(tmpdir(), 'ax-test-'));
     try {
-      const result = extractImageDataBlocks(blocks, wsDir, logger);
+      const result = await extractImageDataBlocks(blocks, wsDir, logger);
       expect(result.blocks).toHaveLength(4);
       expect(result.blocks[0].type).toBe('text');
       expect(result.blocks[1].type).toBe('image');
