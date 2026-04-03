@@ -38,34 +38,56 @@ const logger = getLogger().child({ component: 'claude-code' });
 
 type AnthropicMediaType = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
 
+const DOCUMENT_MIME_TYPES = new Set([
+  'application/pdf', 'text/plain',
+]);
+
 /**
  * Build a prompt suitable for the Agent SDK query().
- * When image blocks are present, returns an AsyncIterable<SDKUserMessage> with
- * structured content (text + image blocks). Otherwise returns a plain string.
+ * When media blocks (images, PDFs) are present, returns an AsyncIterable<SDKUserMessage>
+ * with structured content. Otherwise returns a plain string.
  */
 export function buildSDKPrompt(
   textPrompt: string,
-  imageBlocks: ContentBlock[],
+  mediaBlocks: ContentBlock[],
 ): string | AsyncIterable<SDKUserMessage> {
-  if (imageBlocks.length === 0) return textPrompt;
+  if (mediaBlocks.length === 0) return textPrompt;
 
-  const contentParts: Array<
-    | { type: 'text'; text: string }
-    | { type: 'image'; source: { type: 'base64'; media_type: AnthropicMediaType; data: string } }
-  > = [];
+  const contentParts: any[] = [];
   if (textPrompt.trim()) {
     contentParts.push({ type: 'text', text: textPrompt });
   }
-  for (const img of imageBlocks) {
-    if (img.type === 'image_data') {
+  for (const block of mediaBlocks) {
+    if (block.type === 'image_data') {
       contentParts.push({
         type: 'image',
         source: {
           type: 'base64',
-          media_type: img.mimeType as AnthropicMediaType,
-          data: img.data,
+          media_type: block.mimeType as AnthropicMediaType,
+          data: block.data,
         },
       });
+    } else if (block.type === 'file_data') {
+      if (DOCUMENT_MIME_TYPES.has(block.mimeType)) {
+        contentParts.push({
+          type: 'document',
+          source: {
+            type: 'base64',
+            media_type: block.mimeType,
+            data: block.data,
+          },
+        });
+      } else {
+        // Non-document files: inline as text only if text-like MIME
+        const TEXT_MIMES = ['text/', 'application/json', 'application/xml', 'application/javascript'];
+        const isTextLike = TEXT_MIMES.some(prefix => block.mimeType.startsWith(prefix));
+        if (isTextLike) {
+          const text = Buffer.from(block.data, 'base64').toString('utf-8');
+          contentParts.push({ type: 'text', text: `--- ${block.filename} ---\n${text}\n--- end ---` });
+        } else {
+          contentParts.push({ type: 'text', text: `[File: ${block.filename} (${block.mimeType}, binary — not inlined)]` });
+        }
+      }
     }
   }
   const userMsg: SDKUserMessage = {
@@ -86,9 +108,9 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
     : rawMsg.filter(b => b.type === 'text').map(b => (b as { text: string }).text).join('\n');
   if (!userMessage.trim()) return;
 
-  // Extract inline image blocks so they can be forwarded to the Agent SDK
-  const imageBlocks: ContentBlock[] = Array.isArray(rawMsg)
-    ? rawMsg.filter(b => b.type === 'image_data')
+  // Extract inline media blocks (images, PDFs) so they can be forwarded to the Agent SDK
+  const mediaBlocks: ContentBlock[] = Array.isArray(rawMsg)
+    ? rawMsg.filter(b => b.type === 'image_data' || b.type === 'file_data')
     : [];
 
   // Detect transport mode — AX_HOST_URL means k8s HTTP mode
@@ -195,7 +217,7 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
 
   try {
     // 5. Build prompt — structured with images, or plain string
-    const prompt = buildSDKPrompt(fullPrompt, imageBlocks);
+    const prompt = buildSDKPrompt(fullPrompt, mediaBlocks);
 
     // 6. Call Agent SDK query()
     const result = query({

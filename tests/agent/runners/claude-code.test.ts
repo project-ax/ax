@@ -270,6 +270,59 @@ describe('buildSDKPrompt', () => {
   });
 });
 
+describe('buildSDKPrompt with file_data blocks (PDFs)', () => {
+  test('converts file_data blocks to Anthropic document blocks', async () => {
+    const mediaBlocks: ContentBlock[] = [
+      { type: 'file_data', data: 'cGRmZGF0YQ==', mimeType: 'application/pdf', filename: 'report.pdf' },
+    ];
+    const result = buildSDKPrompt('summarize this pdf', mediaBlocks);
+    expect(typeof result).not.toBe('string');
+    const iter = result as AsyncIterable<{ message: { content: unknown[] } }>;
+    const messages = [];
+    for await (const msg of iter) messages.push(msg);
+
+    const content = messages[0].message.content as Array<Record<string, unknown>>;
+    expect(content).toHaveLength(2);
+    expect(content[0]).toEqual({ type: 'text', text: 'summarize this pdf' });
+    expect(content[1]).toEqual({
+      type: 'document',
+      source: { type: 'base64', media_type: 'application/pdf', data: 'cGRmZGF0YQ==' },
+    });
+  });
+
+  test('handles mixed image and file_data blocks', async () => {
+    const mediaBlocks: ContentBlock[] = [
+      { type: 'image_data', data: 'aW1n', mimeType: 'image/png' },
+      { type: 'file_data', data: 'cGRm', mimeType: 'application/pdf', filename: 'doc.pdf' },
+    ];
+    const result = buildSDKPrompt('analyze these', mediaBlocks);
+    const iter = result as AsyncIterable<{ message: { content: unknown[] } }>;
+    const messages = [];
+    for await (const msg of iter) messages.push(msg);
+
+    const content = messages[0].message.content as Array<Record<string, unknown>>;
+    expect(content).toHaveLength(3); // text + image + document
+    expect(content[0]).toEqual({ type: 'text', text: 'analyze these' });
+    expect((content[1] as any).type).toBe('image');
+    expect((content[2] as any).type).toBe('document');
+  });
+
+  test('inlines non-document file_data as text', async () => {
+    const textContent = 'Hello World';
+    const mediaBlocks: ContentBlock[] = [
+      { type: 'file_data', data: Buffer.from(textContent).toString('base64'), mimeType: 'application/xml', filename: 'data.xml' },
+    ];
+    const result = buildSDKPrompt('parse this', mediaBlocks);
+    const iter = result as AsyncIterable<{ message: { content: unknown[] } }>;
+    const messages = [];
+    for await (const msg of iter) messages.push(msg);
+
+    const content = messages[0].message.content as Array<Record<string, unknown>>;
+    expect(content).toHaveLength(2);
+    expect(content[1]).toEqual({ type: 'text', text: '--- data.xml ---\nHello World\n--- end ---' });
+  });
+});
+
 describe('claude-code k8s HTTP transport detection', () => {
   // The claude-code runner uses direct HTTP to the host LLM proxy when
   // AX_HOST_URL is set. No bridge process needed — ANTHROPIC_BASE_URL

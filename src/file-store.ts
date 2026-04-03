@@ -11,6 +11,7 @@ export interface FileEntry {
   agentName: string;
   userId: string;
   mimeType: string;
+  filename: string;
   createdAt: string;
 }
 
@@ -32,14 +33,15 @@ export class FileStore {
     return new FileStore(db);
   }
 
-  /** Register a file mapping: fileId -> (agentName, userId, mimeType). */
-  async register(fileId: string, agentName: string, userId: string, mimeType: string): Promise<void> {
+  /** Register a file mapping: fileId -> (agentName, userId, mimeType, filename). */
+  async register(fileId: string, agentName: string, userId: string, mimeType: string, filename = ''): Promise<void> {
     await this.db.insertInto('files')
-      .values({ file_id: fileId, agent_name: agentName, user_id: userId, mime_type: mimeType })
+      .values({ file_id: fileId, agent_name: agentName, user_id: userId, mime_type: mimeType, filename })
       .onConflict(oc => oc.column('file_id').doUpdateSet({
         agent_name: agentName,
         user_id: userId,
         mime_type: mimeType,
+        filename,
       }))
       .execute();
   }
@@ -47,7 +49,7 @@ export class FileStore {
   /** Look up a file by its globally unique fileId. */
   async lookup(fileId: string): Promise<FileEntry | undefined> {
     const row = await this.db.selectFrom('files')
-      .select(['file_id', 'agent_name', 'user_id', 'mime_type', 'created_at'])
+      .select(['file_id', 'agent_name', 'user_id', 'mime_type', 'filename', 'created_at'])
       .where('file_id', '=', fileId)
       .executeTakeFirst();
     if (!row) return undefined;
@@ -56,6 +58,7 @@ export class FileStore {
       agentName: row.agent_name as string,
       userId: row.user_id as string,
       mimeType: row.mime_type as string,
+      filename: (row.filename as string) ?? '',
       createdAt: row.created_at as string,
     };
   }

@@ -13,11 +13,14 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { dirname, join, relative } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { minimatch } from 'minimatch';
 import type { ProviderRegistry } from '../../types.js';
 import type { IPCContext } from '../ipc-server.js';
 import { safePath } from '../../utils/safe-path.js';
 import { getLogger } from '../../logger.js';
+import type { GcsFileStorage } from '../gcs-file-storage.js';
+import type { FileStore } from '../../file-store.js';
 
 /** Check once whether rg is available on this system. */
 let _rgAvailable: boolean | undefined;
@@ -103,6 +106,38 @@ function nodeGlob(
 
 const logger = getLogger().child({ component: 'sandbox-tools' });
 
+/** Extension to MIME type mapping for file uploads. */
+const EXT_TO_MIME: Record<string, string> = {
+  pdf: 'application/pdf', txt: 'text/plain', csv: 'text/csv', md: 'text/markdown',
+  json: 'application/json', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+  html: 'text/html', htm: 'text/html', css: 'text/css', js: 'application/javascript',
+  ts: 'text/typescript', svg: 'image/svg+xml', xml: 'application/xml', yaml: 'text/yaml', yml: 'text/yaml',
+};
+
+/** Upload an artifact to GCS and register it in the file store. Returns fileId if uploaded, undefined otherwise. */
+async function uploadArtifactIfNeeded(
+  path: string,
+  content: string,
+  opts: SandboxToolHandlerOptions,
+  ctx: IPCContext,
+): Promise<string | undefined> {
+  const isArtifact = path.split(/[/\\]/).filter(Boolean)[0] === 'artifacts';
+  if (!isArtifact || !opts.gcsFileStorage) return undefined;
+
+  const ext = path.split('.').pop() ?? '';
+  const fileId = `files/${randomUUID()}.${ext}`;
+  const buf = Buffer.from(content, 'utf-8');
+  const mimeType = EXT_TO_MIME[ext] ?? 'application/octet-stream';
+  const originalFilename = path.split('/').pop() ?? path;
+
+  await opts.gcsFileStorage.upload(fileId, buf, mimeType, originalFilename);
+  await opts.fileStore?.register(fileId, opts.agentName ?? 'main', ctx.userId ?? 'unknown', mimeType, originalFilename);
+  opts.onArtifactWritten?.(fileId, mimeType, originalFilename);
+
+  return fileId;
+}
+
 export interface SandboxToolHandlerOptions {
   /**
    * Maps sessionId to the workspace directory for that session.
@@ -110,6 +145,14 @@ export interface SandboxToolHandlerOptions {
    * cleaned up after the agent finishes.
    */
   workspaceMap: Map<string, string>;
+  /** GCS storage for uploading written files as downloadable artifacts. */
+  gcsFileStorage?: GcsFileStorage;
+  /** File store for registering file metadata. */
+  fileStore?: FileStore;
+  /** Agent name for file store registration. */
+  agentName?: string;
+  /** Callback invoked when a file is written and uploaded to GCS. */
+  onArtifactWritten?: (fileId: string, mimeType: string, filename: string) => void;
 }
 
 function resolveWorkspace(opts: SandboxToolHandlerOptions, ctx: IPCContext): string {
@@ -230,7 +273,11 @@ export function createSandboxToolHandlers(providers: ProviderRegistry, opts: San
           args: { path: req.path, bytes: req.content.length },
           result: 'success',
         });
-        return { written: true, path: req.path };
+
+        // Upload to GCS when writing to artifacts/ so the file is downloadable from the chat UI
+        const fileId = await uploadArtifactIfNeeded(req.path, req.content, opts, ctx);
+
+        return { written: true, path: req.path, ...(fileId ? { fileId } : {}) };
       } catch (err: unknown) {
         await providers.audit.log({
           action: 'sandbox_write_file',
@@ -449,9 +496,14 @@ export function createSandboxToolHandlers(providers: ProviderRegistry, opts: San
         ...(req.command ? { command: req.command.slice(0, 100) } : {}),
         ...(req.path ? { path: req.path } : {}),
       });
-      // Option A+ hook point: policy check, return {approved: false, reason: "..."}
 
-      return { approved: true };
+      // Upload to GCS in container mode when writing to artifacts/
+      let fileId: string | undefined;
+      if (req.operation === 'write' && req.content && req.path) {
+        fileId = await uploadArtifactIfNeeded(req.path, req.content, opts, ctx);
+      }
+
+      return { approved: true, ...(fileId ? { fileId } : {}) };
     },
 
     sandbox_result: async (req: any, ctx: IPCContext) => {

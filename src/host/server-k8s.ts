@@ -417,6 +417,7 @@ async function main(): Promise<void> {
     eventBus,
     providers,
     fileStore: core.fileStore,
+    gcsFileStorage: core.gcsFileStorage,
     taintBudget: core.taintBudget,
     completionOpts: {
       modelId,

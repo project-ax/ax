@@ -268,17 +268,17 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
 
   // ── Workspace ──
   {
-    name: 'workspace_write',
-    label: 'Workspace Write',
+    name: 'save_artifact',
+    label: 'Save Artifact',
     description:
-      'Write a text file to a workspace tier (agent, user, or session) without requiring a sandbox.',
+      'Save a file as a downloadable artifact for the user. Use this when the user asks you to create, generate, or save a file they can download (documents, reports, poems, code files, etc.). Files saved here are immediately available for download in the chat UI.',
     parameters: Type.Object({
       tier: Type.String({ description: '"agent", "user", or "session"' }),
-      path: Type.String({ description: 'Relative path within the tier (e.g. "docs/notes.md")' }),
+      path: Type.String({ description: 'Filename with extension (e.g. "report.md", "poem.txt")' }),
       content: Type.String({ description: 'File content to write' }),
     }),
     category: 'workspace',
-    singletonAction: 'workspace_write',
+    singletonAction: 'save_artifact',
   },
 
   // ── Workspace Read ──
@@ -448,9 +448,9 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
   {
     name: 'write_file',
     label: 'Write File',
-    description: 'Write content to a file in the workspace.',
+    description: 'Write content to a file in the workspace. Files written to artifacts/ (e.g. "artifacts/poem.md") are automatically uploaded and made available for download in the chat UI.',
     parameters: Type.Object({
-      path: Type.String({ description: 'Relative path to the file' }),
+      path: Type.String({ description: 'Relative path to the file. Use "artifacts/" prefix for downloadable files.' }),
       content: Type.String({ description: 'Content to write' }),
     }),
     category: 'sandbox',

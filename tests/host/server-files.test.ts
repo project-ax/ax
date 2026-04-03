@@ -7,6 +7,7 @@ import { FileStore } from '../../src/file-store.js';
 import { createKyselyDb } from '../../src/utils/database.js';
 import { runMigrations } from '../../src/utils/migrator.js';
 import { filesMigrations } from '../../src/migrations/files.js';
+import type { GcsFileStorage } from '../../src/host/gcs-file-storage.js';
 
 // Stub paths.ts to use temp directory for workspace
 let tmpDir: string;
@@ -105,7 +106,7 @@ describe('File upload/download API', () => {
 
     test('rejects unsupported MIME type', async () => {
       const req = mockRequest('POST', '/v1/files?agent=main&user=testuser', {
-        'content-type': 'application/pdf',
+        'content-type': 'application/x-executable',
       }, Buffer.from('data'));
       const res = mockResponse();
 
@@ -213,6 +214,71 @@ describe('File upload/download API', () => {
       } finally {
         await fileStore.close();
       }
+    });
+  });
+
+  describe('GCS mode', () => {
+    function mockGcs(): GcsFileStorage & { stored: Map<string, Buffer> } {
+      const stored = new Map<string, Buffer>();
+      return {
+        stored,
+        upload: vi.fn(async (fileId: string, buffer: Buffer) => { stored.set(fileId, buffer); }),
+        getSignedUrl: vi.fn(async (fileId: string) => `https://gcs.example.com/${fileId}?signed=1`),
+        exists: vi.fn(async (fileId: string) => stored.has(fileId)),
+        download: vi.fn(async (fileId: string) => stored.get(fileId) ?? Buffer.alloc(0)),
+      };
+    }
+
+    test('upload stores file in GCS, not local disk', async () => {
+      const gcs = mockGcs();
+      const imageData = Buffer.from('gcs-test-image');
+      const req = mockRequest('POST', '/v1/files?agent=main&user=testuser&filename=photo.png', {
+        'content-type': 'image/png',
+      }, imageData);
+      const res = mockResponse();
+
+      await handleFileUpload(req, res, { gcsFileStorage: gcs });
+
+      expect(gcs.upload).toHaveBeenCalled();
+      const responseBody = JSON.parse(res.end.mock.calls[0][0]);
+      expect(responseBody.fileId).toMatch(/^files\//);
+      expect(responseBody.filename).toBe('photo.png');
+    });
+
+    test('download returns 302 redirect to signed URL', async () => {
+      const gcs = mockGcs();
+      const db = createKyselyDb({ type: 'sqlite', path: join(tmpDir, 'files-gcs.db') });
+      await runMigrations(db, filesMigrations);
+      const fileStore = new FileStore(db);
+      try {
+        await fileStore.register('files/test.png', 'main', 'testuser', 'image/png', 'test.png');
+        gcs.stored.set('files/test.png', Buffer.from('data'));
+
+        const req = mockRequest('GET', '/v1/files/files/test.png', {});
+        const downloadRes = mockResponse();
+        await handleFileDownload(req, downloadRes, { fileStore, gcsFileStorage: gcs });
+
+        expect(downloadRes.writeHead).toHaveBeenCalledWith(302, expect.objectContaining({
+          Location: expect.stringContaining('gcs.example.com'),
+        }));
+      } finally {
+        await fileStore.close();
+      }
+    });
+
+    test('upload accepts PDF files', async () => {
+      const gcs = mockGcs();
+      const pdfData = Buffer.from('fake-pdf-data');
+      const req = mockRequest('POST', '/v1/files?agent=main&user=testuser&filename=report.pdf', {
+        'content-type': 'application/pdf',
+      }, pdfData);
+      const res = mockResponse();
+
+      await handleFileUpload(req, res, { gcsFileStorage: gcs });
+
+      expect(res.writeHead).toHaveBeenCalledWith(200, expect.any(Object));
+      const responseBody = JSON.parse(res.end.mock.calls[0][0]);
+      expect(responseBody.mimeType).toBe('application/pdf');
     });
   });
 });

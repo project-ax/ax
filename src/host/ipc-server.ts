@@ -96,6 +96,12 @@ export interface IPCHandlerOptions {
   toolBatchProvider?: ((ctx: IPCContext) => ToolBatchProvider | null) | ToolBatchOptions;
   /** Cowork plugin management: MCP connection manager + optional domain list. */
   coworkPlugins?: CoworkPluginHandlerOptions;
+  /** GCS file storage for persistent file access. */
+  gcsFileStorage?: import('./gcs-file-storage.js').GcsFileStorage;
+  /** File store for file metadata lookups. */
+  fileStore?: import('../file-store.js').FileStore;
+  /** Callback when a file is written and uploaded to GCS (for SSE content_block events). */
+  onArtifactWritten?: (fileId: string, mimeType: string, filename: string) => void;
 }
 
 export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerOptions) {
@@ -123,7 +129,7 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
     ...createImageHandlers(providers),
     ...createDelegationHandlers(providers, opts),
     ...createSchedulerHandlers(providers, agentName),
-    ...createWorkspaceHandlers(providers, { agentName, profile }),
+    ...createWorkspaceHandlers(providers, { agentName, profile, gcsFileStorage: opts?.gcsFileStorage, fileStore: opts?.fileStore, onArtifactWritten: opts?.onArtifactWritten }),
     ...createGovernanceHandlers(providers, {
       agentDir: opts?.agentDir,
       agentName,
@@ -135,6 +141,10 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
     ...(opts?.orchestrator ? createOrchestrationHandlers(opts.orchestrator) : {}),
     ...(opts?.workspaceMap ? createSandboxToolHandlers(providers, {
       workspaceMap: opts.workspaceMap,
+      gcsFileStorage: opts?.gcsFileStorage,
+      fileStore: opts?.fileStore,
+      agentName,
+      onArtifactWritten: opts?.onArtifactWritten,
     }) : {}),
     ...(opts?.toolBatchProvider ? createToolBatchHandlers(opts.toolBatchProvider) : {}),
   };

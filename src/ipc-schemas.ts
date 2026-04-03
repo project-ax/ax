@@ -50,6 +50,8 @@ const contentBlock = z.union([
   z.strictObject({ type: z.literal('tool_result'), tool_use_id: safeString(200), content: safeString(250_000) }),
   z.strictObject({ type: z.literal('image'), fileId: safeString(1024), mimeType: z.enum(['image/png', 'image/jpeg', 'image/gif', 'image/webp']) }),
   z.strictObject({ type: z.literal('image_data'), data: safeString(20_000_000), mimeType: z.enum(['image/png', 'image/jpeg', 'image/gif', 'image/webp']) }),
+  z.strictObject({ type: z.literal('file'), fileId: safeString(1024), mimeType: safeString(128), filename: safeString(512) }),
+  z.strictObject({ type: z.literal('file_data'), data: safeString(20_000_000), mimeType: safeString(128), filename: safeString(512) }),
 ]);
 
 export const LlmCallSchema = ipcAction('llm_call', {
@@ -291,6 +293,12 @@ export const WorkspaceMountSchema = ipcAction('workspace_mount', {
 });
 
 export const WorkspaceWriteSchema = ipcAction('workspace_write', {
+  tier: z.enum(['agent', 'user', 'session']),
+  path: safeString(1024),
+  content: safeString(500_000),
+});
+
+export const SaveArtifactSchema = ipcAction('save_artifact', {
   tier: z.enum(['agent', 'user', 'session']),
   path: safeString(1024),
   content: safeString(500_000),

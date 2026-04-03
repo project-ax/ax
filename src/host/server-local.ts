@@ -108,7 +108,7 @@ export async function createServer(
   // ── Shared initialization (storage, routing, IPC, templates, orchestrator) ──
   const core = await initHostCore({ config, providers, eventBus, verbose: opts.verbose });
   const {
-    completionDeps, conversationStore, sessionStore, router, taintBudget, fileStore,
+    completionDeps, conversationStore, sessionStore, router, taintBudget, fileStore, gcsFileStorage,
     ipcServer, ipcSocketDir, orchestrator, disableAutoState,
     agentRegistry, agentName, agentDirVal, identityFilesDir, sessionCanaries,
     modelId,
@@ -243,6 +243,7 @@ export async function createServer(
     eventBus,
     providers,
     fileStore,
+    gcsFileStorage,
     taintBudget,
     completionOpts: {
       modelId,
@@ -427,6 +428,9 @@ export async function createServer(
     }
     try { await fileStore.close(); } catch {
       logger.debug('file_store_close_failed');
+    }
+    try { await gcsFileStorage?.close(); } catch {
+      logger.debug('gcs_file_storage_close_failed');
     }
 
     // Flush and shut down OTel tracing

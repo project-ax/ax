@@ -7,6 +7,7 @@ import {
 } from '@assistant-ui/react';
 import { useAISDKRuntime } from '@assistant-ui/react-ai-sdk';
 import { useChat } from '@ai-sdk/react';
+import { generateId } from 'ai';
 import { axThreadListAdapter } from './thread-list-adapter';
 import { createAxHistoryAdapter } from './history-adapter';
 import { AxChatTransport, type CredentialRequiredEvent, type StatusEvent } from './ax-chat-transport';
@@ -26,7 +27,52 @@ const useChatThreadRuntime = (transport: AxChatTransport): AssistantRuntime => {
   );
 
   const chat = useChat({ id, transport });
-  return useAISDKRuntime(chat, { adapters: { history } });
+  return useAISDKRuntime(chat, {
+    adapters: {
+      history,
+      attachments: {
+        accept: 'image/*,.pdf,.txt,.csv,.md,.json,.xlsx',
+        async add({ file }) {
+          return {
+            id: generateId(),
+            type: file.type.startsWith('image/') ? 'image' : 'file',
+            name: file.name,
+            file,
+            contentType: file.type,
+            content: [],
+            status: { type: 'requires-action' as const, reason: 'composer-send' as const },
+          };
+        },
+        async send(attachment) {
+          const EXT_MIME: Record<string, string> = {
+            pdf: 'application/pdf', txt: 'text/plain', csv: 'text/csv', md: 'text/markdown',
+            json: 'application/json', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+            html: 'text/html', xml: 'application/xml',
+          };
+          const ext = attachment.name.split('.').pop()?.toLowerCase() ?? '';
+          const mimeType = attachment.contentType || attachment.file.type || EXT_MIME[ext] || 'application/octet-stream';
+          const resp = await fetch(`/v1/files?agent=main&user=chat-ui&filename=${encodeURIComponent(attachment.name)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': mimeType },
+            body: attachment.file,
+          });
+          const { fileId } = await resp.json();
+          return {
+            id: attachment.id,
+            type: attachment.type,
+            name: attachment.name,
+            contentType: mimeType,
+            status: { type: 'complete' as const },
+            content: mimeType.startsWith('image/')
+              ? [{ type: 'image' as const, image: fileId }]
+              : [{ type: 'file' as const, data: fileId, mimeType, filename: attachment.name }],
+          };
+        },
+        async remove() {},
+      },
+    },
+  });
 };
 
 /**

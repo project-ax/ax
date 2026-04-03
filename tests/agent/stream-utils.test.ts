@@ -2,7 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { convertPiMessages, emitStreamEvents, loadSkills, loadSkillsMultiDir } from '../../src/agent/stream-utils.js';
+import { convertPiMessages, emitStreamEvents, injectFileBlocks, loadSkills, loadSkillsMultiDir } from '../../src/agent/stream-utils.js';
 
 // ── convertPiMessages ────────────────────────────────────────────────
 
@@ -230,6 +230,105 @@ describe('emitStreamEvents', () => {
     const stream = createMockStream();
     emitStreamEvents(stream as any, mockMsg, '', [], 'stop');
     expect(stream.events.map((e: any) => e.type)).toEqual(['start', 'done']);
+  });
+});
+
+// ── injectFileBlocks ─────────────────────────────────────────────────
+
+describe('injectFileBlocks', () => {
+  test('appends file_data blocks to last user message (string content)', () => {
+    const messages = [{ role: 'user', content: 'summarize this pdf' }];
+    const fileBlocks = [
+      { type: 'file_data', data: 'AQID', mimeType: 'application/pdf', filename: 'report.pdf' },
+    ];
+    injectFileBlocks(messages as any, fileBlocks);
+    expect(messages[0].content).toEqual([
+      { type: 'text', text: 'summarize this pdf' },
+      { type: 'file_data', data: 'AQID', mimeType: 'application/pdf', filename: 'report.pdf' },
+    ]);
+  });
+
+  test('appends file blocks to last user message (array content)', () => {
+    const messages = [
+      { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+    ];
+    const fileBlocks = [
+      { type: 'file_data', data: 'data', mimeType: 'application/pdf', filename: 'a.pdf' },
+    ];
+    injectFileBlocks(messages as any, fileBlocks);
+    expect(messages[0].content).toEqual([
+      { type: 'text', text: 'hello' },
+      { type: 'file_data', data: 'data', mimeType: 'application/pdf', filename: 'a.pdf' },
+    ]);
+  });
+
+  test('skips tool_result user messages and injects into prompt message', () => {
+    const messages = [
+      { role: 'user', content: 'analyze this' },
+      { role: 'assistant', content: [{ type: 'text', text: 'ok' }, { type: 'tool_use', id: 'tc1', name: 'read_file', input: {} }] },
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'tc1', content: 'result' }] },
+    ];
+    const fileBlocks = [
+      { type: 'file_data', data: 'pdf', mimeType: 'application/pdf', filename: 'doc.pdf' },
+    ];
+    injectFileBlocks(messages as any, fileBlocks);
+    // Should inject into first user message (index 0), not tool_result (index 2)
+    expect(messages[0].content).toEqual([
+      { type: 'text', text: 'analyze this' },
+      { type: 'file_data', data: 'pdf', mimeType: 'application/pdf', filename: 'doc.pdf' },
+    ]);
+    // tool_result message should be untouched
+    expect(messages[2].content).toEqual([{ type: 'tool_result', tool_use_id: 'tc1', content: 'result' }]);
+  });
+
+  test('does nothing when fileBlocks is empty', () => {
+    const messages = [{ role: 'user', content: 'hello' }];
+    injectFileBlocks(messages as any, []);
+    expect(messages[0].content).toBe('hello');
+  });
+
+  test('does nothing when no user messages exist', () => {
+    const messages = [{ role: 'assistant', content: 'hi' }];
+    injectFileBlocks(messages as any, [{ type: 'file_data', data: 'x', mimeType: 'application/pdf', filename: 'a.pdf' }]);
+    expect(messages[0].content).toBe('hi');
+  });
+
+  test('appends image_data blocks to last user message', () => {
+    const messages = [{ role: 'user', content: 'describe this image' }];
+    const imageBlocks = [
+      { type: 'image_data', data: 'iVBOR...', mimeType: 'image/png' },
+    ];
+    injectFileBlocks(messages as any, imageBlocks);
+    expect(messages[0].content).toEqual([
+      { type: 'text', text: 'describe this image' },
+      { type: 'image_data', data: 'iVBOR...', mimeType: 'image/png' },
+    ]);
+  });
+
+  test('appends mixed image_data and file_data blocks', () => {
+    const messages = [{ role: 'user', content: 'analyze these' }];
+    const mediaBlocks = [
+      { type: 'image_data', data: 'imgdata', mimeType: 'image/jpeg' },
+      { type: 'file_data', data: 'pdfdata', mimeType: 'application/pdf', filename: 'doc.pdf' },
+    ];
+    injectFileBlocks(messages as any, mediaBlocks);
+    expect(messages[0].content).toEqual([
+      { type: 'text', text: 'analyze these' },
+      { type: 'image_data', data: 'imgdata', mimeType: 'image/jpeg' },
+      { type: 'file_data', data: 'pdfdata', mimeType: 'application/pdf', filename: 'doc.pdf' },
+    ]);
+  });
+
+  test('handles Anthropic document blocks (proxy path)', () => {
+    const messages = [{ role: 'user', content: 'read this pdf' }];
+    const docBlocks = [
+      { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'AQID' } },
+    ];
+    injectFileBlocks(messages as any, docBlocks);
+    expect(messages[0].content).toEqual([
+      { type: 'text', text: 'read this pdf' },
+      { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'AQID' } },
+    ]);
   });
 });
 

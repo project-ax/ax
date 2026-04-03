@@ -4,8 +4,8 @@
  * agent spawning, outbound scanning, and memory persistence.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
 import { workspaceDir, agentWorkspaceDir, userWorkspaceDir, agentDir } from '../paths.js';
@@ -30,6 +30,7 @@ import { ensureOAuthTokenFreshViaProvider, ensureOAuthTokenFresh, refreshOAuthTo
 import { runnerPath as resolveRunnerPath, tsxLoader, isDevMode } from '../utils/assets.js';
 import type { OpenAIChatRequest } from './server-http.js';
 import type { FileStore } from '../file-store.js';
+import type { GcsFileStorage } from './gcs-file-storage.js';
 import type { EventBus } from './event-bus.js';
 import { maybeSummarizeHistory, type SummarizationConfig } from './history-summarizer.js';
 import { recallMemoryForMessage, type MemoryRecallConfig } from './memory-recall.js';
@@ -55,6 +56,7 @@ export interface CompletionDeps {
   logger: Logger;
   verbose?: boolean;
   fileStore?: FileStore;
+  gcsFileStorage?: GcsFileStorage;
   eventBus?: EventBus;
   /** Maps sessionId → workspace directory path. Shared with sandbox tool IPC handlers. */
   workspaceMap?: Map<string, string>;
@@ -239,13 +241,14 @@ function parseAgentResponse(raw: string): { text: string; blocks?: ContentBlock[
  * conversation store or sent to clients. This function is the single
  * conversion point from inline data to file references.
  */
-export function extractImageDataBlocks(
+export async function extractImageDataBlocks(
   blocks: ContentBlock[],
   wsDir: string,
   logger: Logger,
-): { blocks: ContentBlock[]; extractedFiles: ExtractedFile[] } {
-  const hasImageData = blocks.some(b => b.type === 'image_data');
-  if (!hasImageData) return { blocks, extractedFiles: [] };
+  gcsFileStorage?: GcsFileStorage,
+): Promise<{ blocks: ContentBlock[]; extractedFiles: ExtractedFile[] }> {
+  const hasTransientData = blocks.some(b => b.type === 'image_data' || b.type === 'file_data');
+  if (!hasTransientData) return { blocks, extractedFiles: [] };
 
   const filesDir = safePath(wsDir, 'files');
   mkdirSync(filesDir, { recursive: true });
@@ -259,10 +262,15 @@ export function extractImageDataBlocks(
         const buf = Buffer.from(block.data, 'base64');
         const ext = MIME_TO_EXT[block.mimeType] ?? '.bin';
         const filename = `${randomUUID()}${ext}`;
-        const filePath = safePath(filesDir, filename);
-        writeFileSync(filePath, buf);
-
         const fileId = `files/${filename}`;
+
+        if (gcsFileStorage) {
+          await gcsFileStorage.upload(fileId, buf, block.mimeType, filename);
+        } else {
+          const filePath = safePath(filesDir, filename);
+          writeFileSync(filePath, buf);
+        }
+
         converted.push({
           type: 'image',
           fileId,
@@ -271,6 +279,28 @@ export function extractImageDataBlocks(
         extractedFiles.push({ fileId, mimeType: block.mimeType, data: buf });
       } catch (err) {
         logger.warn('image_data_extract_failed', {
+          mimeType: block.mimeType,
+          error: (err as Error).message,
+        });
+      }
+    } else if (block.type === 'file_data') {
+      try {
+        const buf = Buffer.from(block.data, 'base64');
+        const ext = MIME_TO_EXT[block.mimeType] ?? '.bin';
+        const filename = `${randomUUID()}${ext}`;
+        const fileId = `files/${filename}`;
+
+        if (gcsFileStorage) {
+          await gcsFileStorage.upload(fileId, buf, block.mimeType, block.filename);
+        } else {
+          const filePath = safePath(filesDir, filename);
+          writeFileSync(filePath, buf);
+        }
+
+        converted.push({ type: 'file', fileId, mimeType: block.mimeType, filename: block.filename });
+        extractedFiles.push({ fileId, mimeType: block.mimeType, data: buf });
+      } catch (err) {
+        logger.warn('file_data_extract_failed', {
           mimeType: block.mimeType,
           error: (err as Error).message,
         });
@@ -818,6 +848,88 @@ export async function processCompletion(
       userWsPath = userWsPath ?? enterpriseUserWs;
     }
 
+    // Resolve uploaded file/image references: download from GCS (or local), provision
+    // to sandbox workspace, and convert file blocks to inline data so the LLM can
+    // see the content regardless of which pod processes the request.
+    if (Array.isArray(content)) {
+      const resolvedContent: ContentBlock[] = [];
+      for (const block of content) {
+        if (block.type !== 'file' && block.type !== 'image') {
+          resolvedContent.push(block);
+          continue;
+        }
+        const fid = 'fileId' in block ? (block as { fileId: string }).fileId : undefined;
+        if (!fid) { resolvedContent.push(block); continue; }
+        try {
+          let data: Buffer | undefined;
+          if (deps.gcsFileStorage) {
+            // Verify file exists in our store before downloading from GCS
+            if (deps.fileStore) {
+              const entry = await deps.fileStore.lookup(fid);
+              if (!entry) {
+                resolvedContent.push(block);
+                reqLogger.warn('file_resolve_unauthorized', { fileId: fid });
+                continue;
+              }
+            }
+            data = await deps.gcsFileStorage.download(fid);
+          } else if (deps.fileStore) {
+            const entry = await deps.fileStore.lookup(fid);
+            if (entry) {
+              const segments = fid.split('/').filter(Boolean);
+              const srcPath = safePath(userWorkspaceDir(agentName, currentUserId), ...segments);
+              if (existsSync(srcPath)) data = readFileSync(srcPath);
+            }
+          }
+          if (data) {
+            // Write to local workspace for agent tool access (subprocess mode)
+            if (userWsPath) {
+              const segments = fid.split('/').filter(Boolean);
+              const destPath = safePath(userWsPath, ...segments);
+              mkdirSync(dirname(destPath), { recursive: true });
+              writeFileSync(destPath, data);
+            }
+            // Convert to inline content so the LLM sees the file.
+            // Text-based files become text blocks (pi-session runner only reads text blocks).
+            // Binary files (images, PDFs) become base64 data blocks for toAnthropicContent.
+            if (block.type === 'file') {
+              const fb = block as { fileId: string; mimeType: string; filename: string };
+              const TEXT_MIMES = ['text/plain', 'text/csv', 'text/markdown', 'text/html', 'application/json'];
+              if (TEXT_MIMES.includes(fb.mimeType)) {
+                resolvedContent.push({
+                  type: 'text',
+                  text: `--- ${fb.filename} ---\n${data.toString('utf-8')}\n--- end ${fb.filename} ---`,
+                });
+              } else {
+                resolvedContent.push({
+                  type: 'file_data',
+                  data: data.toString('base64'),
+                  mimeType: fb.mimeType,
+                  filename: fb.filename,
+                });
+              }
+            } else {
+              // image block → image_data
+              const ib = block as { fileId: string; mimeType: string };
+              resolvedContent.push({
+                type: 'image_data',
+                data: data.toString('base64'),
+                mimeType: ib.mimeType as import('../types.js').ImageMimeType,
+              });
+            }
+            reqLogger.info('file_resolved_inline', { fileId: fid, type: block.type, bytes: data.length });
+          } else {
+            resolvedContent.push(block);
+            reqLogger.warn('file_resolve_no_data', { fileId: fid });
+          }
+        } catch (err) {
+          resolvedContent.push(block);
+          reqLogger.warn('file_resolve_failed', { fileId: fid, error: (err as Error).message });
+        }
+      }
+      content = resolvedContent;
+    }
+
     // Pre-load all stored credentials for this agent/user into the sandbox env.
     // When web_proxy is enabled: register as MITM proxy placeholders (the proxy
     // replaces them with real values in intercepted HTTPS traffic).
@@ -1362,7 +1474,7 @@ export async function processCompletion(
         if (b.type === 'text') return { ...b, text: outbound.content };
         return b;
       });
-      const extracted = extractImageDataBlocks(withScannedText, userWsPath, reqLogger);
+      const extracted = await extractImageDataBlocks(withScannedText, userWsPath, reqLogger, deps.gcsFileStorage);
       responseBlocks = extracted.blocks;
       if (extracted.extractedFiles.length > 0) {
         extractedFiles = extracted.extractedFiles;
@@ -1392,11 +1504,15 @@ export async function processCompletion(
       // Without this, image URLs return 404 after the in-memory drain.
       for (const img of generatedImages) {
         try {
-          const filePath = safePath(userWsPath, ...img.fileId.split('/').filter(Boolean));
-          mkdirSync(join(filePath, '..'), { recursive: true });
-          writeFileSync(filePath, img.data);
+          if (deps.gcsFileStorage) {
+            await deps.gcsFileStorage.upload(img.fileId, img.data, img.mimeType, img.fileId.split('/').pop() ?? 'image');
+          } else {
+            const filePath = safePath(userWsPath, ...img.fileId.split('/').filter(Boolean));
+            mkdirSync(join(filePath, '..'), { recursive: true });
+            writeFileSync(filePath, img.data);
+          }
           deps.fileStore?.register(img.fileId, agentName, currentUserId, img.mimeType);
-          reqLogger.info('image_persisted', { fileId: img.fileId, path: filePath, bytes: img.data.length });
+          reqLogger.info('image_persisted', { fileId: img.fileId, bytes: img.data.length });
         } catch (err) {
           reqLogger.warn('image_persist_failed', { fileId: img.fileId, workspace: userWsPath, error: (err as Error).message });
         }

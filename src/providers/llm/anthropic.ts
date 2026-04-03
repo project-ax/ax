@@ -5,6 +5,16 @@ import { getLogger } from '../../logger.js';
 
 const logger = getLogger().child({ component: 'anthropic' });
 
+/** Maximum bytes for text inlined from file attachments (500 KB). */
+const MAX_INLINE_TEXT_BYTES = 512 * 1024;
+
+function truncateText(text: string, filename: string): string {
+  if (Buffer.byteLength(text, 'utf-8') <= MAX_INLINE_TEXT_BYTES) return text;
+  const truncated = text.slice(0, MAX_INLINE_TEXT_BYTES);
+  logger.warn('file_text_truncated', { filename, originalBytes: Buffer.byteLength(text, 'utf-8'), maxBytes: MAX_INLINE_TEXT_BYTES });
+  return `${truncated}\n--- truncated (file too large) ---`;
+}
+
 /**
  * Convert a Message.content (string or ContentBlock[]) to Anthropic API format.
  *
@@ -56,6 +66,53 @@ export async function toAnthropicContent(
       }
       // Fallback: tell the LLM an image was attached but couldn't be loaded
       result.push({ type: 'text', text: `[Image: ${block.fileId} (could not be loaded)]` });
+    } else if (block.type === 'file') {
+      // Resolve file to bytes and send as Anthropic document block
+      if (resolveFile) {
+        try {
+          const file = await resolveFile(block.fileId);
+          if (file) {
+            const DOCUMENT_MIME_TYPES = ['application/pdf', 'text/plain'] as const;
+            type DocMime = typeof DOCUMENT_MIME_TYPES[number];
+            if (DOCUMENT_MIME_TYPES.includes(file.mimeType as DocMime)) {
+              result.push({
+                type: 'document',
+                source: {
+                  type: 'base64',
+                  media_type: file.mimeType as DocMime,
+                  data: file.data.toString('base64'),
+                },
+              } as any);
+            } else {
+              // For text-like types (markdown, json), inline as text with size limit
+              const text = truncateText(file.data.toString('utf-8'), block.filename);
+              result.push({ type: 'text', text: `--- ${block.filename} ---\n${text}\n--- end ---` });
+            }
+            continue;
+          }
+        } catch (err) {
+          logger.warn('file_resolve_failed', { fileId: block.fileId, error: (err as Error).message });
+        }
+      }
+      result.push({ type: 'text', text: `[File: ${block.filename} (could not be loaded)]` });
+    } else if (block.type === 'file_data') {
+      // Inline file data — same handling as resolved file blocks
+      const DOCUMENT_MIME_TYPES = ['application/pdf', 'text/plain'] as const;
+      type DocMime = typeof DOCUMENT_MIME_TYPES[number];
+      if (DOCUMENT_MIME_TYPES.includes(block.mimeType as DocMime)) {
+        result.push({
+          type: 'document',
+          source: {
+            type: 'base64',
+            media_type: block.mimeType as DocMime,
+            data: block.data,
+          },
+        } as any);
+      } else {
+        const raw = Buffer.from(block.data, 'base64').toString('utf-8');
+        const text = truncateText(raw, block.filename);
+        result.push({ type: 'text', text: `--- ${block.filename} ---\n${text}\n--- end ---` });
+      }
     }
   }
   return result;

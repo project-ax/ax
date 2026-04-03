@@ -17,6 +17,7 @@ import type { Config, ProviderRegistry, ContentBlock } from '../types.js';
 import type { InboundMessage } from '../providers/channel/types.js';
 import { handleFileUpload, handleFileDownload } from './server-files.js';
 import type { FileStore } from '../file-store.js';
+import type { GcsFileStorage } from './gcs-file-storage.js';
 import type { TaintBudget } from './taint-budget.js';
 import { createChatApiHandler } from './server-chat-api.js';
 import { createChatUIHandler } from './server-chat-ui.js';
@@ -233,6 +234,15 @@ export async function handleCompletions(
         });
       }
 
+      // Send image/file content blocks as named SSE events before [DONE]
+      if (result.contentBlocks) {
+        for (const block of result.contentBlocks) {
+          if (block.type === 'image' || block.type === 'file') {
+            try { sendSSENamedEvent(res, 'content_block', block); } catch { /* client gone */ }
+          }
+        }
+      }
+
       const streamFinishReason = hasToolCalls && result.finishReason === 'stop'
         ? 'tool_calls' as const : result.finishReason;
       sendSSEChunk(res, {
@@ -441,6 +451,7 @@ export interface RequestHandlerOpts {
   eventBus: EventBus;
   providers: ProviderRegistry;
   fileStore: FileStore;
+  gcsFileStorage?: GcsFileStorage;
   taintBudget: TaintBudget;
 
   // Completion
@@ -467,7 +478,7 @@ export interface RequestHandlerOpts {
 
 export function createRequestHandler(opts: RequestHandlerOpts): (req: IncomingMessage, res: ServerResponse) => Promise<void> {
   const {
-    modelId, eventBus, providers, fileStore,
+    modelId, eventBus, providers, fileStore, gcsFileStorage,
     completionOpts, webhookPrefix, webhookHandler, adminHandler,
     isDraining, trackRequestStart, trackRequestEnd, extraRoutes,
   } = opts;
@@ -535,7 +546,7 @@ export function createRequestHandler(opts: RequestHandlerOpts): (req: IncomingMe
     // File upload
     if (url.startsWith('/v1/files') && req.method === 'POST') {
       try {
-        await handleFileUpload(req, res, { fileStore });
+        await handleFileUpload(req, res, { fileStore, gcsFileStorage });
       } catch (err) {
         logger.error('file_upload_failed', { error: (err as Error).message });
         if (!res.headersSent) sendError(res, 500, 'File upload failed');
@@ -546,7 +557,7 @@ export function createRequestHandler(opts: RequestHandlerOpts): (req: IncomingMe
     // File download
     if (url.startsWith('/v1/files/') && req.method === 'GET') {
       try {
-        await handleFileDownload(req, res, { fileStore });
+        await handleFileDownload(req, res, { fileStore, gcsFileStorage });
       } catch (err) {
         logger.error('file_download_failed', { error: (err as Error).message });
         if (!res.headersSent) sendError(res, 500, 'File download failed');

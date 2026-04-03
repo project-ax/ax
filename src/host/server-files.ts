@@ -17,15 +17,17 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { userWorkspaceDir } from '../paths.js';
 import { safePath } from '../utils/safe-path.js';
 import { sendError } from './server-http.js';
-import type { ImageMimeType } from '../types.js';
-import { IMAGE_MIME_TYPES } from '../types.js';
+import { UPLOAD_MIME_TYPES } from '../types.js';
+import type { UploadMimeType } from '../types.js';
 import { getLogger } from '../logger.js';
 import type { FileStore } from '../file-store.js';
+import type { GcsFileStorage } from './gcs-file-storage.js';
 
 const logger = getLogger().child({ component: 'files' });
 
 export interface FileDeps {
   fileStore?: FileStore;
+  gcsFileStorage?: GcsFileStorage;
 }
 
 /** Max upload size: 10 MB. */
@@ -37,6 +39,12 @@ const MIME_TO_EXT: Record<string, string> = {
   'image/jpeg': '.jpg',
   'image/gif': '.gif',
   'image/webp': '.webp',
+  'application/pdf': '.pdf',
+  'text/plain': '.txt',
+  'text/csv': '.csv',
+  'text/markdown': '.md',
+  'application/json': '.json',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': '.xlsx',
 };
 
 /** Map extensions back to MIME types for download. */
@@ -46,6 +54,12 @@ const EXT_TO_MIME: Record<string, string> = {
   '.jpeg': 'image/jpeg',
   '.gif': 'image/gif',
   '.webp': 'image/webp',
+  '.pdf': 'application/pdf',
+  '.txt': 'text/plain',
+  '.csv': 'text/csv',
+  '.md': 'text/markdown',
+  '.json': 'application/json',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
 };
 
 /** Read raw binary body from a request, with a size limit. */
@@ -93,8 +107,8 @@ export async function handleFileUpload(
 
   // Validate MIME type
   const contentType = (req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
-  if (!IMAGE_MIME_TYPES.includes(contentType as ImageMimeType)) {
-    sendError(res, 400, `Unsupported content type: ${contentType}. Allowed: ${IMAGE_MIME_TYPES.join(', ')}`);
+  if (!UPLOAD_MIME_TYPES.includes(contentType as UploadMimeType)) {
+    sendError(res, 400, `Unsupported content type: ${contentType}. Allowed: ${UPLOAD_MIME_TYPES.join(', ')}`);
     return;
   }
 
@@ -114,16 +128,23 @@ export async function handleFileUpload(
 
   // Generate unique filename and store
   const ext = MIME_TO_EXT[contentType] ?? '.bin';
-  const filename = `${randomUUID()}${ext}`;
-  const wsDir = userWorkspaceDir(agent, user);
-  const filesDir = safePath(wsDir, 'files');
-  mkdirSync(filesDir, { recursive: true });
-  const filePath = safePath(filesDir, filename);
-  writeFileSync(filePath, body);
+  const generatedFilename = `${randomUUID()}${ext}`;
+  const originalFilename = getQueryParam(url, 'filename') ?? generatedFilename;
+  const fileId = `files/${generatedFilename}`;
 
-  const fileId = `files/${filename}`;
-  deps?.fileStore?.register(fileId, agent, user, contentType);
-  const responseBody = JSON.stringify({ fileId, mimeType: contentType, size: body.length });
+  if (deps?.gcsFileStorage) {
+    await deps.gcsFileStorage.upload(fileId, body, contentType, originalFilename);
+  } else {
+    // Local fallback
+    const wsDir = userWorkspaceDir(agent, user);
+    const filesDir = safePath(wsDir, 'files');
+    mkdirSync(filesDir, { recursive: true });
+    const filePath = safePath(filesDir, generatedFilename);
+    writeFileSync(filePath, body);
+  }
+
+  await deps?.fileStore?.register(fileId, agent, user, contentType, originalFilename);
+  const responseBody = JSON.stringify({ fileId, mimeType: contentType, filename: originalFilename, size: body.length });
   res.writeHead(200, {
     'Content-Type': 'application/json',
     'Content-Length': Buffer.byteLength(responseBody),
@@ -165,6 +186,22 @@ export async function handleFileDownload(
     if (entry) {
       agent = entry.agentName;
       user = entry.userId;
+    }
+  }
+
+  // GCS signed URL redirect (if GCS configured and file exists)
+  if (deps?.gcsFileStorage && deps?.fileStore) {
+    const entry = await deps.fileStore.lookup(fileId);
+    if (entry) {
+      try {
+        const url = await deps.gcsFileStorage.getSignedUrl(fileId, entry.filename || fileId.split('/').pop() || 'download');
+        res.writeHead(302, { Location: url });
+        res.end();
+        return;
+      } catch (err) {
+        logger.warn('gcs_signed_url_failed', { fileId, error: (err as Error).message });
+        // Fall through to local serving
+      }
     }
   }
 

@@ -29,12 +29,29 @@ import type {
 export const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
 export type ImageMimeType = typeof IMAGE_MIME_TYPES[number];
 
+/** Allowed document MIME types for file attachments. */
+export const FILE_MIME_TYPES = [
+  'application/pdf',
+  'text/plain',
+  'text/csv',
+  'text/markdown',
+  'application/json',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+] as const;
+export type FileMimeType = typeof FILE_MIME_TYPES[number];
+
+/** All uploadable MIME types (images + documents). */
+export const UPLOAD_MIME_TYPES = [...IMAGE_MIME_TYPES, ...FILE_MIME_TYPES] as const;
+export type UploadMimeType = typeof UPLOAD_MIME_TYPES[number];
+
 export type ContentBlock =
   | { type: 'text'; text: string }
   | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
   | { type: 'tool_result'; tool_use_id: string; content: string }
   | { type: 'image'; fileId: string; mimeType: ImageMimeType }
-  | { type: 'image_data'; data: string; mimeType: ImageMimeType };
+  | { type: 'image_data'; data: string; mimeType: ImageMimeType }
+  | { type: 'file'; fileId: string; mimeType: string; filename: string }
+  | { type: 'file_data'; data: string; mimeType: string; filename: string };
 
 export interface Message {
   role: 'user' | 'assistant' | 'system';

@@ -47,6 +47,7 @@ export interface HostCore {
   router: Router;
   taintBudget: TaintBudget;
   fileStore: FileStore;
+  gcsFileStorage?: import('./gcs-file-storage.js').GcsFileStorage;
   completionDeps: CompletionDeps;
   handleIPC: (raw: string, ctx: IPCContext) => Promise<string>;
   ipcServer: NetServer;
@@ -84,6 +85,24 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
   const conversationStore = providers.storage.conversations;
   const sessionStore = providers.storage.sessions;
   const fileStore = await FileStore.create(providers.database);
+
+  // Create GCS file storage if workspace bucket is configured
+  let gcsFileStorage: import('./gcs-file-storage.js').GcsFileStorage | undefined;
+  const gcsBucket = config.workspace?.bucket ?? process.env.GCS_WORKSPACE_BUCKET;
+  if (gcsBucket) {
+    try {
+      const { Storage } = await import('@google-cloud/storage');
+      const storage = new Storage();
+      const bucket = storage.bucket(gcsBucket);
+      const { createGcsFileStorage } = await import('./gcs-file-storage.js');
+      gcsFileStorage = createGcsFileStorage(bucket, config.workspace?.prefix ?? '');
+    } catch (err) {
+      // Non-fatal: fall back to local disk storage
+      const initLogger = (await import('../logger.js')).getLogger();
+      initLogger.warn('gcs_file_storage_init_failed', { error: (err as Error).message });
+    }
+  }
+
   const taintBudget = new TaintBudget({ threshold: thresholdForProfile(config.profile) });
   const router = createRouter(providers, db, { taintBudget });
 
@@ -227,6 +246,7 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     logger,
     verbose,
     fileStore,
+    gcsFileStorage,
     eventBus,
     workspaceMap,
     requestedCredentials,
@@ -324,6 +344,8 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
         }
       : undefined,
     coworkPlugins: mcpManager ? { mcpManager, domainList } : undefined,
+    gcsFileStorage,
+    fileStore,
   });
   completionDeps.ipcHandler = handleIPC;
 
@@ -354,6 +376,7 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     router,
     taintBudget,
     fileStore,
+    gcsFileStorage,
     completionDeps,
     handleIPC,
     ipcServer,

@@ -2,6 +2,56 @@
 
 Agent runner implementations, process management, dev/production mode split.
 
+## [2026-04-01 01:20] — Fix multipart message display in chat history
+
+**Task:** User messages with file/image attachments displayed as raw JSON in chat history (e.g., `[{"type":"text","text":"Describe..."}]`) instead of clean text.
+**What I did:**
+- Root-caused to three layers: (1) history API returned raw serialized content strings, (2) history adapter wrapped all content as a single text part, (3) UserMessage component had no Image part renderer
+- Fixed `server-chat-api.ts` to use `deserializeContent()` when returning history, so `ContentBlock[]` arrays are returned as structured JSON instead of stringified JSON
+- Fixed `history-adapter.ts` to handle both string and array content, mapping AX block types (`image_data` → `image`, `file_data` → `file`) to assistant-ui part types
+- Added `UserImagePart` component and `Image` slot to `UserMessage`'s `MessagePrimitive.Parts`
+**Files touched:** src/host/server-chat-api.ts, ui/chat/src/lib/history-adapter.ts, ui/chat/src/components/thread.tsx
+**Outcome:** Success — user messages with attachments now render as clean text in history, all 2792 tests pass
+**Notes:** `image_data`/`file_data` blocks are intentionally stripped by `serializeContent()` before storage (to avoid storing large base64 data in DB), so only text parts survive in history. The Image part renderer is for future cases where images might be stored (e.g., via URLs).
+
+## [2026-04-01 01:10] — Fix image attachments dropped by pi-session runner and proxy-stream
+
+**Task:** Image attachments (PNG, JPEG) uploaded via chat UI were silently dropped by the agent. The agent responded "I cannot see the image" despite the host correctly resolving the image to `image_data` content blocks.
+**What I did:**
+- Root-caused to pi-session.ts only extracting `file_data` blocks (for PDFs) but not `image_data` blocks (for images) from `rawMsg` — the same pattern as the PDF fix but for images
+- Fixed pi-session.ts to filter `b.type === 'file_data' || b.type === 'image_data'` when extracting media blocks
+- Fixed proxy-stream.ts `fileBlocksToAnthropicDocs()` to also handle `image_data` → Anthropic `image` blocks with `base64` source
+- Added 2 tests for image_data injection in stream-utils tests
+- Rebuilt Docker image, loaded into kind, verified via Playwright
+**Files touched:** src/agent/runners/pi-session.ts, src/agent/proxy-stream.ts, tests/agent/stream-utils.test.ts
+**Outcome:** Success — agent correctly described screenshot content, all 2792 tests pass
+**Notes:** claude-code runner already handled both `image_data` and `file_data` (line 108) — this was only missing in pi-session runner and proxy-stream. Same pattern as the PDF fix: each runner/path must handle ALL ContentBlock media types.
+
+## [2026-04-01 00:54] — Fix PDF file attachments dropped by OpenAI-compat LLM provider
+
+**Task:** PDF file attachments were still not being summarized by the agent despite runner-side fixes. Debugging via k8s cluster + Playwright showed the agent received `file_data` blocks and injected them into IPC messages, but the LLM responded as if no PDF was attached.
+**What I did:**
+- Root-caused to `toOpenAIMessages()` in `src/providers/llm/openai.ts` — the OpenAI-compatible provider (used by OpenRouter/Gemini) only extracted `text` blocks, silently dropping `image_data` and `file_data`
+- Added multipart content handling for user messages: `image_data` → `image_url` with data URI, `file_data` → OpenAI `file` content part with `file_data` data URI
+- Verified end-to-end via Playwright: chat UI → file upload → agent → LLM → PDF summary response
+**Files touched:** src/providers/llm/openai.ts
+**Outcome:** Success — all 2790 tests pass, PDF summarization works in k8s cluster via browser
+**Notes:** The Anthropic provider already handled `file_data` via `toAnthropicContent()`, but the deployed config used `openrouter/google/gemini-3-flash-preview` which routes through the OpenAI-compat provider. Two separate debugging red herrings: (1) stale Vite proxy from worktree returning 500, (2) sandbox pods using old Docker image without runner fixes.
+
+## [2026-03-31 18:31] — Fix PDF file attachments not reaching LLM in pi-session/claude-code runners
+
+**Task:** PDF file attachments uploaded via chat UI were silently dropped by agent runners. Markdown files worked because the server converts them to `text` blocks, but PDFs became `file_data` blocks which runners discarded.
+**What I did:**
+- Added `file_data` block extraction in pi-session and claude-code runners
+- Created `injectFileBlocks()` helper in stream-utils.ts to inject file content into user messages
+- Updated proxy-stream.ts to convert `file_data` → Anthropic `document` blocks for direct SDK calls
+- Updated `buildSDKPrompt()` in claude-code runner to handle `file_data` alongside `image_data`
+- Fixed frontend `ax-chat-transport.ts` to send array content when non-text parts exist (was dropping file-only attachments)
+- Added 9 tests for new functionality
+**Files touched:** src/agent/runners/pi-session.ts, src/agent/runners/claude-code.ts, src/agent/proxy-stream.ts, src/agent/stream-utils.ts, src/ipc-schemas.ts, ui/chat/src/lib/ax-chat-transport.ts, tests/agent/stream-utils.test.ts, tests/agent/runners/claude-code.test.ts, tests/ipc-schemas.test.ts
+**Outcome:** Success — all 2789 tests pass including new tests
+**Notes:** Three issues: (1) runners dropped `file_data` blocks, (2) IPC Zod schema for `contentBlock` was missing `file_data` variant causing strict validation rejection, (3) frontend condition dropped file-only attachments. The proxy path needed explicit conversion to Anthropic `document` format.
+
 ## [2026-03-30 13:45] — Fix MCP tool stubs for HTTP IPC (k8s mode)
 
 **Task:** Fix "get all linear issues in this cycle" prompt making 40+ tool calls. Tool stubs in `./agent/tools/` couldn't execute because they only supported Unix socket IPC, but k8s uses HTTP IPC.

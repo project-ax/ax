@@ -4,6 +4,9 @@ Agent process lessons: runner implementations, prompt building, image forwarding
 
 ## Entries
 
+- ALL LLM providers must handle image_data and file_data ContentBlocks — not just Anthropic [entries.md](entries.md)
+- Both runners must handle ALL ContentBlock types from server — not just text [entries.md](entries.md)
+- New ContentBlock types MUST be added to ipc-schemas.ts contentBlock union [entries.md](entries.md)
 - Prompt instructions must specify exact tool names and paths — vague "read from" causes LLM tool-guessing spirals [entries.md](entries.md)
 - request_credential returns immediately — tool description must use imperative "MUST stop" language [entries.md](entries.md)
 - web_fetch IPC bypasses MITM proxy — no credential placeholder replacement possible [entries.md](entries.md)

@@ -5,6 +5,7 @@
  */
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import type { ContentBlock } from '../types.js';
 import { join } from 'node:path';
 import type { TextContent, ToolCall, AssistantMessage } from '@mariozechner/pi-ai';
 
@@ -75,6 +76,33 @@ export function convertPiMessages(messages: readonly any[]): ConvertedMessage[] 
     }
     return { role: 'user', content: '.' };
   });
+}
+
+// ── File block injection ─────────────────────────────────────────────
+
+/**
+ * Inject content blocks (file_data, document, etc.) into the last plain user message
+ * in a converted message array. This makes inline file content visible to the LLM.
+ * Skips tool_result messages — only targets the actual user prompt message.
+ * Accepts any block-like objects (internal file_data or Anthropic document blocks).
+ */
+export function injectFileBlocks(messages: ConvertedMessage[], fileBlocks: Array<{ type: string; [k: string]: unknown }>): void {
+  if (fileBlocks.length === 0) return;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== 'user') continue;
+    // Skip tool_result messages (array content starting with tool_result block)
+    if (Array.isArray(m.content) && (m.content as any[])[0]?.type === 'tool_result') continue;
+    // Convert existing string content to array form so we can append blocks
+    const existing: Array<{ type: string; [k: string]: unknown }> = typeof m.content === 'string'
+      ? [{ type: 'text', text: m.content }]
+      : [...(m.content as Array<{ type: string; [k: string]: unknown }>)];
+    messages[i] = {
+      ...m,
+      content: [...existing, ...fileBlocks.map(b => ({ ...b }))],
+    };
+    return;
+  }
 }
 
 // ── Stream event emission ────────────────────────────────────────────
