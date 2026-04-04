@@ -86,6 +86,7 @@ export const MemoryWriteSchema = ipcAction('memory_write', {
   content: safeString(100_000),
   tags: z.array(safeString(100)).optional(),
   tainted: z.boolean().optional(),
+  pool: z.enum(['agent', 'company']).optional(),
 });
 
 export const MemoryQuerySchema = ipcAction('memory_query', {
@@ -93,6 +94,7 @@ export const MemoryQuerySchema = ipcAction('memory_query', {
   query: safeString(10_000).optional(),
   limit: z.number().int().min(1).max(100).optional(),
   tags: z.array(safeString(100)).optional(),
+  pool: z.enum(['agent', 'company', 'both']).optional(),
 });
 
 export const MemoryReadSchema = ipcAction('memory_read', { id: uuid });
