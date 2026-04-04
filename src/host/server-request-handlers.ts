@@ -571,12 +571,30 @@ export function createRequestHandler(opts: RequestHandlerOpts): (req: IncomingMe
       return;
     }
 
-    // Webhooks
+    // Webhooks — supports both /webhooks/{name} and /webhooks/{agentId}/{name}
     if (webhookHandler && url.startsWith(webhookPrefix)) {
-      const webhookName = url.slice(webhookPrefix.length).split('?')[0];
+      const remainder = url.slice(webhookPrefix.length).split('?')[0];
+      if (!remainder) {
+        sendError(res, 404, 'Not found');
+        return;
+      }
+      // Parse: "agentId/name" or just "name"
+      const segments = remainder.split('/').filter(Boolean);
+      let webhookName: string;
+      let webhookAgentId: string | undefined;
+      if (segments.length >= 2) {
+        webhookAgentId = segments[0];
+        webhookName = segments.slice(1).join('/');
+      } else {
+        webhookName = segments[0];
+      }
       if (!webhookName) {
         sendError(res, 404, 'Not found');
         return;
+      }
+      // Inject agentId into the request headers so the webhook handler can use it
+      if (webhookAgentId) {
+        req.headers['x-ax-agent-id'] = webhookAgentId;
       }
       trackRequestStart?.();
       try {
