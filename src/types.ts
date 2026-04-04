@@ -184,6 +184,30 @@ export interface Config {
   url_rewrites?: Record<string, string>;
   /** Plugin declarations — each maps a source to the agents that use it. */
   plugins?: PluginDeclaration[];
+  /** Shared agents started alongside the default agent. Each has its own Slack token and identity. */
+  shared_agents?: SharedAgentConfig[];
+}
+
+/** Configuration for a shared (team/company) agent declared in ax.yaml. */
+export interface SharedAgentConfig {
+  /** Unique agent ID (alphanumeric, dash, underscore). */
+  id: string;
+  /** Display name shown in Slack responses (e.g. "[Backend Bot]"). */
+  display_name: string;
+  /** Agent type — defaults to the global config.agent value. */
+  agent?: AgentType;
+  /** Model overrides for this agent. */
+  models?: ModelMap;
+  /** Environment variable holding the Slack bot token (e.g. "BACKEND_SLACK_BOT_TOKEN"). */
+  slack_bot_token_env?: string;
+  /** Environment variable holding the Slack app token (e.g. "BACKEND_SLACK_APP_TOKEN"). */
+  slack_app_token_env?: string;
+  /** User IDs who can administer this agent. */
+  admins?: string[];
+  /** Capability tags for routing and discovery. */
+  capabilities?: string[];
+  /** Brief description of what this agent does. */
+  description?: string;
 }
 
 export interface PluginDeclaration {

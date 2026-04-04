@@ -169,6 +169,23 @@ const ConfigSchema = z.strictObject({
     source: z.string().min(1).max(1000),
     agents: z.array(z.string().min(1).max(100)).min(1),
   })).optional(),
+  shared_agents: z.array(z.strictObject({
+    id: z.string().min(1).max(100).regex(/^[a-zA-Z0-9_-]+$/),
+    display_name: z.string().min(1).max(200),
+    agent: z.enum(['pi-coding-agent', 'claude-code']).optional(),
+    models: z.strictObject({
+      default: z.array(z.string()).optional(),
+      fast: z.array(z.string()).optional(),
+      thinking: z.array(z.string()).optional(),
+      coding: z.array(z.string()).optional(),
+      image: z.array(z.string()).optional(),
+    }).optional(),
+    slack_bot_token_env: z.string().min(1).optional(),
+    slack_app_token_env: z.string().min(1).optional(),
+    admins: z.array(z.string().min(1)).optional(),
+    capabilities: z.array(z.string().min(1)).optional(),
+    description: z.string().optional(),
+  })).optional(),
 });
 
 /**
