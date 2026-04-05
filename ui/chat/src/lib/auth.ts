@@ -23,8 +23,17 @@ export async function getSession(): Promise<AuthSession | null> {
   }
 }
 
-export function signInWithGoogle() {
-  window.location.href = '/api/auth/sign-in/social?provider=google&callbackURL=/';
+export async function signInWithGoogle() {
+  const res = await fetch('/api/auth/sign-in/social', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ provider: 'google', callbackURL: '/' }),
+  });
+  const data = await res.json();
+  if (data?.url) {
+    window.location.href = data.url;
+  }
 }
 
 export async function signOut() {

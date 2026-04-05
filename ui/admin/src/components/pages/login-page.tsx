@@ -6,8 +6,17 @@ interface LoginPageProps {
 }
 
 export default function LoginPage({ onLogin: _onLogin, sessionAuth }: LoginPageProps) {
-  const handleGoogleLogin = () => {
-    window.location.href = '/api/auth/sign-in/social?provider=google&callbackURL=/admin';
+  const handleGoogleLogin = async () => {
+    const res = await fetch('/api/auth/sign-in/social', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ provider: 'google', callbackURL: '/admin' }),
+    });
+    const data = await res.json();
+    if (data?.url) {
+      window.location.href = data.url;
+    }
   };
 
   return (
