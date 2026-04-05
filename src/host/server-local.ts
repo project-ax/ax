@@ -201,6 +201,7 @@ export async function createServer(
     localDevMode,
     domainList: core.domainList,
     mcpManager: core.mcpManager,
+    externalAuth: !!providers.auth?.length,
   });
 
   let httpServer: HttpServer | null = null;
@@ -267,6 +268,7 @@ export async function createServer(
     webhookPrefix,
     webhookHandler,
     adminHandler,
+    authProviders: providers.auth,
     isDraining: () => draining,
     trackRequestStart,
     trackRequestEnd,
