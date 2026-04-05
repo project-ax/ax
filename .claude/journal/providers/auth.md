@@ -1,5 +1,13 @@
 # Auth Provider Journal
 
+## [2026-04-05 16:45] — Add BetterAuth provider with Google OAuth
+
+**Task:** Implement the BetterAuth auth provider (Task 7 of 13) with Google OAuth support
+**What I did:** Created `src/providers/auth/better-auth.ts` implementing the AuthProvider contract using BetterAuth library. Creates SQLite or PostgreSQL database connection based on DATABASE_URL env var. Uses `fromNodeHeaders()` from `better-auth/node` for header conversion. Handles session validation via `auth.api.getSession()`, domain restriction via `allowed_domains`, and route handling for `/api/auth/*`. Created 3 tests covering missing config, no-cookie auth, and non-auth route handling.
+**Files touched:** `src/providers/auth/better-auth.ts` (created), `tests/providers/auth/better-auth.test.ts` (created)
+**Outcome:** Success — 3 new tests pass, full suite passes (2883 tests)
+**Notes:** BetterAuth v1.5.6 database option does NOT accept `{url, type}` -- it requires raw database instances (SqliteDatabase from better-sqlite3, or PostgresPool from pg). Adapted the implementation accordingly. Also used `fromNodeHeaders()` utility from `better-auth/node` instead of manual Headers construction.
+
 ## [2026-04-05 16:35] — Wire auth provider into provider-map and Config types
 
 **Task:** Add auth provider to static allowlist and Config/ProviderRegistry types (Task 3 of 13)

@@ -127,6 +127,8 @@
 - Check dependency chain before implementing plan tasks — missing prereqs block you [providers/memory.md](providers/memory.md)
 - Identity content and injection patterns are semantically identical [providers/scanner.md](providers/scanner.md)
 - Check the audit_log table when identity persistence fails [providers/scanner.md](providers/scanner.md)
+- BetterAuth database option requires raw DB instances, not URL strings [providers/auth.md](providers/auth.md)
+- Use fromNodeHeaders() from better-auth/node for header conversion [providers/auth.md](providers/auth.md)
 
 ### host
 
