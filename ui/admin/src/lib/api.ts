@@ -55,6 +55,7 @@ export async function apiFetch<T>(
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     headers,
+    credentials: 'include',
   });
 
   if (res.status === 401) {

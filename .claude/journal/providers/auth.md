@@ -1,5 +1,13 @@
 # Auth Provider Journal
 
+## [2026-04-05 18:00] — Admin UI session-based auth flow
+
+**Task:** Update admin UI to support BetterAuth session cookies alongside existing bearer token auth (Task 10 of 13)
+**What I did:** Added `credentials: 'include'` to apiFetch in api.ts so session cookies are sent. Rewrote App.tsx auth flow to check BetterAuth session via `/api/auth/get-session` with soft fallback to token auth. Updated LoginPage to show Google sign-in button when session auth is available, or the existing token instructions when it is not. Added AccessDenied component for authenticated non-admin users.
+**Files touched:** `ui/admin/src/lib/api.ts` (modified), `ui/admin/src/App.tsx` (rewritten), `ui/admin/src/components/pages/login-page.tsx` (modified)
+**Outcome:** Success — Vite build passes cleanly
+**Notes:** Auth flow is a soft check: if `/api/auth/get-session` fails or returns 404, falls back to token-based behavior. This preserves backward compatibility when BetterAuth is not configured.
+
 ## [2026-04-05 17:00] — First-user admin bootstrap on signup
 
 **Task:** Add auto-promotion of the first user to admin role for zero-config bootstrap (Task 8 of 13)
