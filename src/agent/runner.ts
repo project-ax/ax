@@ -274,6 +274,8 @@ export interface StdinPayload {
   credentialEnv?: Record<string, string>;
   /** MITM CA cert PEM — written to disk so sandbox processes trust the proxy. */
   caCert?: string;
+  /** When true, sandbox exits after completing this turn (cron, heartbeat, etc.). */
+  singleTurn?: boolean;
   /** Pre-loaded skills from DB (agent-scoped and user-scoped, merged).
    *  Each skill includes its full file contents so the runner can write
    *  them to /workspace/skills/ for installSkillDeps() and
@@ -328,6 +330,7 @@ export function parseStdinPayload(data: string): StdinPayload {
           ? parsed.credentialEnv as Record<string, string>
           : undefined,
         caCert: typeof parsed.caCert === 'string' ? parsed.caCert : undefined,
+        singleTurn: parsed.singleTurn === true,
         skills: Array.isArray(parsed.skills) ? parsed.skills : undefined,
         mcpCLIs: Array.isArray(parsed.mcpCLIs) ? parsed.mcpCLIs : undefined,
       };
@@ -536,15 +539,25 @@ if (isMain) {
     config.ipcClient = client;
 
     // Session-long work loop: fetch → process → respond → repeat
+    // Self-terminate after consecutive idle polls so orphaned pods don't run forever.
+    const maxIdlePolls = parseInt(process.env.AX_MAX_IDLE_POLLS || '', 10) || 2;
+    let idlePolls = 0;
+
     (async () => {
       while (true) {
         logger.info('work_loop_waiting');
         // Long-poll for work (wait up to 5 minutes, then re-poll)
         const data = await client.fetchWork(2000, 5 * 60 * 1000);
         if (!data) {
-          logger.info('work_loop_no_work');
+          idlePolls++;
+          logger.info('work_loop_no_work', { idlePolls, maxIdlePolls });
+          if (idlePolls >= maxIdlePolls) {
+            logger.info('idle_timeout_exit', { idlePolls });
+            process.exit(0);
+          }
           continue;
         }
+        idlePolls = 0;
 
         try {
           const parsed = JSON.parse(data);
@@ -559,6 +572,11 @@ if (isMain) {
           // token and session context from the payload — no override needed.
 
           await run(config);
+
+          if (payload.singleTurn) {
+            logger.info('single_turn_exit');
+            process.exit(0);
+          }
         } catch (err) {
           logger.error('work_loop_error', { error: (err as Error).message, stack: (err as Error).stack });
           try {

@@ -91,6 +91,8 @@ export interface CompletionDeps {
   mcpManager?: McpConnectionManager;
   /** Dynamic agent provisioner for multi-agent resolution. */
   provisioner?: import('./agent-provisioner.js').AgentProvisioner;
+  /** When true, sandbox exits after completing this turn (cron, heartbeat, delegation). */
+  singleTurn?: boolean;
 }
 
 export interface ExtractedFile {
@@ -1043,6 +1045,8 @@ export async function processCompletion(
       },
       // MITM CA cert — sandbox pods need this to trust the proxy's TLS certs.
       caCert: caCertPem,
+      // Single-turn mode: sandbox exits after this turn (cron, heartbeat, delegation).
+      ...(deps.singleTurn ? { singleTurn: true } : {}),
     });
 
     // Spawn, run, and collect agent output — with retry on transient crashes.
