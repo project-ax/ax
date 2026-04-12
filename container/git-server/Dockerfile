@@ -1,4 +1,4 @@
-FROM alpine:latest
+FROM alpine:3.21
 
 # Install git, git-lfs, and node.js (HTTP-only server with LFS support)
 RUN apk add --no-cache git git-lfs nodejs

@@ -30,7 +30,7 @@ spec:
             matchLabels:
               app.kubernetes.io/name: ax-git
       ports:
-        - port: 8000
+        - port: {{ .Values.gitServer.httpPort }}
           protocol: TCP
     # DNS
     - ports:

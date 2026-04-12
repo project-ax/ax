@@ -21,6 +21,10 @@ export interface GitOpts {
   cwd?: string;
   /** Additional environment variables */
   env?: Record<string, string>;
+  /** Timeout in milliseconds (default: 60000) */
+  timeoutMs?: number;
+  /** Branch name (default: 'main') */
+  branch?: string;
 }
 
 /**
@@ -37,7 +41,7 @@ export async function gitExec(args: string[], opts?: GitOpts): Promise<string> {
   if (opts?.workTree) env.GIT_WORK_TREE = opts.workTree;
 
   return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd: opts?.cwd, env, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile('git', args, { cwd: opts?.cwd, env, maxBuffer: 10 * 1024 * 1024, timeout: opts?.timeoutMs ?? 60_000 }, (err, stdout, stderr) => {
       if (err) {
         const msg = stderr?.trim() || err.message;
         logger.debug('git_error', { subcommand: args[0], code: (err as NodeJS.ErrnoException).code, stderr: msg });
@@ -94,7 +98,8 @@ export async function gitCommit(message: string, opts: GitOpts): Promise<string>
 }
 
 export async function gitPush(opts: GitOpts & { force?: boolean }): Promise<void> {
-  const args = ['push', 'origin', 'main'];
+  const branch = opts.branch ?? 'main';
+  const args = ['push', 'origin', branch];
   if (opts.force) args.push('--force');
   await gitExec(args, opts);
 }

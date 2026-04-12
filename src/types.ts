@@ -172,7 +172,10 @@ export interface Config {
   /** Git server configuration for workspace repositories. */
   gitServer?: {
     host: string;
+    port?: number;
     httpPort?: number;
+    user?: string;
+    repoBasePath?: string;
   };
   /** GCS bucket configuration for file storage (artifacts, attachments). */
   gcs?: {

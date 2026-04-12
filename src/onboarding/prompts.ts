@@ -137,7 +137,7 @@ export const DEFAULT_MODELS: Record<LLMProviderChoice, string> = {
 /** Available provider choices per category, derived from the provider map. */
 export const PROVIDER_CHOICES = {
   memory: ['cortex'],
-  scanner: ['patterns'],
+  security: ['patterns'],
   web_extract: ['none', 'tavily'],
   web_search: ['none', 'tavily', 'brave'],
   credentials: ['keychain', 'plaintext'],

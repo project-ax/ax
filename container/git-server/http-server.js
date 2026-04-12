@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const PORT = process.env.PORT || 8000;
 const GIT_REPOS_PATH = process.env.GIT_REPOS_PATH || '/var/git/repos';
 const LFS_OBJECTS_PATH = process.env.LFS_OBJECTS_PATH || '/var/git/lfs-objects';
+const MAX_BODY_BYTES = 1024 * 1024; // 1MB limit for request bodies
 
 // ─── LFS helpers ─────────────────────────────────────────────────────
 function isValidOid(oid) {
@@ -158,7 +159,15 @@ const server = http.createServer((req, res) => {
   // Repository creation endpoint: POST /repos with JSON body {name: "repo-name"}
   if (pathname === '/repos' && req.method === 'POST') {
     let body = '';
+    let bodyBytes = 0;
     req.on('data', (chunk) => {
+      bodyBytes += chunk.length;
+      if (bodyBytes > MAX_BODY_BYTES) {
+        res.writeHead(413, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Request body too large' }));
+        req.destroy();
+        return;
+      }
       body += chunk.toString();
     });
 
@@ -251,8 +260,13 @@ const server = http.createServer((req, res) => {
             for (const cmd of commands) {
               const result = spawnSync('git', cmd.args, { cwd: tmpDir, encoding: 'utf-8' });
               if (result.status !== 0 && result.status !== null) {
-                console.warn(`[WARN] ${cmd.name} returned non-zero exit code ${result.status}`);
-                // Don't fail on non-zero for config commands which might fail but are idempotent
+                const stderr = (result.stderr || '').trim();
+                // Config commands are idempotent — warn only. Critical commands must succeed.
+                const critical = ['git commit', 'git push'];
+                if (critical.includes(cmd.name)) {
+                  throw new Error(`${cmd.name} failed (exit ${result.status}): ${stderr}`);
+                }
+                console.warn(`[WARN] ${cmd.name} returned non-zero exit code ${result.status}: ${stderr}`);
               }
             }
 

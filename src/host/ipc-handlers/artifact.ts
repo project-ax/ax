@@ -36,7 +36,11 @@ export function createArtifactHandlers(providers: ProviderRegistry, opts: Artifa
       const ext = req.path.split('.').pop() ?? '';
       const mimeType = EXT_TO_MIME[ext] ?? 'application/octet-stream';
       const originalFilename = req.path.split('/').pop() ?? req.path;
-      const buf = Buffer.from(req.content, 'utf-8');
+      // Detect base64-encoded binary content (e.g., PDFs, images, XLSX)
+      const isBase64 = /^[A-Za-z0-9+/\n]+=*$/.test(req.content.replace(/\s/g, ''));
+      const buf = isBase64 && req.content.length > 100
+        ? Buffer.from(req.content, 'base64')
+        : Buffer.from(req.content, 'utf-8');
 
       // Upload to GCS when available (k8s / cloud mode)
       if (opts.gcsFileStorage) {
@@ -60,7 +64,11 @@ export function createArtifactHandlers(providers: ProviderRegistry, opts: Artifa
       const segments = req.path.split(/[/\\]/).filter(Boolean);
       const filePath = safePath(localDir, ...segments);
       mkdirSync(dirname(filePath), { recursive: true });
-      writeFileSync(filePath, req.content, 'utf-8');
+      const localIsBase64 = /^[A-Za-z0-9+/\n]+=*$/.test(req.content.replace(/\s/g, ''));
+      const localBuf = localIsBase64 && req.content.length > 100
+        ? Buffer.from(req.content, 'base64')
+        : Buffer.from(req.content, 'utf-8');
+      writeFileSync(filePath, localBuf);
 
       await providers.audit.log({
         action: 'save_artifact',

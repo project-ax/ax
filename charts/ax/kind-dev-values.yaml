@@ -132,7 +132,7 @@ config:
   profile: balanced
   web_proxy: true
   gitServer:
-    host: git-server.ax.svc.cluster.local
+    host: git-server.ax-dev.svc.cluster.local
     httpPort: 8000
   models:
     default:
@@ -142,4 +142,4 @@ config:
     database: postgresql
     eventbus: postgres
     sandbox: k8s
-    workspace: git-ssh
+    workspace: git-http

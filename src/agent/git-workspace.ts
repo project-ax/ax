@@ -41,7 +41,9 @@ export class GitWorkspace {
       try {
         await gitCheckout('main', { cwd: this.workspaceDir });
       } catch {
-        logger.warn('checkout_main_failed', { workspaceDir: this.workspaceDir });
+        // Remote may not have a main branch yet — create it
+        logger.warn('checkout_main_creating', { workspaceDir: this.workspaceDir });
+        await gitExec(['checkout', '-b', 'main'], { cwd: this.workspaceDir });
       }
     } catch (err) {
       logger.error('git_clone_failed', { error: (err as Error).message, url: this.repoUrl });

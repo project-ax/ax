@@ -161,6 +161,9 @@ async function loadProvider(kind: string, name: string, config: Config) {
 async function loadSecurity(config: Config, llm: import('../providers/llm/types.js').LLMProvider) {
   const securityModPath = resolveProviderPath('security', config.providers.security);
   const securityMod = await import(securityModPath);
+  if (typeof securityMod.create !== 'function') {
+    throw new Error(`Security provider '${config.providers.security}' does not export a create() function`);
+  }
   return securityMod.create(config, config.providers.security, { llm });
 }
 

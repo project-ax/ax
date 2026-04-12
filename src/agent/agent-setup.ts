@@ -10,7 +10,7 @@ import { loadIdentityFiles } from './identity-loader.js';
 import { loadSkillsMultiDir } from './stream-utils.js';
 import { detectSkillInstallIntent } from './prompt/modules/skills.js';
 import { join, resolve } from 'node:path';
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, accessSync, constants } from 'node:fs';
 import type { AgentConfig } from './runner.js';
 import type { ToolFilterContext } from './tool-catalog.js';
 
@@ -25,7 +25,10 @@ function scanMcpCLIs(workspace: string): string[] | undefined {
   if (!existsSync(binDir)) return undefined;
   try {
     const entries = readdirSync(binDir).filter(f => {
-      try { return statSync(join(binDir, f)).isFile(); } catch { return false; }
+      try {
+        const p = join(binDir, f);
+        return statSync(p).isFile() && (accessSync(p, constants.X_OK), true);
+      } catch { return false; }
     });
     return entries.length > 0 ? entries : undefined;
   } catch { return undefined; }

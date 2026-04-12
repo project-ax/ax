@@ -132,7 +132,7 @@ const SCREEN_EXFILTRATION: { regex: RegExp; detail: string }[] = [
 // Layer 3: Prompt injection patterns (FLAG)
 const SCREEN_INJECTION: { regex: RegExp; detail: string }[] = [
   { regex: /<!--\s*(system|override|ignore|reset|forget)\b/i, detail: 'HTML comment directive' },
-  { regex: /[\u200B\u200C\u200D\uFEFF]/g, detail: 'Zero-width characters detected' },
+  { regex: /[\u200B\u200C\u200D\uFEFF]/, detail: 'Zero-width characters detected' },
   { regex: /\b(you are now|ignore (previous|all|above)|system:\s*override|forget (your|all))\b/i, detail: 'Role reassignment attempt' },
   { regex: /\[INST\]|\[\/INST\]|<\|im_start\|>|<\|system\|>/i, detail: 'Chat template injection' },
 ];
@@ -326,7 +326,7 @@ export async function create(_config: Config): Promise<SecurityProvider> {
     async screen(content: string, declaredPermissions?: string[]): Promise<ScreeningVerdict> {
       const ext = scanContent(content, declaredPermissions);
       return {
-        allowed: ext.verdict !== 'REJECT',
+        allowed: ext.verdict === 'APPROVE',
         reasons: ext.reasons.map(r => r.detail),
       };
     },

@@ -27,11 +27,13 @@ export async function execFileNoThrow(
       stdout: result.stdout || '',
       stderr: result.stderr || '',
     };
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const e = err as { code?: number | string; status?: number; stdout?: string; stderr?: string; message?: string };
+    const status = typeof e.status === 'number' ? e.status : typeof e.code === 'number' ? e.code : 1;
     return {
-      status: err.code || err.status || 1,
-      stdout: err.stdout || '',
-      stderr: err.stderr || err.message || '',
+      status,
+      stdout: e.stdout ?? '',
+      stderr: e.stderr ?? e.message ?? '',
     };
   }
 }

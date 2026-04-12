@@ -396,7 +396,7 @@ function createIPCToolDefinitions(client: IIPCClient, opts?: IPCToolDefsOptions)
       const result = await ipcCall(action, callParams, spec.timeoutMs);
       const toolDurationMs = Date.now() - toolStart;
       const resultStr = JSON.stringify(result);
-      logger.debug('tool_result', { name: spec.name, action, durationMs: toolDurationMs, resultLength: resultStr.length, content: resultStr.substring(0, 300) });
+      logger.debug('tool_result', { name: spec.name, action, durationMs: toolDurationMs, resultLength: resultStr.length });
 
       // Track failures for circuit-breaker (check for common failure indicators)
       if (isFailureResult(resultStr)) {
@@ -404,7 +404,7 @@ function createIPCToolDefinitions(client: IIPCClient, opts?: IPCToolDefsOptions)
       } else {
         actionFailures.delete(action); // reset on success
       }
-      process.stderr.write(`[diag] tool_result name=${spec.name} action=${action} duration=${toolDurationMs}ms resultLen=${resultStr.length} content=${resultStr.substring(0, 150)}\n`);
+      process.stderr.write(`[diag] tool_result name=${spec.name} action=${action} duration=${toolDurationMs}ms resultLen=${resultStr.length}\n`);
       return result;
     },
   })) as ToolDefinition[];
@@ -466,12 +466,6 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
     });
   }
 
-  // Install missing skill dependencies from /workspace/skills/
-  const skillSources = [{ skillDir: join(config.workspace, 'skills'), prefix: config.workspace }];
-  if (existsSync(skillSources[0].skillDir)) {
-    await installSkillDeps(skillSources);
-  }
-
   // Initialize git workspace if WORKSPACE_REPO_URL is set.
   // In k8s, the git-init container already cloned the repo and locked .git to UID 1001.
   // The agent (UID 1000) can read/write workspace files but cannot access .git.
@@ -503,10 +497,10 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
         const result = await resp.json() as { ok: boolean; error?: string };
         if (result.ok) {
           logger.info('sidecar_pull_complete', { attempt });
-        } else {
-          logger.warn('sidecar_pull_failed', { error: result.error, attempt });
+          break;
         }
-        break;
+        logger.warn('sidecar_pull_failed', { error: result.error, attempt });
+        if (attempt < 9) await new Promise(r => setTimeout(r, 500));
       } catch (err) {
         if (attempt < 9) {
           logger.debug('sidecar_not_ready', { attempt, error: (err as Error).message });
@@ -516,6 +510,12 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
         }
       }
     }
+  }
+
+  // Install missing skill dependencies from /workspace/skills/ (after git sync)
+  const skillSources = [{ skillDir: join(config.workspace, 'skills'), prefix: config.workspace }];
+  if (existsSync(skillSources[0].skillDir)) {
+    await installSkillDeps(skillSources);
   }
 
   // Decide LLM transport: proxy (direct Anthropic SDK) or IPC fallback

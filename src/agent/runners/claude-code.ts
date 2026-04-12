@@ -173,12 +173,6 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
     });
   }
 
-  // Install missing skill dependencies from /workspace/skills/
-  const skillSources = [{ skillDir: join(config.workspace, 'skills'), prefix: config.workspace }];
-  if (existsSync(skillSources[0].skillDir)) {
-    await installSkillDeps(skillSources);
-  }
-
   // 1c. Initialize git workspace if WORKSPACE_REPO_URL is set.
   // In k8s, git-init container already cloned and .git is locked to UID 1001.
   const hasGitWorkspace = !!process.env.WORKSPACE_REPO_URL;
@@ -206,10 +200,10 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
         const result = await resp.json() as { ok: boolean; error?: string };
         if (result.ok) {
           logger.info('sidecar_pull_complete', { attempt });
-        } else {
-          logger.warn('sidecar_pull_failed', { error: result.error, attempt });
+          break;
         }
-        break;
+        logger.warn('sidecar_pull_failed', { error: result.error, attempt });
+        if (attempt < 9) await new Promise(r => setTimeout(r, 500));
       } catch (err) {
         if (attempt < 9) {
           logger.debug('sidecar_not_ready', { attempt, error: (err as Error).message });
@@ -219,6 +213,12 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
         }
       }
     }
+  }
+
+  // Install missing skill dependencies from /workspace/skills/ (after git sync)
+  const skillSources = [{ skillDir: join(config.workspace, 'skills'), prefix: config.workspace }];
+  if (existsSync(skillSources[0].skillDir)) {
+    await installSkillDeps(skillSources);
   }
 
   // 2. Connect IPC client for MCP tools

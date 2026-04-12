@@ -78,8 +78,9 @@ load-image:
 
 helm-upgrade:
 	@echo "Helm upgrade (tag: $(TAG))..."
-	helm upgrade ax ./charts/ax -f $(VALUES_FILE) -n $(NAMESPACE) \
+	helm upgrade --install ax ./charts/ax -f $(VALUES_FILE) -n $(NAMESPACE) \
 		--set imageDefaults.tag=$(TAG) \
+		--set gitServer.image.repository=$(GIT_SERVER_IMAGE) \
 		--set gitServer.image.tag=$(TAG)
 	@echo "✓ Helm upgrade complete"
 	@echo "Waiting for deployments to be ready..."

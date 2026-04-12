@@ -225,10 +225,16 @@ export async function create(_config: Config): Promise<SandboxProvider> {
       let resolved = false;
       let lastPhase: string | undefined;
       const watchStartTime = Date.now();
+      let watchReq: any;
 
       const watchPath = `/api/v1/namespaces/${namespace}/pods`;
 
-      watch.watch(
+      const cleanup = () => {
+        clearTimeout(timer);
+        try { watchReq?.abort(); } catch { /* best-effort */ }
+      };
+
+      watchReq = watch.watch(
         watchPath,
         { fieldSelector: `metadata.name=${podName}` },
         (type: string, obj: any) => {
@@ -239,6 +245,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
           if (phase === 'Succeeded') {
             resolved = true;
             activePods.delete(pid);
+            cleanup();
             resolve(0);
           } else if (phase === 'Failed') {
             resolved = true;
@@ -247,6 +254,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
             const code = containerStatus?.state?.terminated?.exitCode ?? 1;
             const reason = containerStatus?.state?.terminated?.reason;
             logger.warn('pod_failed', { podName, exitCode: code, reason, phase });
+            cleanup();
             resolve(code);
           }
         },
@@ -255,6 +263,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
             resolved = true;
             activePods.delete(pid);
             logger.warn('pod_watch_error', { podName, lastPhase, error: err?.message });
+            cleanup();
             resolve(1);
           }
         },
@@ -267,6 +276,7 @@ export async function create(_config: Config): Promise<SandboxProvider> {
           resolved = true;
           activePods.delete(pid);
           logger.warn('pod_timeout', { podName, timeoutMs, lastPhase, elapsedMs: Date.now() - watchStartTime });
+          try { watchReq?.abort(); } catch { /* best-effort */ }
           resolve(1);
         }
       }, timeoutMs);

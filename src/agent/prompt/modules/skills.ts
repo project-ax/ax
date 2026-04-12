@@ -41,7 +41,7 @@ export class SkillsModule extends BasePromptModule {
       const rows = ctx.skills
         .map(s => {
           const warn = s.warnings?.length ? ` \u26A0 ${s.warnings.join(', ')}` : '';
-          return `| ${s.name} | ${s.description}${warn} | \`user/skills/${s.path}\` |`;
+          return `| ${s.name} | ${s.description}${warn} | \`/workspace/skills/${s.path}\` |`;
         })
         .join('\n');
 

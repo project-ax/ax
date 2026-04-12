@@ -8,7 +8,7 @@ import { IPCClient } from './ipc-client.js';
 import { getLogger, truncate } from '../logger.js';
 import type { ContentBlock } from '../types.js';
 import type { IdentityFiles } from './prompt/types.js';
-import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join, dirname, resolve, sep } from 'node:path';
 
 const logger = getLogger().child({ component: 'runner' });
@@ -460,7 +460,7 @@ function applyPayload(config: AgentConfig, payload: StdinPayload): void {
   // Enterprise fields
   config.agentId = payload.agentId;
   // Write skills to /workspace/skills/ so installSkillDeps() and loadSkillsMultiDir() find them.
-  if (Array.isArray(payload.skills) && payload.skills.length > 0 && config.workspace) {
+  if (Array.isArray(payload.skills) && config.workspace) {
     const skillsBase = resolve(config.workspace, 'skills');
     // Prune stale skills from previous turns so deleted skills don't linger on disk
     if (existsSync(skillsBase)) {
@@ -491,6 +491,18 @@ function applyPayload(config: AgentConfig, payload: StdinPayload): void {
   if (Array.isArray(payload.mcpCLIs) && config.workspace) {
     const binDir = resolve(config.workspace, 'bin');
     mkdirSync(binDir, { recursive: true });
+    // Remove stale wrappers not in the current payload
+    const incomingPaths = new Set(payload.mcpCLIs.map(f => f.path));
+    try {
+      for (const existing of readdirSync(binDir)) {
+        if (!incomingPaths.has(existing)) {
+          const fullPath = resolve(binDir, existing);
+          if (fullPath.startsWith(binDir + sep) && statSync(fullPath).isFile()) {
+            unlinkSync(fullPath);
+          }
+        }
+      }
+    } catch { /* binDir may not exist yet */ }
     for (const file of payload.mcpCLIs) {
       const filePath = resolve(binDir, file.path);
       if (!filePath.startsWith(binDir + sep) && filePath !== binDir) {

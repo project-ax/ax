@@ -43,11 +43,15 @@ export async function create(config: Config): Promise<WorkspaceProvider> {
 
           // Create bare repo via HTTP API
           const url = `http://${gitHost}:${gitHttpPort}/repos`;
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 30_000);
           const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: repoName }),
+            signal: controller.signal,
           });
+          clearTimeout(timeout);
 
           if (response.ok || response.status === 409) {
             if (response.ok) {
@@ -96,8 +100,6 @@ export async function create(config: Config): Promise<WorkspaceProvider> {
         }
       }
 
-      // Return HTTP clone URL regardless of creation status
-      // Agent will detect missing repo on clone and fail gracefully
       return `http://${gitHost}:${gitHttpPort}/${repoName}.git`;
     },
 

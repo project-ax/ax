@@ -201,7 +201,7 @@ agent: ${agentType}
 
 providers:
   memory: cortex
-  scanner: patterns
+  security: patterns
   channels: []
   web:
     extract: none
