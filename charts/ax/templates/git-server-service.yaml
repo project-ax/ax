@@ -1,0 +1,19 @@
+{{- if .Values.gitServer.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: {{ include "ax.namespace" . }}
+  name: {{ include "ax.fullname" . }}-git
+  labels:
+    {{- include "ax.labels" . | nindent 4 }}
+    app.kubernetes.io/component: git
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8000
+    targetPort: http
+    protocol: TCP
+    name: http
+  selector:
+    {{- include "ax.selectorLabels" (dict "component" "git" "context" $) | nindent 4 }}
+{{- end }}
