@@ -6,7 +6,7 @@
  * depending on the workspace provider.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import type { ProviderRegistry } from '../../types.js';

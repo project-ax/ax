@@ -40,7 +40,7 @@ export async function gitExec(args: string[], opts?: GitOpts): Promise<string> {
     execFile('git', args, { cwd: opts?.cwd, env, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) {
         const msg = stderr?.trim() || err.message;
-        logger.debug('git_error', { args, code: (err as any).code, stderr: msg });
+        logger.debug('git_error', { subcommand: args[0], code: (err as NodeJS.ErrnoException).code, stderr: msg });
         reject(new Error(`git ${args[0]} failed: ${msg}`));
         return;
       }

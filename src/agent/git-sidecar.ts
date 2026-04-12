@@ -84,7 +84,7 @@ async function commitAndPush(workspaceDir: string, gitDir: string): Promise<Comm
     } catch (forceErr) {
       const error = (forceErr as Error).message;
       logger.error('force_push_failed', { error });
-      return { ok: true, hash, files: changed.length, error: `push failed: ${error}` };
+      return { ok: false, hash, files: changed.length, error: `push failed: ${error}` };
     }
   }
 
@@ -102,7 +102,7 @@ export async function runGitSidecar(): Promise<void> {
     process.exit(0);
   }
 
-  logger.info('sidecar_start', { workspaceDir, gitDir, repoUrl, port });
+  logger.info('sidecar_start', { workspaceDir, gitDir, port });
 
   let activeCommit: Promise<CommitResult> | null = null;
 

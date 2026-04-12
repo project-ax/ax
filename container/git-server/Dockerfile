@@ -5,8 +5,8 @@ RUN apk add --no-cache git git-lfs nodejs
 
 # Create git user and repo directory
 RUN adduser -D -h /home/git -s /bin/sh git && \
-    mkdir -p /var/git/repos && \
-    chown git:git /var/git/repos
+    mkdir -p /var/git/repos /var/git/lfs-objects && \
+    chown -R git:git /var/git
 
 # Copy entrypoint and HTTP server
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
