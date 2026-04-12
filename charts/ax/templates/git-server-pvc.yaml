@@ -1,0 +1,31 @@
+{{- if .Values.gitServer.enabled }}
+{{/*
+Git server persistent volume claim.
+
+IMPORTANT: This PVC is created in a separate template to ensure it outlives
+the git-server Deployment. The PVC is NOT owned by the Deployment and will NOT
+be deleted if the Deployment is deleted (similar to PostgreSQL).
+
+This allows git repositories to persist across pod restarts, Deployment updates,
+and even helm upgrades (unless explicitly deleted with 'kubectl delete pvc').
+
+To manually delete the PVC: kubectl delete pvc data-ax-git -n <namespace>
+*/}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  namespace: {{ include "ax.namespace" . }}
+  name: data-ax-git
+  labels:
+    {{- include "ax.labels" . | nindent 4 }}
+    app.kubernetes.io/component: git
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.gitServer.storage | default "10Gi" }}
+  {{- if .Values.gitServer.storageClassName }}
+  storageClassName: {{ .Values.gitServer.storageClassName }}
+  {{- end }}
+{{- end }}

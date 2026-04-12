@@ -1,0 +1,70 @@
+{{- if .Values.gitServer.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: {{ include "ax.namespace" . }}
+  name: {{ include "ax.fullname" . }}-git
+  labels:
+    {{- include "ax.labels" . | nindent 4 }}
+    app.kubernetes.io/component: git
+spec:
+  replicas: {{ .Values.gitServer.replicas | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "ax.selectorLabels" (dict "component" "git" "context" $) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ax.selectorLabels" (dict "component" "git" "context" $) | nindent 8 }}
+    spec:
+      securityContext:
+        # fsGroup ensures the PVC is writable by the git user (uid 1000).
+        # Kubernetes chowns the volume to this GID on mount — no root init container needed.
+        # Works on GKE Autopilot (no runAsUser: 0 required).
+        fsGroup: 1000
+        runAsUser: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+      containers:
+      - name: git
+        image: "{{ .Values.gitServer.image.repository }}:{{ .Values.gitServer.image.tag }}"
+        imagePullPolicy: {{ .Values.gitServer.image.pullPolicy | default "IfNotPresent" }}
+        ports:
+        - name: http
+          containerPort: 8000
+          protocol: TCP
+        env:
+        - name: LOG_LEVEL
+          value: {{ .Values.gitServer.logLevel | default "info" }}
+        volumeMounts:
+        - name: git-repos
+          mountPath: /var/git
+        resources:
+          {{- if .Values.gitServer.resources }}
+          {{- toYaml .Values.gitServer.resources | nindent 12 }}
+          {{- else }}
+          limits:
+            cpu: 500m
+            memory: 256Mi
+          requests:
+            cpu: 100m
+            memory: 64Mi
+          {{- end }}
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
+      volumes:
+      # Git repositories PVC — persists across pod/deployment lifecycle
+      - name: git-repos
+        persistentVolumeClaim:
+          claimName: data-ax-git
+{{- end }}
