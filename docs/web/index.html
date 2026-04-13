@@ -1,17 +1,17 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ax — Open Source AI Agent Framework</title>
-  <meta name="description" content="A free, open source framework for building always-on AI agents. 15 provider categories, Kubernetes deployment, persistent memory — from laptop to production cluster.">
+  <meta name="description" content="An open source framework for building self-learning AI agents that actually get work done. From a solo side project to your whole team — agents that remember, adapt, and improve.">
   <meta property="og:title" content="ax — Open Source AI Agent Framework">
-  <meta property="og:description" content="Always-on AI agents with sandboxed execution, taint tracking, plugin ecosystem — from personal assistant to enterprise fleet.">
+  <meta property="og:description" content="Self-learning AI agents that remember context, adapt to your workflows, and get better over time. Open source, community-driven.">
   <meta property="og:type" content="website">
   <link rel="icon" href="favicon.ico">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -67,16 +67,16 @@
 
       <div class="stagger-item">
         <h1>
-          <span>Let your agent cook.</span><br>
-          <span class="accent">In a fireproof kitchen.</span>
+          <span>Day one, it's useful.</span><br>
+          <span class="accent">Day thirty, it's indispensable.</span>
         </h1>
       </div>
 
       <div class="stagger-item">
         <p class="hero-subtitle">
-          Define goals, give it skills, and let your agent handle the rest.
-          Runs on your laptop or across a Kubernetes cluster — with the same config
-          and the safeguards that let you sleep at night.
+          ax is an open source framework for building AI agents that remember context,
+          adapt to your workflows, and actually get better over time.
+          We're figuring out agentic systems together — come build with us.
         </p>
       </div>
 
@@ -106,37 +106,37 @@
   <section id="features" class="features">
     <div class="container">
       <div class="reveal features-header">
-        <h2>Security you won't notice until it matters</h2>
-        <p>Everything you need to deploy, manage, and scale autonomous AI agents — with security built into every layer, not bolted on as an afterthought.</p>
+        <h2>What your agents can actually do</h2>
+        <p>Not another chatbot wrapper. ax agents learn your context, use tools, work across models, and keep getting better at the things your team does every day.</p>
       </div>
 
       <div class="reveal">
         <div class="features-grid">
-          <!-- Sandboxed Execution -->
+          <!-- Persistent Memory -->
+          <div class="feature-card">
+            <div class="feature-icon icon-orange">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            </div>
+            <h3>Persistent Memory</h3>
+            <p>Your agent remembers what matters. Semantic memory with embedding search, LLM-powered extraction, and proactive context recall — so you don't have to re-explain everything every session.</p>
+          </div>
+
+          <!-- Runs Anywhere -->
           <div class="feature-card">
             <div class="feature-icon icon-blue">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
             </div>
-            <h3>Sandboxed Execution</h3>
-            <p>Every AI agent runs in an isolated sandbox — no network access, no credential leaks, no escape hatches. Seatbelt, nsjail, bwrap, Docker, or Kubernetes pods with gVisor.</p>
+            <h3>Runs Anywhere</h3>
+            <p>Same config on your laptop or across a Kubernetes cluster. Local sandboxing for personal use, K8s pods for your whole team. Scale when you're ready, not before.</p>
           </div>
 
-          <!-- Taint Tracking -->
-          <div class="feature-card">
-            <div class="feature-icon icon-purple">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/><path d="M2 12a10 10 0 0 1 18-6"/><path d="M2 16h.01"/><path d="M21.8 16c.2-2 .131-5.354 0-6"/><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2"/><path d="M8.65 22c.21-.66.45-1.32.57-2"/><path d="M9 6.8a6 6 0 0 1 9 5.2v2"/></svg>
-            </div>
-            <h3>Taint Tracking</h3>
-            <p>Every piece of external content is tagged at the source. We trace it through the entire pipeline so you always know what's user-generated and what isn't.</p>
-          </div>
-
-          <!-- Prompt Injection Scanning -->
+          <!-- Smart Model Routing -->
           <div class="feature-card">
             <div class="feature-icon icon-cyan">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>
             </div>
-            <h3>Prompt Injection Scanning</h3>
-            <p>Multi-layer scanning catches injection attempts before they reach your LLM. Pattern matching, guardian models, and canary tokens — belt, suspenders, and a backup belt.</p>
+            <h3>Smart Model Routing</h3>
+            <p>Organize models by task — fast, thinking, coding — each with fallback chains. The router picks the right model for each job so you get speed where it matters and power where you need it.</p>
           </div>
 
           <!-- Plugin Ecosystem -->
@@ -145,52 +145,52 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></svg>
             </div>
             <h3>Plugin Ecosystem</h3>
-            <p>Extend ax with third-party providers via the Provider SDK. Integrity-verified, process-isolated, and lockfile-pinned. Because "npm install trust-me" isn't a security strategy.</p>
+            <p>Extend ax with community-built providers via the Provider SDK. Give your agent new skills, connect new services, add new models. If you can write TypeScript, you can build a plugin.</p>
           </div>
 
-          <!-- Cortex Memory -->
+          <!-- Always On -->
           <div class="feature-card">
-            <div class="feature-icon icon-orange">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            <div class="feature-icon icon-purple">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             </div>
-            <h3>Cortex Memory</h3>
-            <p>Persistent, semantic memory with embedding search, LLM-powered extraction, and proactive context recall. Multi-user scoped. Your agent remembers what matters.</p>
+            <h3>Always On</h3>
+            <p>Agents that work while you don't. Scheduled tasks, proactive hints, and a heartbeat system that keeps things running. Set it up on Friday, find the results on Monday.</p>
           </div>
 
-          <!-- Streaming & Observability -->
+          <!-- Real-Time Streaming -->
           <div class="feature-card">
             <div class="feature-icon icon-red">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg>
             </div>
-            <h3>Streaming & Observability</h3>
-            <p>Real-time event bus (in-process or PostgreSQL) with SSE streaming, OpenTelemetry tracing, and Langfuse integration. Watch your agent think — or plug into your existing stack.</p>
+            <h3>Real-Time Streaming</h3>
+            <p>Watch your agent think. SSE event streaming, OpenTelemetry tracing, Langfuse integration. When something goes sideways, you'll know exactly what happened and why.</p>
           </div>
 
-          <!-- Encrypted Credentials -->
+          <!-- Connects Your Stack -->
           <div class="feature-card">
             <div class="feature-icon icon-cyan">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
             </div>
-            <h3>Secure Credentials</h3>
-            <p>API keys never enter the sandbox. OS keychain integration, credential-injecting proxy, and host-side isolation. Your secrets stay where they belong.</p>
+            <h3>Connects Your Stack</h3>
+            <p>Drop-in OpenAI-compatible API, Slack integration, MCP servers, and channels for wherever your team already works. Point your existing tools at ax and they just work.</p>
           </div>
 
-          <!-- Provider Architecture -->
+          <!-- Swappable Everything -->
           <div class="feature-card">
             <div class="feature-icon icon-purple">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m6.08 9.5-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/><path d="m6.08 14.5-3.5 1.6a1 1 0 0 0 0 1.81l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9a1 1 0 0 0 0-1.83l-3.5-1.59"/></svg>
             </div>
-            <h3>15 Provider Categories</h3>
-            <p>Swappable providers across LLM, memory, security, channel, web, credentials, audit, sandbox, scheduler, database, storage, eventbus, MCP, and auth.</p>
+            <h3>Swappable Everything</h3>
+            <p>15 provider categories — LLM, memory, channel, database, sandbox, and more. Every piece is a TypeScript interface. Don't like something? Swap it. Want something new? Build it.</p>
           </div>
 
-          <!-- OpenAI-Compatible API -->
+          <!-- Safe by Default -->
           <div class="feature-card">
             <div class="feature-icon icon-blue">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/><path d="M11 8v6"/><path d="M8 11h6"/></svg>
             </div>
-            <h3>OpenAI-Compatible API</h3>
-            <p>Drop-in /v1/chat/completions with SSE streaming plus /v1/files/ for persistent artifacts. Point your existing tools at ax and get security for free.</p>
+            <h3>Safe by Default</h3>
+            <p>Sandboxed execution, taint tracking, prompt injection scanning, credential isolation. The guardrails are there so you can let your agents loose without losing sleep.</p>
           </div>
         </div>
       </div>
@@ -201,8 +201,8 @@
   <section id="deploy" class="deployment">
     <div class="container">
       <div class="reveal deployment-header">
-        <h2>From laptop to cluster</h2>
-        <p>Same framework, same config format. A personal assistant on your machine, or a fleet of agents across Kubernetes. You choose the scale — we handle the rest.</p>
+        <h2>From side project to team infrastructure</h2>
+        <p>Same framework, same config. Start with a personal agent on your laptop. When the rest of your team wants in, scale to Kubernetes without rewriting anything.</p>
       </div>
 
       <div class="reveal">
@@ -231,24 +231,24 @@
             </div>
             <ul class="deployment-highlights">
               <li><span class="dot dot-amber"></span>SQLite — zero infrastructure</li>
-              <li><span class="dot dot-amber"></span>Local sandbox (seatbelt / nsjail)</li>
+              <li><span class="dot dot-amber"></span>Runs locally, learns your patterns</li>
               <li><span class="dot dot-amber"></span>One command: <code>npx ax init</code></li>
               <li><span class="dot dot-amber"></span>Persistent memory out of the box</li>
             </ul>
           </div>
 
-          <!-- Enterprise -->
+          <!-- Team -->
           <div class="deployment-card">
             <div class="deployment-card-label label-enterprise">
               <!-- server/k8s icon -->
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg>
-              <span>enterprise</span>
+              <span>team</span>
             </div>
             <div class="deployment-code">
               <div class="deployment-code-header">
                 <span>helm values.yaml</span>
               </div>
-              <pre><code><span class="line comment"># Production Kubernetes deployment</span>
+              <pre><code><span class="line comment"># Same agent, now for the whole team</span>
 <span class="line"><span class="key">replicaCount</span><span class="colon">:</span><span class="value"> 3</span></span>
 <span class="line"></span>
 <span class="line"><span class="key">config</span><span class="colon">:</span></span>
@@ -267,10 +267,10 @@
 <span class="line"><span class="key">  enabled</span><span class="colon">:</span><span class="value"> true</span></span></code></pre>
             </div>
             <ul class="deployment-highlights">
-              <li><span class="dot dot-blue"></span>PostgreSQL (storage + event bus)</li>
-              <li><span class="dot dot-blue"></span>K8s pods with gVisor isolation</li>
-              <li><span class="dot dot-blue"></span>Helm chart + Flux CD gitops</li>
-              <li><span class="dot dot-blue"></span>Network policies & RBAC</li>
+              <li><span class="dot dot-blue"></span>PostgreSQL for shared state</li>
+              <li><span class="dot dot-blue"></span>Multi-user memory scoping</li>
+              <li><span class="dot dot-blue"></span>Helm chart — deploy in minutes</li>
+              <li><span class="dot dot-blue"></span>Agents that learn from the whole team</li>
             </ul>
           </div>
         </div>
@@ -282,14 +282,14 @@
   <section id="capabilities" class="deep-dives">
     <div class="container">
 
-      <!-- Multi-Step Reasoning -->
+      <!-- Thinks, Then Does -->
       <div class="deep-dive-row">
         <div class="deep-dive-text reveal from-left">
           <div class="deep-dive-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg>
           </div>
-          <h3>Multi-Step Reasoning</h3>
-          <p>ax agents don't just answer questions — they break down complex tasks, use tools, check their work, and iterate. Extended thinking models (Anthropic, OpenAI o-series, DeepSeek R1) stream their reasoning in real time so you can watch the gears turn.</p>
+          <h3>Thinks, then does</h3>
+          <p>ax agents don't just autocomplete — they break down problems, use tools, check their work, and iterate. Extended thinking models stream their reasoning in real time. It's weirdly satisfying to watch.</p>
         </div>
         <div class="deep-dive-visual reveal from-right">
           <div class="deep-dive-visual-box">
@@ -303,14 +303,14 @@
         </div>
       </div>
 
-      <!-- See Everything -->
+      <!-- Know What's Happening -->
       <div class="deep-dive-row reverse">
         <div class="deep-dive-text reveal from-right">
           <div class="deep-dive-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>
           </div>
-          <h3>See Everything</h3>
-          <p>Every LLM call, every tool invocation, every decision — logged and queryable. The streaming event bus emits typed events via SSE. Plug into OpenTelemetry or Langfuse for production-grade traces. When you need to debug, the full picture is right there.</p>
+          <h3>Know what's happening</h3>
+          <p>Every decision your agent makes is logged and queryable. Stream events in real time, plug into OpenTelemetry, or just tail the logs. When something goes weird — and it will, this is AI — you'll know exactly where to look.</p>
         </div>
         <div class="deep-dive-visual reveal from-left">
           <div class="deep-dive-visual-box">
@@ -318,21 +318,21 @@
               <div class="log-line"><span class="log-time">14:23:01</span><span class="log-event">llm.start</span><span class="log-ok">ok</span></div>
               <div class="log-line"><span class="log-time">14:23:02</span><span class="log-event">llm.thinking</span><span class="log-ok">stream</span></div>
               <div class="log-line"><span class="log-time">14:23:03</span><span class="log-event">tool.call: bash</span><span class="log-ok">ok</span></div>
-              <div class="log-line"><span class="log-time">14:23:04</span><span class="log-event">scan.outbound</span><span class="log-warn">taint:0.3</span></div>
-              <div class="log-line"><span class="log-time">14:23:05</span><span class="log-event">scan.inbound</span><span class="log-error">blocked</span></div>
+              <div class="log-line"><span class="log-time">14:23:04</span><span class="log-event">memory.recall</span><span class="log-ok">3 hits</span></div>
+              <div class="log-line"><span class="log-time">14:23:05</span><span class="log-event">task.complete</span><span class="log-ok">done</span></div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Build It Your Way -->
+      <!-- Your Stack, Your Rules -->
       <div class="deep-dive-row">
         <div class="deep-dive-text reveal from-left">
           <div class="deep-dive-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>
           </div>
-          <h3>Build It Your Way</h3>
-          <p>Every piece of ax is a TypeScript interface. Swap Anthropic for OpenAI, SQLite for PostgreSQL, local sandbox for Kubernetes pods. Install third-party plugins with <code>ax plugin add</code> — integrity-verified and process-isolated.</p>
+          <h3>Your stack, your rules</h3>
+          <p>Every piece of ax is a TypeScript interface. Swap Anthropic for OpenAI, SQLite for PostgreSQL, local process for Kubernetes pods. Build your own provider, publish it as a plugin, share it with the community. That's kind of the whole point.</p>
         </div>
         <div class="deep-dive-visual reveal from-right">
           <div class="deep-dive-visual-box">
@@ -340,7 +340,7 @@
               <div class="provider-grid-inner">
                 <div class="provider-block">LLM</div>
                 <div class="provider-block">Memory</div>
-                <div class="provider-block">Security</div>
+                <div class="provider-block">Channel</div>
                 <div class="provider-block">Sandbox</div>
                 <div class="provider-block">Scheduler</div>
                 <div class="provider-block">Database</div>
@@ -356,20 +356,20 @@
         </div>
       </div>
 
-      <!-- Smart Model Routing -->
+      <!-- Right Model for the Job -->
       <div class="deep-dive-row reverse">
         <div class="deep-dive-text reveal from-right">
           <div class="deep-dive-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z"/></svg>
           </div>
-          <h3>Smart Model Routing</h3>
-          <p>Organize models by task type — default, fast, thinking, coding — each with its own fallback chain. The router handles failover with exponential backoff and circuit breakers. Your agent picks the right model for each job automatically.</p>
+          <h3>Right model for the job</h3>
+          <p>Not every task needs your most expensive model. Organize by role — default, fast, thinking, coding — each with its own fallback chain. The router handles failover automatically. Your API bill will thank you.</p>
         </div>
         <div class="deep-dive-visual reveal from-left">
           <div class="deep-dive-visual-box">
             <div class="logs-container">
               <div class="log-line"><span class="log-time">default</span><span class="log-event">claude-sonnet → llama-3.3</span><span class="log-ok">fallback</span></div>
-              <div class="log-line"><span class="log-time">fast</span><span class="log-event">claude-haiku</span><span class="log-ok">screening</span></div>
+              <div class="log-line"><span class="log-time">fast</span><span class="log-event">claude-haiku</span><span class="log-ok">triage</span></div>
               <div class="log-line"><span class="log-time">thinking</span><span class="log-event">claude-opus</span><span class="log-ok">planning</span></div>
               <div class="log-line"><span class="log-time">coding</span><span class="log-event">claude-sonnet</span><span class="log-ok">code gen</span></div>
             </div>
@@ -384,8 +384,8 @@
   <section id="get-started" class="code-showcase">
     <div class="container">
       <div class="reveal code-showcase-header">
-        <h2>Get started in 30 seconds</h2>
-        <p>Install, configure, and start chatting with your agent.</p>
+        <h2>Try it in 30 seconds</h2>
+        <p>Seriously, that's not marketing. It's three commands.</p>
       </div>
 
       <div class="reveal">
@@ -400,10 +400,10 @@
 <span class="line"><span class="value">npm start</span></span>
 <span class="line"></span>
 <span class="line comment"># Or use the CLI</span>
-<span class="line"><span class="value">ax configure</span><span class="comment">          # interactive setup wizard</span></span>
+<span class="line"><span class="value">ax configure</span><span class="comment">          # walks you through setup</span></span>
 <span class="line"><span class="value">ax serve</span><span class="comment">              # start the server</span></span>
-<span class="line"><span class="value">ax chat</span><span class="comment">               # interactive chat session</span></span>
-<span class="line"><span class="value">ax plugin add @ax/web</span><span class="comment"> # install a provider plugin</span></span></code></pre>
+<span class="line"><span class="value">ax chat</span><span class="comment">               # talk to your agent</span></span>
+<span class="line"><span class="value">ax plugin add @ax/web</span><span class="comment"> # give it new skills</span></span></code></pre>
         </div>
       </div>
     </div>
@@ -436,8 +436,8 @@
 
       <div class="reveal">
         <div class="cta-box">
-          <h2>Built in the open</h2>
-          <p>ax is free and open source under the MIT license. No paid tiers, no gated features. Just a framework you can use, fork, extend with plugins, and build on.</p>
+          <h2>Come build with us</h2>
+          <p>ax is MIT-licensed and evolving fast. We're exploring the frontier of agentic systems in the open — new provider categories, better memory, smarter routing. If that sounds fun, jump in.</p>
           <div class="cta-buttons">
             <a href="https://github.com/project-ax/project-ax" class="btn btn-solid">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
@@ -465,11 +465,11 @@
             </div>
             <span>ax</span>
           </div>
-          <p>Open source AI agent framework.<br>Free forever. MIT licensed.</p>
+          <p>Open source AI agents.<br>MIT licensed. Community driven.</p>
         </div>
 
         <div class="footer-col">
-          <h4>product</h4>
+          <h4>project</h4>
           <ul>
             <li><a href="#features">Features</a></li>
             <li><a href="#deploy">Deploy</a></li>
@@ -498,7 +498,7 @@
 
       <div class="footer-bottom">
         <p>&copy; 2026 ax. MIT License.</p>
-        <p>Made with mass amounts of mass-produced coffee.</p>
+        <p>Built by humans, improved by agents, powered by coffee.</p>
       </div>
     </div>
   </footer>
