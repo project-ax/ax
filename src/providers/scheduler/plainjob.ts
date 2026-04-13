@@ -253,7 +253,7 @@ export async function create(config: Config, deps: PlainJobSchedulerDeps = {}): 
     if (!isWithinActiveHours(activeHours)) return;
     const now = at ?? new Date();
     const mk = minuteKey(now);
-    const jobList = await jobs.list();
+    const jobList = await jobs.list(agentName);
     for (const job of jobList) {
       if (job.id.startsWith('__heartbeat__:')) continue; // synthetic row for heartbeat dedup
       if (!matchesCron(job.schedule, now)) continue;

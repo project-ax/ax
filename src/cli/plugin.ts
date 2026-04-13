@@ -38,7 +38,7 @@ Sources (GitHub-based):
   ./plugins/my-custom-plugin                    Local directory (development only)
 
 Options:
-  --agent <name>   Target agent (default: main)
+  --agent <name>   Target agent (default: from config agent_name)
   --shared         Share this plugin's skills with the company
 
 Examples:

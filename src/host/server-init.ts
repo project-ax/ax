@@ -361,7 +361,7 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     await loadDatabaseMcpServers(providers.database, mcpManager);
   }
 
-  const defaultCtx = { sessionId: 'server', agentId: 'system', userId: defaultUserId };
+  const defaultCtx = { sessionId: 'server', agentId, userId: defaultUserId };
   const ipcServer = await createIPCServer(ipcSocketPath, handleIPC, defaultCtx);
 
   const modelId = providers.llm.name;

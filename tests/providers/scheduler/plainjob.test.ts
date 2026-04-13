@@ -273,7 +273,7 @@ describe('scheduler-plainjob', () => {
     expect(all).toHaveLength(2);
   });
 
-  test('checkCronNow fires jobs for all agents', async () => {
+  test('checkCronNow fires only jobs for the configured agent', async () => {
     const scheduler = await create(mockConfig, { jobStore: new MemoryJobStore() });
     const received: InboundMessage[] = [];
 
@@ -286,10 +286,9 @@ describe('scheduler-plainjob', () => {
     scheduler.checkCronNow!(new Date('2026-03-01T12:05:00Z'));
     await new Promise(r => setTimeout(r, 10));
 
-    // Scheduler fires all jobs — the callback routes each to the correct agent
-    expect(received).toHaveLength(2);
-    const senders = received.map(m => m.sender).sort();
-    expect(senders).toEqual(['cron:my-job', 'cron:other-job']);
+    // Scheduler only fires jobs belonging to the configured agent
+    expect(received).toHaveLength(1);
+    expect(received[0].sender).toBe('cron:my-job');
   });
 
   // ─── Heartbeat ─────────────────────────────────────

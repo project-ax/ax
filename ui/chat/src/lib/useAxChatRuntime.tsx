@@ -17,7 +17,7 @@ import { AxChatTransport, type CredentialRequiredEvent, type StatusEvent } from 
  * Passes the AX history adapter directly to useAISDKRuntime
  * so thread history loads when switching threads.
  */
-const useChatThreadRuntime = (transport: AxChatTransport): AssistantRuntime => {
+const useChatThreadRuntime = (transport: AxChatTransport, user = 'guest'): AssistantRuntime => {
   const id = useAuiState(({ threadListItem }) => threadListItem.id);
   const aui = useAui();
 
@@ -52,7 +52,7 @@ const useChatThreadRuntime = (transport: AxChatTransport): AssistantRuntime => {
           };
           const ext = attachment.name.split('.').pop()?.toLowerCase() ?? '';
           const mimeType = attachment.contentType || attachment.file.type || EXT_MIME[ext] || 'application/octet-stream';
-          const resp = await fetch(`/v1/files?agent=default&user=guest&filename=${encodeURIComponent(attachment.name)}`, {
+          const resp = await fetch(`/v1/files?agent=default&user=${encodeURIComponent(user)}&filename=${encodeURIComponent(attachment.name)}`, {
             method: 'POST',
             headers: { 'Content-Type': mimeType },
             body: attachment.file,
@@ -105,7 +105,7 @@ export const useAxChatRuntime = (
   );
 
   return useRemoteThreadListRuntime({
-    runtimeHook: () => useChatThreadRuntime(transport),
+    runtimeHook: () => useChatThreadRuntime(transport, user ?? 'guest'),
     adapter: axThreadListAdapter,
   });
 };

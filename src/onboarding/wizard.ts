@@ -43,7 +43,12 @@ export async function runOnboarding(opts: OnboardingOptions): Promise<void> {
   const cfgPath = join(outputDir, 'ax.yaml');
   let existing: Record<string, unknown> = {};
   if (existsSync(cfgPath)) {
-    try { existing = parseYaml(readFileSync(cfgPath, 'utf-8')) ?? {}; } catch { /* ignore parse errors */ }
+    try {
+      const parsed = parseYaml(readFileSync(cfgPath, 'utf-8'));
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        existing = parsed as Record<string, unknown>;
+      }
+    } catch { /* ignore parse errors */ }
   }
 
   // Merge wizard answers onto existing config

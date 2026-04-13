@@ -4,7 +4,7 @@
  * agent spawning, outbound scanning, and memory persistence.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID, createHash } from 'node:crypto';
@@ -343,18 +343,25 @@ export async function extractImageDataBlocks(
 /**
  * Clone or pull a workspace from a file:// bare repo on the host side.
  * Container sandboxes can't access file:// URLs — the host must do git ops.
+ *
+ * Uses --separate-git-dir to keep .git metadata outside the workspace,
+ * mirroring the k8s git-init approach. The agent only sees working-tree files.
+ * Returns the gitdir path for use in hostGitCommit.
  */
-function hostGitSync(workspace: string, repoUrl: string, logger: Logger): void {
-  const hasGit = existsSync(join(workspace, '.git'));
-  const gitOpts = { cwd: workspace, stdio: 'pipe' as const };
+function hostGitSync(workspace: string, gitDir: string, repoUrl: string, logger: Logger): void {
+  const gitEnv = { GIT_DIR: gitDir, GIT_WORK_TREE: workspace };
+  const gitOpts = { cwd: workspace, stdio: 'pipe' as const, env: { ...process.env, ...gitEnv } };
 
-  if (!hasGit) {
+  if (!existsSync(join(gitDir, 'HEAD'))) {
     try {
-      execFileSync('git', ['clone', repoUrl, '.'], gitOpts);
+      execFileSync('git', ['clone', '--separate-git-dir', gitDir, repoUrl, '.'], { cwd: workspace, stdio: 'pipe' as const });
+      // clone leaves a .git pointer file in workspace — remove it so agent can't see it
+      try { unlinkSync(join(workspace, '.git')); } catch { /* already absent */ }
       // Ensure we're on 'main' regardless of system default
       try { execFileSync('git', ['branch', '-M', 'main'], gitOpts); } catch (e) { logger.debug('branch_rename_skip', { reason: (e as Error).message }); }
     } catch {
-      // Clone fails on empty bare repos (no commits yet) — init and add remote
+      // Clone fails on empty bare repos (no commits yet) — init with separate gitdir
+      mkdirSync(gitDir, { recursive: true });
       execFileSync('git', ['init'], gitOpts);
       execFileSync('git', ['remote', 'add', 'origin', repoUrl], gitOpts);
       try { execFileSync('git', ['checkout', '-b', 'main'], gitOpts); } catch (e) { logger.debug('checkout_skip', { reason: (e as Error).message }); }
@@ -367,18 +374,20 @@ function hostGitSync(workspace: string, repoUrl: string, logger: Logger): void {
 
   execFileSync('git', ['config', 'user.name', 'agent'], gitOpts);
   execFileSync('git', ['config', 'user.email', 'agent@ax.local'], gitOpts);
-  logger.debug('host_git_synced', { workspace, repoUrl });
+  logger.debug('host_git_synced', { workspace, gitDir, repoUrl });
 }
 
 /**
  * Commit and push workspace changes to the file:// bare repo from the host.
+ * Uses GIT_DIR/GIT_WORK_TREE to operate on the separated git metadata.
  */
-function hostGitCommit(workspace: string, logger: Logger): void {
-  const gitOpts = { cwd: workspace, stdio: 'pipe' as const };
+function hostGitCommit(workspace: string, gitDir: string, logger: Logger): void {
+  const gitEnv = { GIT_DIR: gitDir, GIT_WORK_TREE: workspace };
+  const gitOpts = { cwd: workspace, stdio: 'pipe' as const, env: { ...process.env, ...gitEnv } };
   try {
     execFileSync('git', ['add', '.'], gitOpts);
     const status = execFileSync('git', ['status', '--porcelain'], {
-      cwd: workspace, encoding: 'utf-8', stdio: 'pipe',
+      cwd: workspace, encoding: 'utf-8', stdio: 'pipe', env: { ...process.env, ...gitEnv },
     });
     if (status.trim()) {
       const timestamp = new Date().toISOString();
@@ -584,6 +593,7 @@ export async function processCompletion(
   let webProxyCleanup: (() => void) | undefined;
   let toolMountRoot: { mountRoot: string; cleanup: () => void } | undefined;
   let hostManagedGit = false;
+  let gitDir = '';
   const currentUserId = userId ?? 'anonymous';
   const sandboxResolvedAgent = userId && deps.provisioner
     ? await deps.provisioner.resolveAgent(userId)
@@ -607,6 +617,8 @@ export async function processCompletion(
   try {
     // All workspaces are ephemeral — git repo is the source of truth
     workspace = mkdtempSync(join(tmpdir(), 'ax-ws-'));
+    // Separate gitdir keeps .git metadata outside workspace (agent can't see it)
+    gitDir = mkdtempSync(join(tmpdir(), 'ax-git-'));
 
     // Git repo is the persistence layer — always sync for persistent sessions.
     // For file:// workspace URLs (git-local provider), clone/pull on the host side.
@@ -615,7 +627,7 @@ export async function processCompletion(
       const repoUrl = await providers.workspace.getRepoUrl(agentId);
       if (repoUrl.startsWith('file://')) {
         try {
-          hostGitSync(workspace, repoUrl, reqLogger);
+          hostGitSync(workspace, gitDir, repoUrl, reqLogger);
           hostManagedGit = true;
         } catch (err) {
           reqLogger.warn('host_git_sync_failed', { error: (err as Error).message });
@@ -630,7 +642,7 @@ export async function processCompletion(
         execFileSync('git', ['init', '--bare', '--initial-branch=main'], { cwd: repoPath, stdio: 'pipe' });
       }
       try {
-        hostGitSync(workspace, repoUrl, reqLogger);
+        hostGitSync(workspace, gitDir, repoUrl, reqLogger);
         hostManagedGit = true;
       } catch (err) {
         reqLogger.warn('host_git_sync_failed', { error: (err as Error).message });
@@ -1670,12 +1682,17 @@ export async function processCompletion(
       deps.sharedCredentialRegistry.deregister(sessionId);
     }
     // Commit workspace changes to the bare repo before cleanup.
-    if (hostManagedGit && workspace) {
-      hostGitCommit(workspace, reqLogger);
+    if (hostManagedGit && workspace && gitDir) {
+      hostGitCommit(workspace, gitDir, reqLogger);
     }
     if (workspace) {
       try { rmSync(workspace, { recursive: true, force: true }); } catch {
         reqLogger.debug('workspace_cleanup_failed', { workspace });
+      }
+    }
+    if (gitDir) {
+      try { rmSync(gitDir, { recursive: true, force: true }); } catch {
+        reqLogger.debug('gitdir_cleanup_failed', { gitDir });
       }
     }
   }

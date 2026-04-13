@@ -230,7 +230,7 @@ async function main(): Promise<void> {
     if (isK8s) {
       activeTokens.set(turnToken, {
         handleIPC: wrappedHandleIPC,
-        ctx: { sessionId, agentId: agentName, userId: userId ?? defaultUserId, requestId },
+        ctx: { sessionId, agentId: baseDeps?.config.agent_name ?? agentName, userId: userId ?? defaultUserId, requestId },
       });
       logger.info('token_registered', { sessionId, requestId, tokenPresent: true });
     }

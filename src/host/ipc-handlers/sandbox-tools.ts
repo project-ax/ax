@@ -131,7 +131,7 @@ async function uploadArtifactIfNeeded(
   const originalFilename = path.split('/').pop() ?? path;
 
   await opts.gcsFileStorage.upload(fileId, buf, mimeType, originalFilename);
-  await opts.fileStore?.register(fileId, opts.agentId ?? 'system', ctx.userId ?? 'unknown', mimeType, originalFilename);
+  await opts.fileStore?.register(fileId, ctx.agentId, ctx.userId ?? 'unknown', mimeType, originalFilename);
   opts.onArtifactWritten?.(fileId, mimeType, originalFilename);
 
   return fileId;

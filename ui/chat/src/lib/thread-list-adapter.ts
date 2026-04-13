@@ -36,7 +36,7 @@ export const axThreadListAdapter: RemoteThreadListAdapter = {
   async initialize(threadId: string) {
     // Don't pre-create the session — the AX server auto-creates it
     // during the first completion via chatSessions.ensureExists().
-    // The server derives sessionId from the user field: "{agentId}:http:guest:{threadId}".
+    // The server derives sessionId from the user field: "http:dm:{agentId}:{userId}:{threadId}".
     return { remoteId: threadId, externalId: undefined };
   },
 

@@ -60,7 +60,7 @@ function saveProposal(proposal: Proposal): void {
 }
 
 export function createGovernanceHandlers(providers: ProviderRegistry, opts: GovernanceHandlerOptions) {
-  const { agentDir, agentId, profile, registry } = opts;
+  const { agentDir, agentId, registry } = opts;
 
   return {
     identity_propose: async (req: any, ctx: IPCContext) => {

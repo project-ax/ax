@@ -162,10 +162,8 @@ export async function runSend(args: string[]): Promise<void> {
 
   // If --session given and doesn't contain ':', compose as {agentId}:cli:<name>
   // If it contains ':', pass through as full session ID
-  const config = loadConfig();
-  const cliAgentId = config.agent_name ?? 'cli';
   const resolvedSessionId = sessionId
-    ? (sessionId.includes(':') ? sessionId : composeSessionId(cliAgentId, 'cli', sessionId))
+    ? (sessionId.includes(':') ? sessionId : composeSessionId(loadConfig().agent_name, 'cli', sessionId))
     : undefined; // no session (ephemeral)
 
   const client = createSendClient({
