@@ -181,7 +181,7 @@ export function createSandboxToolHandlers(providers: ProviderRegistry, opts: San
 
       return new Promise<{ output: string }>((resolve) => {
         // nosemgrep: javascript.lang.security.detect-child-process — intentional: sandbox tool
-        const child = spawn('sh', ['-c', req.command], {
+        const child = spawn('bash', ['-c', req.command], {
           cwd: workspace,
           stdio: ['pipe', 'pipe', 'pipe'],
           detached: true,

@@ -34,7 +34,10 @@ export class MemoryJobStore implements JobStore {
   private lastFired = new Map<string, string>();
   get(jobId: string): CronJobDef | undefined { return this.jobs.get(jobId); }
   set(job: CronJobDef): void { this.jobs.set(job.id, job); }
-  delete(jobId: string): boolean { return this.jobs.delete(jobId); }
+  delete(jobId: string): boolean {
+    this.lastFired.delete(jobId);
+    return this.jobs.delete(jobId);
+  }
   list(agentId?: string): CronJobDef[] {
     const all = [...this.jobs.values()];
     return agentId ? all.filter(j => j.agentId === agentId) : all;

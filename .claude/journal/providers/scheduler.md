@@ -1,5 +1,13 @@
 # Scheduler Provider Journal
 
+## [2026-04-13 11:43] — Address PR #167 review comments
+
+**Task:** Implement all changes requested in CodeRabbit review of the multi-replica dedup PR
+**What I did:** Four fixes: (1) sandbox-tools.ts `sandbox_bash` handler now spawns `bash` instead of `sh` to match `local-sandbox.ts` and support bash-specific syntax. (2) `MemoryJobStore.delete()` now also clears `lastFired` claim state to prevent phantom `tryClaim → false` for reused job IDs. (3) Added error callbacks to both `tryClaim` Promise chains in `fireHeartbeat()` and `fireOnceJob()` so rejections are caught instead of unhandled. (4) Wrapped `onMessageHandler()` calls in `emitHeartbeat()`, `checkCronJobs()`, and `doFireOnce()` with try/catch so a synchronous throw cannot permanently leak an ID in the `inFlight` Set.
+**Files touched:** `src/host/ipc-handlers/sandbox-tools.ts`, `src/providers/scheduler/types.ts`, `src/providers/scheduler/plainjob.ts`
+**Outcome:** Success — `npx tsc --noEmit` clean, 77 tests pass (64 + 13 skipped).
+**Notes:** The cron try/catch uses `continue` (inside a for loop) rather than `return` to allow subsequent jobs in the same tick to still fire.
+
 ## [2026-04-13 09:55] — Fix "Command failed" false positive for zero-exit-code bash commands
 
 **Task:** Gemini Flash LLM was looping through 44 bash calls in a single cron invocation, trying different approaches to create one file. Root cause: the sandbox bash tool returned "Command failed" for successful commands with no stdout/stderr output.

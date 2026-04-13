@@ -129,7 +129,10 @@ export async function create(config: Config, deps: PlainJobSchedulerDeps = {}): 
       const claimed = jobs.tryClaim(HEARTBEAT_JOB_ID, mk);
       // tryClaim may return a Promise (KyselyJobStore) — handle both
       if (claimed && typeof (claimed as any).then === 'function') {
-        (claimed as Promise<boolean>).then(ok => { if (ok) emitHeartbeat(); });
+        (claimed as Promise<boolean>).then(
+          ok => { if (ok) emitHeartbeat(); },
+          err => { /* tryClaim rejected — skip this heartbeat tick */ void err; },
+        );
         return;
       }
       if (!claimed) return;
@@ -150,15 +153,21 @@ export async function create(config: Config, deps: PlainJobSchedulerDeps = {}): 
     }
 
     inFlight.add(HEARTBEAT_JOB_ID);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result: any = onMessageHandler({
-      id: randomUUID(),
-      session: schedulerSession('heartbeat'),
-      sender: 'heartbeat',
-      content,
-      attachments: [],
-      timestamp: new Date(),
-    });
+    let result: unknown;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      result = (onMessageHandler as any)({
+        id: randomUUID(),
+        session: schedulerSession('heartbeat'),
+        sender: 'heartbeat',
+        content,
+        attachments: [],
+        timestamp: new Date(),
+      });
+    } catch {
+      inFlight.delete(HEARTBEAT_JOB_ID);
+      return;
+    }
     if (result && typeof (result as Promise<unknown>).then === 'function') {
       (result as Promise<unknown>).finally(() => inFlight.delete(HEARTBEAT_JOB_ID));
     } else {
@@ -193,13 +202,16 @@ export async function create(config: Config, deps: PlainJobSchedulerDeps = {}): 
       const mk = `once:${job.id}`;
       const claimed = jobs.tryClaim(job.id, mk);
       if (claimed && typeof (claimed as any).then === 'function') {
-        (claimed as Promise<boolean>).then(ok => {
-          if (ok) doFireOnce(job);
-          else {
-            // Another replica already fired — just clean up local timer
-            onceTimers.delete(job.id);
-          }
-        });
+        (claimed as Promise<boolean>).then(
+          ok => {
+            if (ok) doFireOnce(job);
+            else {
+              // Another replica already fired — just clean up local timer
+              onceTimers.delete(job.id);
+            }
+          },
+          err => { /* tryClaim rejected — skip this once-job */ void err; },
+        );
         return;
       }
       if (!claimed) {
@@ -213,15 +225,23 @@ export async function create(config: Config, deps: PlainJobSchedulerDeps = {}): 
 
   function doFireOnce(job: CronJobDef): void {
     if (!onMessageHandler) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const result: any = onMessageHandler({
-      id: randomUUID(),
-      session: schedulerSession(`cron:${job.id}`),
-      sender: `cron:${job.id}`,
-      content: job.prompt,
-      attachments: [],
-      timestamp: new Date(),
-    });
+    let result: unknown;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      result = (onMessageHandler as any)({
+        id: randomUUID(),
+        session: schedulerSession(`cron:${job.id}`),
+        sender: `cron:${job.id}`,
+        content: job.prompt,
+        attachments: [],
+        timestamp: new Date(),
+      });
+    } catch {
+      // Synchronous throw — still clean up job so it doesn't re-fire
+      jobs.delete(job.id);
+      onceTimers.delete(job.id);
+      return;
+    }
     deferCleanup(result, () => {
       jobs.delete(job.id);
       onceTimers.delete(job.id);
@@ -252,15 +272,21 @@ export async function create(config: Config, deps: PlainJobSchedulerDeps = {}): 
       }
 
       inFlight.add(job.id);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result: any = onMessageHandler({
-        id: randomUUID(),
-        session: schedulerSession(`cron:${job.id}`),
-        sender: `cron:${job.id}`,
-        content: job.prompt,
-        attachments: [],
-        timestamp: now,
-      });
+      let result: unknown;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        result = (onMessageHandler as any)({
+          id: randomUUID(),
+          session: schedulerSession(`cron:${job.id}`),
+          sender: `cron:${job.id}`,
+          content: job.prompt,
+          attachments: [],
+          timestamp: now,
+        });
+      } catch {
+        inFlight.delete(job.id);
+        continue;
+      }
       // Clear in-flight when completion finishes (or immediately if sync)
       if (result && typeof (result as Promise<unknown>).then === 'function') {
         (result as Promise<unknown>).finally(() => inFlight.delete(job.id));
