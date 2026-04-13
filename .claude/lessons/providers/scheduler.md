@@ -24,6 +24,36 @@
 **Lesson:** The `JobStore` interface and its implementations (MemoryJobStore, SQLiteJobStore) live in `src/providers/scheduler/types.ts`. New JobStore implementations should be added there to keep them reusable across scheduler tiers. The SQLiteJobStore uses INSERT OR REPLACE for upsert and COUNT query for delete return value.
 **Tags:** scheduler, sqlite, job-store, types
 
+### MemoryJobStore.delete() must clear all per-job state, not just the job map
+**Date:** 2026-04-13
+**Context:** PR #167 review — `MemoryJobStore.delete()` only removed the entry from `this.jobs` but left `this.lastFired` claim state intact. One-shot jobs use a stable key (`once:${job.id}`), so if a job is re-added with the same ID after deletion, `tryClaim` returns `false` forever because the old minute key still matches.
+**Lesson:** Any in-memory store that maintains auxiliary maps keyed by job ID (e.g., `lastFired`, cooldown maps, etc.) must clear those auxiliary entries in `delete()`, not just the primary record. Treat `delete()` as "remove all traces of this job ID from all internal state."
+**Tags:** scheduler, memory-store, delete, tryClaim, dedup, job-id-reuse
+
+### Always add error callbacks to tryClaim() promise chains
+**Date:** 2026-04-13
+**Context:** PR #167 review — `fireHeartbeat()` and `fireOnceJob()` attached only a success `.then(ok => {...})` to the Promise returned by `tryClaim()`. A rejected promise (e.g., DB connection error) went completely unhandled, risking process crashes or silent failures.
+**Lesson:** Every `.then(success)` on a `tryClaim()` Promise must have a corresponding error handler — either `.then(ok => {...}, err => { void err; })` or `.catch(err => {...})`. The error handler can be a no-op (skip the tick) but it must exist. The same applies to any fire-and-forget async call in scheduler dispatch code.
+**Tags:** scheduler, promise, error-handling, tryClaim, unhandled-rejection
+
+### Wrap onMessageHandler() in try/catch to prevent permanent inFlight leaks
+**Date:** 2026-04-13
+**Context:** PR #167 review — `inFlight.add(id)` happens before `onMessageHandler()` is called. If `onMessageHandler()` throws synchronously, execution jumps past the `.finally()` cleanup, permanently trapping the job ID in `inFlight` and preventing that job from ever firing again for the lifetime of the process.
+**Lesson:** In scheduler dispatch code, whenever you add an ID to `inFlight` and then call a function that might throw synchronously, wrap the call in `try { ... } catch { inFlight.delete(id); return/continue; }`. Then attach `.finally(() => inFlight.delete(id))` to the returned Promise for the async case. This pattern ensures the ID is always removed regardless of sync throw, async rejection, or success.
+**Tags:** scheduler, inFlight, try-catch, error-safety, plainjob
+
+### Synthetic DB rows for distributed dedup pollute job listings
+**Date:** 2026-04-13
+**Context:** Inserting a `__heartbeat__:agentName` synthetic row into `cron_jobs` for heartbeat dedup caused the row to appear in `listJobs()` and `checkCronJobs()`, breaking 12 existing tests.
+**Lesson:** When inserting synthetic/internal rows into a shared table for distributed coordination, filter them out in ALL query paths that surface data to callers. Use a consistent prefix convention (e.g., `__heartbeat__:`) and check `instanceof KyselyJobStore` rather than `jobs.tryClaim` to avoid inserting synthetic rows for in-memory stores that don't need them.
+**Tags:** scheduler, multi-replica, dedup, synthetic-rows, heartbeat
+
+### tryClaim minuteKey dedup is insufficient — need in-flight tracking for long-running jobs
+**Date:** 2026-04-13
+**Context:** A "create random file" cron job took 68 seconds (LLM looped through 44 bash calls). The next minute's `checkCronJobs()` fired a second concurrent invocation because `minuteKey` had changed, doubling LLM calls and costs.
+**Lesson:** `tryClaim(jobId, minuteKey)` only prevents duplicate fires within the *same* minute. For long-running jobs (>60s), you also need per-process in-flight tracking: `if (inFlight.has(job.id)) continue` before firing, `inFlight.add(job.id)` before calling `onMessageHandler`, and `.finally(() => inFlight.delete(job.id))` on the returned Promise. This is a per-process guard (not distributed), which is correct — each replica independently decides whether its own previous invocation is still running.
+**Tags:** scheduler, cron, overlap, in-flight, dedup, plainjob
+
 ### Pre-existing provider-map path regex failures
 **Date:** 2026-03-03
 **Context:** Running full test suite after adding plainjob to provider-map
