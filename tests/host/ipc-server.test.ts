@@ -853,7 +853,7 @@ describe('scheduler IPC handlers', () => {
 
     const result = JSON.parse(await handle(JSON.stringify({
       action: 'scheduler_remove_cron',
-      jobId: addResult.jobId,
+      id: addResult.jobId,
     }), ctx));
 
     expect(result.ok).toBe(true);
