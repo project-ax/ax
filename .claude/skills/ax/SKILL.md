@@ -38,7 +38,7 @@ In k8s mode, all communication uses HTTP:
 - **Work dispatch**: Host queues work via `SessionPodManager.queueWork()`; pods fetch via `GET /internal/work`
 - **Event bus**: `src/providers/eventbus/postgres.ts` (PostgreSQL-backed pub/sub for events)
 
-**HTTP for all payloads**: Workspace file data flows via HTTP POST to the host's `/internal/workspace-staging` endpoint. IPC requests use HTTP POST to `/internal/ipc`. Work dispatch uses `SessionPodManager` (in-process queue). NetworkPolicy allows sandbox pods egress to host on port 8080.
+**HTTP for all payloads**: IPC requests use HTTP POST to `/internal/ipc`. Work dispatch uses `SessionPodManager` (in-process queue). NetworkPolicy allows sandbox pods egress to host on port 8080. Workspace persistence uses git-based providers (git-http for k8s, git-local for local dev).
 
 ### MCP Fast Path (In-Process Agent)
 
@@ -71,4 +71,4 @@ Zero-dependency TypeScript tool stub generation with Proxy-based batching (`src/
 
 ### Provider Categories
 
-There are 15 provider categories in the static allowlist (`src/host/provider-map.ts`): llm, memory, security, channel, web_extract, web_search, credentials, audit, sandbox, scheduler, database, storage, eventbus, mcp, auth. The `mcp` category has `none` and `database` implementations.
+There are 15 provider categories in the static allowlist (`src/host/provider-map.ts`): llm, memory, channel, web_fetch, web_extract, web_search, credentials, audit, sandbox, scheduler, database, storage, eventbus, workspace, mcp, auth. Credentials is database-only. Workspace has `git-http` and `git-local` implementations. The `mcp` category has `none` and `database` implementations.

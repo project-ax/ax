@@ -5,7 +5,7 @@ description: Use when adding new provider categories, modifying provider loading
 
 ## Overview
 
-AX uses a **provider contract pattern**: every subsystem is a TypeScript interface with pluggable implementations. Implementations are selected by name in `ax.yaml`, resolved via a static allowlist (`provider-map.ts`), and instantiated by `registry.ts` calling each module's `create(config)` export. This enforces SC-SEC-002 -- no dynamic path construction. Third-party providers are supported via the plugin system and provider SDK.
+AX uses a **provider contract pattern**: every subsystem is a TypeScript interface with pluggable implementations. There are 15 provider categories. Implementations are selected by name in `ax.yaml`, resolved via a static allowlist (`provider-map.ts`), and instantiated by `registry.ts` calling each module's `create(config)` export. This enforces SC-SEC-002 -- no dynamic path construction. Third-party providers are supported via the plugin system and provider SDK.
 
 ## The Contract
 
@@ -19,23 +19,20 @@ AX uses a **provider contract pattern**: every subsystem is a TypeScript interfa
 | Category      | Interface              | Directory                      |
 |---------------|------------------------|--------------------------------|
 | llm           | `LLMProvider`          | `src/providers/llm/`           |
-| image         | `ImageProvider`        | `src/providers/image/`         |
 | memory        | `MemoryProvider`       | `src/providers/memory/`        |
-| scanner       | `ScannerProvider`      | `src/providers/scanner/`       |
 | channel       | `ChannelProvider`      | `src/providers/channel/`       |
 | web           | `WebProvider`          | `src/providers/web/`           |
-| browser       | `BrowserProvider`      | `src/providers/browser/`       |
 | credentials   | `CredentialProvider`   | `src/providers/credentials/`   |
 | skills        | `SkillStoreProvider`   | `src/providers/skills/`        |
 | audit         | `AuditProvider`        | `src/providers/audit/`         |
 | sandbox       | `SandboxProvider`      | `src/providers/sandbox/`       |
 | scheduler     | `SchedulerProvider`    | `src/providers/scheduler/`     |
-| screener      | `SkillScreenerProvider`| `src/providers/screener/`      |
 | database      | `DatabaseProvider`     | `src/providers/database/`      |
 | storage       | `StorageProvider`      | `src/providers/storage/`       |
 | eventbus      | `EventBusProvider`     | `src/providers/eventbus/`      |
 | workspace     | `WorkspaceProvider`    | `src/providers/workspace/`     |
-| mcp           | `McpProvider`          | `src/providers/mcp/`           | (`none`, `database`) |
+| mcp           | `McpProvider`          | `src/providers/mcp/`           |
+| auth          | `AuthProvider`         | `src/providers/auth/`          |
 
 ## Provider Map (SC-SEC-002)
 
@@ -52,18 +49,16 @@ AX uses a **provider contract pattern**: every subsystem is a TypeScript interfa
 
 - Reads provider names from `config.providers.*`
 - **Three loading patterns** based on provider needs:
-  1. **Simple**: `loadProvider(kind, name, config)` — resolveProviderPath → import → `mod.create(config, name)`. Used by web, browser, credentials, sandbox, eventbus, workspace.
+  1. **Simple**: `loadProvider(kind, name, config)` — resolveProviderPath → import → `mod.create(config, name)`. Used by web, credentials, sandbox, eventbus, workspace.
   2. **Manual import with options**: resolve path, import, call `mod.create(config, name, { ...deps })`. Used by providers that need injected dependencies:
      - **memory** gets `{ llm, database, eventbus }`
-     - **scanner** gets `{ llm }` (via `loadScanner()`)
-     - **skills** gets `{ screener, storage }`
+     - **skills** gets `{ storage }`
      - **storage** gets `{ database }`
      - **audit** gets `{ database }`
   3. **Custom**: `loadScheduler(config, database, eventbus)` — scheduler has its own `create(config, { database, eventbus })` shape.
 - **mcp** gets `{ database, credentials }` (via manual import, not loadProvider)
-- **Loading order matters**: credentials → database → LLM → screener → skills → eventbus → memory → storage → audit → workspace → mcp → scanner → everything else
+- **Loading order matters**: credentials → database → LLM → skills → eventbus → memory → storage → audit → workspace → mcp → everything else
 - Channels load as an array (`config.providers.channels` is `string[]`)
-- **Image provider**: Loaded only when `config.models.image` is configured
 - **Tracing wrapper**: LLM provider wrapped with `TracedLLMProvider` when `OTEL_EXPORTER_OTLP_ENDPOINT` is set
 - **Plugin host integration**: Optional `opts.pluginHost` calls `pluginHost.startAll()` before loading (registers plugin providers)
 
@@ -74,27 +69,14 @@ AX uses a **provider contract pattern**: every subsystem is a TypeScript interfa
 - **`src/provider-sdk/index.ts`** -- Main entry re-exporting all interfaces, test harness, and utilities
 - **`src/provider-sdk/interfaces/index.ts`** -- Re-exports all provider type interfaces from canonical `src/providers/*/types.ts`
 - **`src/provider-sdk/testing/harness.ts`** -- `ProviderTestHarness` for validating provider implementations against the contract
-- **`src/provider-sdk/testing/fixtures/`** -- Ready-made test fixtures (memory, scanner)
+- **`src/provider-sdk/testing/fixtures/`** -- Ready-made test fixtures (memory)
 - **`src/provider-sdk/utils/safe-path.ts`** -- Re-exported `safePath()` for plugin authors
-
-## Image Provider Category
-
-New provider category for image generation:
-
-| Implementation | File | Description |
-|---|---|---|
-| openai | `src/providers/image/openai-images.ts` | DALL-E via OpenAI API |
-| openrouter | `src/providers/image/openrouter.ts` | Image gen via OpenRouter |
-| groq | `src/providers/image/openai-images.ts` | Groq image gen (OpenAI-compatible) |
-| gemini | `src/providers/image/gemini.ts` | Google Gemini image gen |
-| router | `src/providers/image/router.ts` | Multi-provider routing based on `models.image` config |
-| mock | `src/providers/image/mock.ts` | Test fixture |
 
 ## Shared Provider Types
 
 - **`src/providers/shared-types.ts`**: Re-export hub for types used across multiple provider categories. Prevents cross-provider directory imports.
-- **`src/providers/router-utils.ts`**: `parseCompoundId()` utility shared by LLM and image routers.
-- **Typed unions**: `provider-map.ts` exports typed name unions for each category: `LLMProviderName`, `ImageProviderName`, `MemoryProviderName`, `ScannerProviderName`, `ChannelProviderName`, `WebProviderName`, `BrowserProviderName`, `CredentialProviderName`, `SkillsProviderName`, `DatabaseProviderName`, `AuditProviderName`, `SandboxProviderName`, `SchedulerProviderName`, `ScreenerProviderName`, `StorageProviderName`, `EventBusProviderName`, `WorkspaceProviderName`, `McpProviderName`. Used in `Config.providers` for type-safe config.
+- **`src/providers/router-utils.ts`**: `parseCompoundId()` utility shared by LLM router.
+- **Typed unions**: `provider-map.ts` exports typed name unions for each category: `LLMProviderName`, `MemoryProviderName`, `ChannelProviderName`, `WebProviderName`, `CredentialProviderName`, `SkillsProviderName`, `DatabaseProviderName`, `AuditProviderName`, `SandboxProviderName`, `SchedulerProviderName`, `StorageProviderName`, `EventBusProviderName`, `WorkspaceProviderName`, `McpProviderName`, `AuthProviderName`. Used in `Config.providers` for type-safe config.
 
 ## Common Tasks
 
@@ -124,9 +106,7 @@ New provider category for image generation:
 - **`channels` is an array.** `config.providers.channels` is `string[]`, returning `ChannelProvider[]`.
 - **`create()` validated at runtime.** `loadProvider()` throws if the export is missing.
 - **Use `safePath()`** for any file-based provider constructing paths from input.
-- **Image provider is optional.** Only loaded when `config.models.image` is configured.
 - **Tracing is opt-in.** LLM provider only wrapped when `OTEL_EXPORTER_OTLP_ENDPOINT` is set.
 - **Plugin providers need integrity verification.** Must pass SHA-512 hash check before registration.
 - **Don't import across provider categories.** Use `shared-types.ts` or `router-utils.ts` instead.
-- **Providers with deps use manual import.** Memory, scanner, skills, storage, audit all receive injected dependencies via the third `options` arg to `create()`. Simple providers (web, browser, etc.) go through `loadProvider()`.
-- **Scanner depends on LLM.** The guardian scanner uses the LLM for classification. It's loaded after LLM in `loadProviders()`. Other scanner implementations (patterns) ignore the extra args.
+- **Providers with deps use manual import.** Memory, skills, storage, audit all receive injected dependencies via the third `options` arg to `create()`. Simple providers (web, credentials, etc.) go through `loadProvider()`.

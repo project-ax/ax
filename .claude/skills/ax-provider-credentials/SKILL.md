@@ -1,6 +1,6 @@
 ---
 name: ax-provider-credentials
-description: Use when modifying credential storage providers — plaintext env vars, OS keychain, or database-backed in src/providers/credentials/
+description: Use when modifying credential storage — database-backed credential provider in src/providers/credentials/
 ---
 
 ## Overview
@@ -34,32 +34,25 @@ Credentials are scoped per agent and per user. Skills are per-agent or per-user,
 - `credentialScope(agentName, userId?)` — builds the scope key string
 - `resolveCredential(provider, envName, agentName, userId?)` — tries user scope first, falls back to agent scope
 
-## Implementations
+## Implementation
 
 | Name | File | Storage Mechanism | Security Level |
 |------|------|-------------------|----------------|
-| plaintext | `src/providers/credentials/plaintext.ts` | `~/.ax/credentials.yaml` with `process.env` fallback | Low -- plaintext on disk |
-| keychain | `src/providers/credentials/keychain.ts` | OS native keychain via `keytar` (macOS Keychain, GNOME Keyring, Windows Credential Locker) | High -- OS-managed |
 | database | `src/providers/credentials/database.ts` | Shared DatabaseProvider (SQLite or PostgreSQL) with `process.env` fallback | Medium -- durable across restarts, k8s-ready |
 
-All providers export `create(config: Config): Promise<CredentialProvider>`. Registered in `src/host/provider-map.ts` static allowlist (SC-SEC-002).
+The provider exports `create(config: Config): Promise<CredentialProvider>`. Registered in `src/host/provider-map.ts` static allowlist (SC-SEC-002).
 
 The `database` provider also accepts `CreateOptions` with a `database` field (like `audit/database`). Its migration is in `src/providers/credentials/migrations.ts` and uses migration table `credential_migration`.
 
-**Scoped storage implementation details:**
-- **database**: Uses the existing `scope` column in `credential_store` table. `UNIQUE(scope, env_name)` index handles isolation. No migration needed.
-- **plaintext**: Stores scoped keys as `scope::env_name` in the YAML file (e.g., `agent:main::LINEAR_API_KEY`). `list()` filters by prefix.
-- **keychain**: Uses `scope::service` as the keytar account name. `list()` filters by prefix on `findCredentials()` results.
-- All providers: `process.env` fallback only applies for unscoped (global) calls.
+**Scoped storage:** Uses the `scope` column in `credential_store` table. `UNIQUE(scope, env_name)` index handles isolation. `process.env` fallback only applies for unscoped (global) calls.
 
 ## Common Tasks
 
-**Adding a new credential provider:**
-1. Create `src/providers/credentials/<name>.ts` exporting `create(config: Config): Promise<CredentialProvider>`
-2. Implement all 4 methods: `get`, `set`, `delete`, `list` — all with optional `scope` parameter
-3. Register in `src/host/provider-map.ts` static allowlist (SC-SEC-002)
-4. Add tests at `tests/providers/credentials/<name>.test.ts` including scoped isolation tests
-5. Use `safePath()` for any file path construction from input
+**Modifying the credential provider:**
+1. Edit `src/providers/credentials/database.ts` — implements all 4 methods: `get`, `set`, `delete`, `list` — all with optional `scope` parameter
+2. The provider is registered in `src/host/provider-map.ts` static allowlist (SC-SEC-002)
+3. Tests are at `tests/providers/credentials/database.test.ts` including scoped isolation tests
+4. Use `safePath()` for any file path construction from input
 
 ## MITM Credential Injection Flow
 
@@ -114,12 +107,10 @@ When the agent calls `skill({ type: "request_credential", envName })`, the `cred
 - **Credentials never enter agent containers:** The host holds credentials and injects them into outbound API requests via the MITM proxy. Agents receive opaque `ax-cred:<hex>` placeholder tokens as env vars, not real credentials.
 - **Credential scopes prevent multi-user clobbering:** Two users providing different values for the same `envName` are stored at different scopes (`user:main:alice` vs `user:main:bob`). The `credential_store.scope` column and `UNIQUE(scope, env_name)` index enforce isolation.
 - **User scope overrides agent scope for sandbox injection:** `resolveCredential()` checks user scope first. Alice's personal API key always overrides the shared org key in her sandbox.
-- **Plaintext provider uses `scope::env_name` YAML keys:** Scoped credentials are stored as namespaced keys (e.g., `agent:main::LINEAR_API_KEY`). `list()` filters by prefix.
 - **process.env fallback only for unscoped calls:** Scoped `get()` does NOT fall back to `process.env`. Only unscoped (global) calls do.
 - **Credential map is populated by reference:** The `CredentialPlaceholderMap` is created before the web proxy starts and populated later (after workspace paths are set). Since it's passed by reference, the proxy sees updates.
 - **Non-blocking credential prompts:** Missing credentials emit a `credential.required` event and return early. No blocking, no idle sandboxes, no cross-replica coordination needed.
 - **credential_request returns availability:** The IPC handler returns `{ ok: true, available: boolean }` so the agent can inform the user when a credential is still needed.
-- **Database provider needs DB loaded first:** When `credentials === 'database'`, the registry conditionally loads the database provider BEFORE credentials (reversed from the normal order). See `src/host/registry.ts`. For plaintext/keychain, the original order is preserved.
-- **Helm chart default is 'database':** The k8s Helm chart (`charts/ax/values.yaml`) defaults to `credentials: database` so user-provided skill credentials survive pod restarts via PostgreSQL.
+- **Database provider needs DB loaded first:** The registry conditionally loads the database provider BEFORE credentials (reversed from the normal order). See `src/host/registry.ts`.
 - **HTTP endpoint uses session context:** The `/v1/credentials/provide` endpoint accepts `{sessionId, envName, value}`. The host looks up `agentName`/`userId` from an in-memory session context map (populated during completions). If no session context is found (e.g., no prior `credential.required` event), the credential is stored at global scope for backward compat.
 - **Session context persists beyond completion:** `setSessionCredentialContext()` is called when the completion starts and is NOT cleared in the finally block — the user provides credentials after the completion returns.

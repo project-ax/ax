@@ -32,6 +32,9 @@ The agent subsystem runs inside a sandboxed process (no network, no credentials)
 | `src/agent/runners/pi-session.ts` | pi-coding-agent runner variant with proxy or IPC LLM transport | `runPiSession()` |
 | `src/agent/runners/claude-code.ts` | Claude Code runner variant with Agent SDK | `runClaudeCode()`, `buildSDKPrompt()` |
 | `src/agent/mcp-server.ts` | MCP tool registry for claude-code runner | `createIPCMcpServer()`, `MCPServerOptions` |
+| `src/agent/git-cli.ts` | Native git CLI wrapper (execFile, no shell). Supports separate gitdir via GIT_DIR/GIT_WORK_TREE env vars | `gitExec()`, `gitClone()`, `gitFetch()`, `gitResetHard()`, `gitCommit()`, `gitPush()`, `GitOpts` |
+| `src/agent/git-sidecar.ts` | K8s sidecar HTTP server for git ops. Runs in separate container, manages .git directory. HTTP endpoints: POST /pull, POST /turn-complete, GET /health | `startGitSidecar()` |
+| `src/agent/git-workspace.ts` | Agent-side git workspace wrapper for non-k8s mode. Clone, pull, commit+push lifecycle | `GitWorkspace` (clone, init, pull, commitAndPush) |
 
 ## Agent Boot Sequence
 
@@ -113,7 +116,7 @@ Uses `createAgentSession()` from `@mariozechner/pi-coding-agent`. Two LLM transp
 - **Proxy mode** (if `--proxy-socket`): Direct Anthropic SDK calls, credentials injected by proxy
 - **IPC mode**: LLM calls route through host via IPC (no credentials in container)
 
-Uses `config.ipcClient` (pre-connected `IIPCClient`) when available, otherwise creates a new `IPCClient`. Non-sandbox tools route through IPC; sandbox tools route to `local-sandbox.ts` in container mode or through IPC in subprocess mode. Passes `compactHistory()` if history exceeds 75% of context window.
+Uses `config.ipcClient` (pre-connected `IIPCClient`) when available, otherwise creates a new `IPCClient`. Non-sandbox tools route through IPC; sandbox tools route to `local-sandbox.ts` in container mode or through IPC in subprocess mode. Passes `compactHistory()` if history exceeds 75% of context window. Integrates with git workspace: clones at startup, commits at turn end. Uses `GitWorkspace` in non-k8s mode, HTTP sidecar in k8s mode.
 
 ### claude-code (`claude-code.ts`)
 
@@ -123,7 +126,32 @@ Uses `query()` from `@anthropic-ai/claude-agent-sdk`. Creates:
 3. Agent SDK query with system prompt and MCP server
 4. Streams output to stdout
 
-Uses `config.ipcClient` (pre-connected `IIPCClient`) when available. Supports inline image blocks via `buildSDKPrompt()` which returns either a plain string or an `AsyncIterable<SDKUserMessage>` with structured content blocks.
+Uses `config.ipcClient` (pre-connected `IIPCClient`) when available. Supports inline image blocks via `buildSDKPrompt()` which returns either a plain string or an `AsyncIterable<SDKUserMessage>` with structured content blocks. Integrates with git workspace: clones at startup, commits at turn end. Uses `GitWorkspace` in non-k8s mode, HTTP sidecar in k8s mode.
+
+## Git Workspace Integration
+
+Both runners support git-backed workspace persistence when `WORKSPACE_REPO_URL` is set:
+
+### Non-K8s Mode (Direct Agent Control)
+When `WORKSPACE_REPO_URL` is set and NOT in k8s:
+1. `GitWorkspace` (`git-workspace.ts`) clones the repo at startup
+2. `gitWorkspace.init()` configures git user
+3. `gitWorkspace.pull()` fetches latest (handles merge conflicts gracefully)
+4. At turn end, `gitWorkspace.commitAndPush()` stages all changes and pushes
+
+### K8s Mode (Git Sidecar)
+When `WORKSPACE_REPO_URL` is set AND in k8s (`AX_HOST_URL` set):
+1. `git-sidecar.ts` runs as a separate container (UID 1001) with exclusive `.git` access
+2. Agent container (UID 1000) sees `/workspace` but NOT `.git`
+3. Runner POSTs `http://localhost:9099/pull` at turn start → sidecar fetches + resets
+4. Runner POSTs `http://localhost:9099/turn-complete` at turn end → sidecar commits + pushes
+5. Prevents agent from modifying git history or breaking repo integrity
+
+**Key env vars:**
+- `WORKSPACE_REPO_URL` — Git clone URL (triggers workspace integration)
+- `AX_GIT_SIDECAR_PORT` — Sidecar HTTP port (default: 9099)
+
+**Security:** `git-cli.ts` uses `execFile()` (no shell) to prevent command injection. All git commands go through this wrapper.
 
 ## Common Tasks
 
@@ -174,5 +202,8 @@ Uses `config.ipcClient` (pre-connected `IIPCClient`) when available. Supports in
 - **Network domain auto-approval**: `local-sandbox.ts` exports `extractNetworkDomains()` which maps known package manager commands (npm, pip, yarn, cargo, go, gem) to their registry domains. The `bash()` method pre-approves these via `web_proxy_approve` IPC before executing the command, preventing the proxy governance deadlock.
 - **Warm pool env var propagation**: Per-request env vars (like `AX_WEB_PROXY_URL`) must be in BOTH the k8s pod spec (cold spawn) AND the NATS work payload (warm pool). The runner's `parseStdinPayload()` extracts `webProxyUrl` and `applyPayload()` sets `process.env.AX_WEB_PROXY_URL`.
 - **NATS IPC requires `setContext()` after work payload**: In NATS mode, the IPC client is connected before the work payload arrives. `applyPayload()` calls `ipcClient.setContext()` to set session/request/token fields needed for NATS subject scoping (`ipc.request.{requestId}.{token}`).
-- **K8s workspace provision via HTTP**: In k8s mode (`AX_HOST_URL` set, workspace provider is `gcs`), `provisionWorkspaceFromPayload()` provisions all scopes via HTTP from the host's `GET /internal/workspace/provision` endpoint — the host has GCS credentials, the pod doesn't. This doesn't require GCS prefix fields in the payload; the host resolves paths from its own config. The legacy direct-GCS path (non-k8s) remains as fallback.
+- **Workspace providers are git-based**: `git-local` (file:// repos at `~/.ax/repos/`) for local mode, `git-http` (HTTP repos via ax-git k8s Service) for k8s mode. Old GCS/local/none workspace providers have been removed.
 - **Sandbox tools routing depends on sandbox type**: Container sandboxes (docker, apple, k8s) use `local-sandbox.ts` (agent-local execution with `sandbox_approve`/`sandbox_result` IPC). Subprocess sandbox routes through IPC to host-side handlers. The `localSandbox` option in `IPCToolsOptions`/`MCPServerOptions` controls this.
+- **Git workspace is optional**: Only activated when `WORKSPACE_REPO_URL` env var is set. Without it, workspace behavior is unchanged.
+- **K8s sidecar pattern**: In k8s, the agent cannot see `.git/` — git operations go through the sidecar HTTP API. The sidecar handles force-push fallback for concurrent sessions.
+- **Cache-stable time**: Runtime module rounds current time to nearest 5-minute boundary for improved prompt cache hit rates.

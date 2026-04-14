@@ -84,7 +84,7 @@ This interface enables transport-agnostic IPC usage in runners and tools (e.g. `
 | Registry    | `agent_registry_get`   | `agentId`                                                 | `agent`                       |
 | Scheduler   | `scheduler_add_cron`   | `schedule`, `prompt`, `maxTokenBudget?`, `delivery?`      | `jobId`                       |
 | Scheduler   | `scheduler_run_at`     | `datetime`, `prompt`, `maxTokenBudget?`, `delivery?`      | `jobId`                       |
-| Scheduler   | `scheduler_remove_cron`| `jobId`                                                   | `removed`                     |
+| Scheduler   | `scheduler_remove_cron`| `id`                                                      | `removed`                     |
 | Scheduler   | `scheduler_list_jobs`  | (none)                                                    | `jobs`                        |
 | Skills      | `skill_install`        | `skill`, `phase` (inspect/execute), `stepIndex?`, `inspectToken?` | (install result)       |
 | Skills      | `skill_install_status` | `skill`                                                   | (install status)              |

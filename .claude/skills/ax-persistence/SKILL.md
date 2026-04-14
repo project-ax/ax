@@ -21,12 +21,12 @@ DatabaseProvider (SQLite or PostgreSQL)
   └── McpServerStore — `mcp_servers` table for database-backed MCP provider
   └── Cortex MemoryProvider — knowledge items, embeddings, summaries
   └── AuditProvider — audit trail
-  └── AgentRegistryDb — agent registry (PostgreSQL only)
+  └── AgentRegistryDb — agent registry (PostgreSQL and SQLite)
 
 WorkspaceProvider (src/providers/workspace/)
-  └── Manages persistent file workspaces with three scopes (agent, user, session)
-  └── Backends: none (no-op), local (filesystem), gcs (Google Cloud Storage)
-  └── Mount/commit lifecycle with change detection and scan-before-persist
+  └── Returns git clone URLs for agent workspaces
+  └── Backends: git-http (HTTP repos via k8s Service), git-local (bare repos at ~/.ax/repos/)
+  └── Git operations handled host-side (local) or via git-sidecar (k8s)
 ```
 
 Standalone stores (outside StorageProvider):
@@ -51,11 +51,10 @@ Standalone stores (outside StorageProvider):
 | `src/file-store.ts` | File metadata store |
 | `src/job-store.ts` | Scheduler job persistence |
 | `src/providers/storage/tool-stubs.ts` | Tool stub cache (schema hash invalidation) |
-| `src/providers/workspace/types.ts` | WorkspaceProvider interface (scopes, mounts, commits) |
-| `src/providers/workspace/none.ts` | No-op workspace stub (default) |
-| `src/providers/workspace/local.ts` | Local filesystem workspace backend |
-| `src/providers/workspace/gcs.ts` | Google Cloud Storage workspace backend |
-| `src/providers/workspace/shared.ts` | Shared workspace utilities (change detection, ignore patterns) |
+| `src/providers/workspace/types.ts` | WorkspaceProvider interface (getRepoUrl, close) |
+| `src/providers/workspace/git-http.ts` | HTTP-based workspace for k8s (creates repos via ax-git Service) |
+| `src/providers/workspace/git-local.ts` | Local bare git repos at ~/.ax/repos/ |
+| `src/migrations/jobs.ts` | Job schema migrations (three-part: initial, dedup, workspace) |
 
 ## StorageProvider Sub-Stores
 
@@ -99,21 +98,21 @@ Standalone stores (outside StorageProvider):
 - **Purpose**: Maps fileId to metadata for file downloads
 
 ### JobStore (`src/job-store.ts`)
-- **DB**: `~/.ax/data/job-store.db` (standalone SQLite)
-- **Purpose**: Persists scheduled jobs for the `plainjob` scheduler provider
+- **Class**: `KyselyJobStore` — uses shared DatabaseProvider (SQLite or PostgreSQL)
+- **Migration table**: `'scheduler_migration'`
+- **Migrations** (`src/migrations/jobs.ts`): `jobs_001_initial` (core), `jobs_002_last_fired_at` (dedup), `jobs_003_creator_session_id` (workspace)
+- **Key method**: `tryClaim(jobId, minuteKey)` — atomic CAS for multi-replica dedup
+- **Fallback**: standalone SQLite at `~/.ax/data/scheduler.db` if no shared DatabaseProvider
 
 ## Workspace Provider
 
-The `WorkspaceProvider` (`src/providers/workspace/`) manages persistent file workspaces for agent sessions. Unlike StorageProvider which stores structured key-value data, workspace provides scoped file-system semantics:
+The `WorkspaceProvider` (`src/providers/workspace/`) provides git clone URLs for agent workspaces. Minimal interface: `getRepoUrl(agentId): Promise<string>` and `close(): Promise<void>`.
 
-- **Scopes**: `agent` (shared across all sessions for an agent), `user` (per-user), `session` (ephemeral per session)
-- **Lifecycle**: `mount()` activates scopes and populates sandbox directories → agent works in sandbox → `commit()` diffs, scans, and persists changes → `cleanup()` tears down session scope
 - **Backends**:
-  - `none` — No-op stub (default). All operations succeed without persisting.
-  - `local` — Local filesystem backend. Stores workspace files under a configurable base path.
-  - `gcs` — Google Cloud Storage backend. Stores workspace files in GCS buckets.
-- **Shared utilities** (`shared.ts`): Change detection (file diffing), ignore-pattern matching, and commit-size enforcement shared across backends.
-- **Not database-backed**: Unlike most other persistence providers, workspace uses the filesystem or object storage directly rather than the shared DatabaseProvider.
+  - `git-http` — Creates repos via HTTP POST to `ax-git.{namespace}.svc.cluster.local:8000/repos`. Clone URLs are HTTP-based. Used in k8s deployments.
+  - `git-local` — Creates bare repos via `git init --bare` at `~/.ax/repos/{encodedAgentId}`. Clone URLs use `file://` protocol. Used in local mode.
+- **Agent ID encoding**: `encodeURIComponent(agentId)` for lossless encoding (prevents aliasing, e.g., `user:alice` vs `user-alice`)
+- **Git operations**: For `git-local` (file:// URLs), host handles git clone/pull/commit. For `git-http`, agents clone directly. Git sidecar handles k8s mode.
 
 ## Common Tasks
 
@@ -126,8 +125,9 @@ The `WorkspaceProvider` (`src/providers/workspace/`) manages persistent file wor
 
 ## Gotchas
 
-- **No standalone conversation/message/session stores**: These were consolidated into StorageProvider. The old `src/conversation-store.ts`, `src/db.ts`, `src/session-store.ts` no longer exist.
 - **Always use shared DatabaseProvider**: Don't create standalone DB connections for new sub-stores. Inject via `CreateOptions`.
+- **Job store uses shared DB**: `KyselyJobStore` uses the shared DatabaseProvider by default. Standalone SQLite fallback exists but is not recommended for production.
+- **Workspace is git-based**: Old scoped workspace model (agent/user/session scopes, mount/commit lifecycle) has been replaced by simple git clone URLs. No GCS or filesystem workspace backends remain.
 - **Per-subsystem migration tables**: Always pass a unique `migrationTableName` to `runMigrations()`.
 - **SQLite autoincrement IDs**: After delete+insert, IDs don't respect logical ordering. Don't rely on ID order.
 - **Content serialization**: `serializeContent()` strips `image_data` blocks. `deserializeContent()` detects JSON arrays by checking `[` prefix.

@@ -19,6 +19,9 @@ AX supports multiple agent runners that execute inside the sandbox. Each runner 
 | `src/agent/web-proxy-bridge.ts` | TCP-to-Unix-socket bridge for HTTP forward proxy (HTTP + CONNECT) | `startWebProxyBridge()`, `WebProxyBridge` |
 | `src/agent/http-ipc-client.ts` | HTTP-based IPC client for k8s (drop-in IPCClient replacement) | `HttpIPCClient` |
 | `src/agent/skill-installer.ts` | Skill dependency installer — reads SKILL.md install specs, runs missing installs | `installSkillDeps()` |
+| `src/agent/git-cli.ts` | Native git CLI wrapper (no shell, execFile) | `gitExec()`, `gitClone()`, `gitCommit()`, `gitPush()`, `GitOpts` |
+| `src/agent/git-sidecar.ts` | K8s git sidecar HTTP server (POST /pull, /turn-complete) | `startGitSidecar()` |
+| `src/agent/git-workspace.ts` | Agent-side git workspace (clone, pull, commit+push) | `GitWorkspace` |
 | `src/agent/local-sandbox.ts` | Agent-side sandbox execution with host audit gate | `createLocalSandbox()` |
 | `src/agent/stream-utils.ts` | Message conversion, stream events, helpers | `convertPiMessages()`, `emitStreamEvents()`, `createSocketFetch()`, `createLazyAnthropicClient()` |
 | `src/agent/ipc-transport.ts` | IPC-based LLM streaming adapter with image block injection | `createIPCStreamFn()` |
@@ -74,6 +77,7 @@ Note: `pi-agent-core` was removed as a user-facing agent type.
 **Key flow:**
 1. Use pre-connected `IIPCClient` from `config.ipcClient` (or create new `IPCClient`)
 2. Start web proxy bridge if `AX_WEB_PROXY_SOCKET` / `AX_WEB_PROXY_URL` / `AX_WEB_PROXY_PORT` env var set; set `HTTP_PROXY`/`HTTPS_PROXY` for child processes
+2b. If `WORKSPACE_REPO_URL` set: clone workspace via `GitWorkspace` (non-k8s) or signal git sidecar via HTTP POST `/pull` (k8s)
 3. Create LLM stream function (proxy preferred, IPC fallback)
 4. Load identity files, build system prompt via `buildSystemPrompt()` (returns prompt + `ToolFilterContext`)
 5. Create IPC tools (filtered by `ToolFilterContext` -- memory, web, audit, skills, scheduler, identity/user write, delegation, image_generate)
@@ -81,6 +85,7 @@ Note: `pi-agent-core` was removed as a user-facing agent type.
 7. Create `AgentSession` with tools, history, custom system prompt
 8. Call `session.sendMessage(userMessage)` and stream text to stdout
 9. Subscribe to events: text_delta -> stdout, tool calls -> logged
+10. At turn end: commit and push workspace changes via `gitWorkspace.commitAndPush()` or POST `/turn-complete` to sidecar
 
 **Timeout passthrough**: `LLM_CALL_TIMEOUT_MS` (configurable via `AX_LLM_TIMEOUT_MS`, defaults to 10 min) passed to IPC calls.
 
@@ -93,6 +98,7 @@ Note: `pi-agent-core` was removed as a user-facing agent type.
 **Key flow:**
 1. Start bridge: TCP bridge (`startTCPBridge(proxySocket)`) for credential-injecting proxy
 1b. Start web proxy bridge if `AX_WEB_PROXY_SOCKET` / `AX_WEB_PROXY_URL` / `AX_WEB_PROXY_PORT` env var set
+1c. If `WORKSPACE_REPO_URL` set: clone workspace via `GitWorkspace` (non-k8s) or POST `/pull` to git sidecar (k8s)
 2. Use pre-connected `IIPCClient` from `config.ipcClient` (or create new `IPCClient`)
 3. Create IPC MCP server (`createIPCMcpServer(client)`) exposing tools via MCP protocol
 4. Build system prompt via `buildSystemPrompt()` (returns prompt + `ToolFilterContext`)
@@ -104,6 +110,7 @@ Note: `pi-agent-core` was removed as a user-facing agent type.
    - `mcpServers`: the IPC MCP server
    - `env`: includes `HTTP_PROXY`/`HTTPS_PROXY` if web proxy bridge is running
 6. Stream text blocks to stdout
+7. At turn end: commit and push workspace changes via git
 
 **Image support via `buildSDKPrompt()`**: When the user message contains `image_data` content blocks, `buildSDKPrompt()` returns an `AsyncIterable<SDKUserMessage>` with structured content blocks (text + base64 images) instead of a plain string.
 
@@ -158,4 +165,6 @@ This avoids the round-trip of sending file contents/command output over IPC for 
 - **Concurrent IPC fix**: Misrouted responses on shared Unix sockets have been fixed. Each `call()` is now correctly matched to its response.
 - **Web proxy bridge cleanup**: Both runners stop the web proxy bridge in their cleanup path (after agent loop completes). Failure to start the bridge is non-fatal (logged as warning, agent continues without outbound HTTP).
 - **Web proxy env var priority**: `AX_WEB_PROXY_SOCKET` (container, Unix socket bridge) > `AX_WEB_PROXY_URL` (k8s, direct URL) > `AX_WEB_PROXY_PORT` (subprocess, TCP). Only one is used.
-- **K8s workspace release**: Workspace release is now handled by host IPC handlers, not agent-side code. The old `workspace-release.ts` has been deleted. `SessionPodManager` with HTTP work dispatch replaced NATS-based work dispatch in k8s.
+- **Git workspace integration**: Both runners check `WORKSPACE_REPO_URL` env var. Non-k8s uses `GitWorkspace` directly; k8s signals `git-sidecar.ts` via HTTP (default port 9099, configurable via `AX_GIT_SIDECAR_PORT`).
+- **Git sidecar pattern**: In k8s, agent (UID 1000) cannot access `.git/`. Sidecar (UID 1001) owns `.git/` and exposes HTTP API. Prevents agent from tampering with git history.
+- **K8s workspace is git-based**: Workspace release via old GCS/staging path has been replaced by git sidecar commit+push. The old `workspace-release.ts` has been deleted.
