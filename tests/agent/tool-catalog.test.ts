@@ -109,7 +109,7 @@ describe('tool-catalog', () => {
 
   test('scheduler tool has correct param keys (union of all members)', () => {
     const keys = getToolParamKeys('scheduler');
-    expect(keys.sort()).toEqual(['datetime', 'jobId', 'maxTokenBudget', 'prompt', 'schedule']);
+    expect(keys.sort()).toEqual(['datetime', 'id', 'maxTokenBudget', 'prompt', 'schedule']);
   });
 
   // Regression: weaker models (Gemini, Kimi) send free-text for enum fields,
