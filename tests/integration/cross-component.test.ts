@@ -414,9 +414,15 @@ describe('Tool Catalog → IPC Handler Completeness', () => {
       'session_expiring',
     ]);
 
+    // Session manager actions (only registered when sessionManager is provided)
+    const sessionManagerActions = new Set([
+      'fetch_work',
+    ]);
+
     for (const action of VALID_ACTIONS) {
       if (orchestrationActions.has(action)) continue;
       if (hostPushActions.has(action)) continue;
+      if (sessionManagerActions.has(action)) continue;
       const result = JSON.parse(await handleIPC(JSON.stringify({
         action,
         // Send minimal fields — some will fail validation, that's OK

@@ -622,12 +622,13 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
     });
   }
 
-  // In k8s mode, buffer text instead of writing to stdout — response goes via IPC
-  const isK8sTransport = !!process.env.AX_HOST_URL;
-  const textBuffer: string[] | undefined = isK8sTransport ? [] : undefined;
+  // Buffer text when response goes via IPC (k8s HTTP or Apple Container bridge).
+  // For Docker/subprocess, stream to stdout — the host reads from stdout.
+  const useIPCResponse = !!process.env.AX_HOST_URL || process.env.AX_IPC_LISTEN === '1';
+  const textBuffer: string[] = [];
 
-  // Subscribe to events — stream text to stdout (or buffer for HTTP IPC), log tools/errors to stderr
-  const eventState = subscribeAgentEvents(session, config, { buffer: textBuffer });
+  // Subscribe to events — buffer text (IPC mode) or stream to stdout (Docker/subprocess)
+  const eventState = subscribeAgentEvents(session, config, useIPCResponse ? { buffer: textBuffer } : undefined);
 
   // Send message and wait — log tools that are actually on the agent
   const agentTools = (session.agent.state as any).tools ?? [];
@@ -690,13 +691,13 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
     }
   }
 
-  // In k8s mode, send agent_response via IPC
-  if (isK8sTransport) {
-
+  // Send response back to host via agent_response IPC action (k8s/bridge only).
+  // Docker/subprocess response goes via stdout — no IPC needed.
+  if (useIPCResponse) {
     const buffered = eventState.getBuffered();
-    logger.debug('k8s_agent_response', { contentLength: buffered.length });
+    logger.debug('agent_response', { contentLength: buffered.length });
     try {
-      await client.call({ action: 'agent_response', content: buffered });
+      await client.call({ action: 'agent_response', content: buffered }, 5000);
     } catch (err) {
       logger.error('agent_response_failed', { error: (err as Error).message });
       process.stderr.write(`Failed to send agent_response: ${(err as Error).message}\n`);

@@ -90,15 +90,8 @@ export interface CompletionDeps {
    *  Called after work is published so the timer doesn't include pre-processing time
    *  (scanner LLM calls, workspace provisioning, etc.). */
   startAgentResponseTimer?: () => void;
-  /** Queue a work payload for a session-long pod to fetch via GET /internal/work.
-   *  Called in k8s HTTP mode instead of writing to stdin. Keyed by sessionId. */
-  queueWork?: (sessionId: string, payload: string) => void;
-  /** Check if a session-long pod already exists for this session (k8s HTTP mode). */
-  getSessionPod?: (sessionId: string) => { podName: string; pid: number; kill: () => void } | undefined;
-  /** Register a newly spawned pod for session reuse (k8s HTTP mode). */
-  registerSessionPod?: (sessionId: string, pod: { podName: string; pid: number; kill: () => void }) => void;
-  /** Remove a session pod mapping (called when pod exits unexpectedly). */
-  removeSessionPod?: (sessionId: string) => void;
+  /** Unified session manager for cross-turn sandbox reuse (Docker and k8s). */
+  sessionManager?: import('./session-manager.js').SessionManager;
   /** Per-agent plugin MCP server registry. */
   mcpManager?: McpConnectionManager;
   /** Dynamic agent provisioner for multi-agent resolution. */
@@ -384,18 +377,38 @@ function hostGitSync(workspace: string, gitDir: string, repoUrl: string, logger:
 function hostGitCommit(workspace: string, gitDir: string, logger: Logger): void {
   const gitEnv = { GIT_DIR: gitDir, GIT_WORK_TREE: workspace };
   const gitOpts = { cwd: workspace, stdio: 'pipe' as const, env: { ...process.env, ...gitEnv } };
+  const textOpts = { cwd: workspace, encoding: 'utf-8' as const, stdio: 'pipe' as const, env: { ...process.env, ...gitEnv } };
   try {
     execFileSync('git', ['add', '.'], gitOpts);
-    const status = execFileSync('git', ['status', '--porcelain'], {
-      cwd: workspace, encoding: 'utf-8', stdio: 'pipe', env: { ...process.env, ...gitEnv },
-    });
+    const status = execFileSync('git', ['status', '--porcelain'], textOpts);
     if (status.trim()) {
+      // Detect current branch. On a fresh repo with no commits, HEAD doesn't exist yet —
+      // fall back to the symbolic-ref (set during init) or default to 'main'.
+      let branch = 'main';
+      try {
+        branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], textOpts).trim() || 'main';
+      } catch {
+        try {
+          // Fresh repo — read the default branch from symbolic-ref
+          const ref = execFileSync('git', ['symbolic-ref', 'HEAD'], textOpts).trim();
+          branch = ref.replace('refs/heads/', '') || 'main';
+        } catch { /* use default 'main' */ }
+      }
       const timestamp = new Date().toISOString();
       execFileSync('git', ['commit', '-m', `agent-turn: ${timestamp}`], gitOpts);
-      execFileSync('git', ['pull', '--rebase', 'origin', 'main'], gitOpts);
-      execFileSync('git', ['push', 'origin', 'main'], gitOpts);
-      logger.info('host_git_committed', { workspace });
+      // Pull with rebase only if the remote branch exists (first push won't have it).
+      try {
+        execFileSync('git', ['pull', '--rebase', 'origin', branch], gitOpts);
+      } catch {
+        // Remote branch doesn't exist yet — first push, skip rebase
+      }
+      execFileSync('git', ['push', 'origin', branch], gitOpts);
+      logger.info('host_git_committed', { workspace, branch });
     }
+    // Reset workspace to committed state — prevents prompt-injected files
+    // (scripts, configs, dotfiles) from persisting to the next turn.
+    execFileSync('git', ['reset', '--hard'], gitOpts);
+    execFileSync('git', ['clean', '-fd'], gitOpts);
   } catch (err) {
     logger.warn('host_git_commit_failed', { error: (err as Error).message });
   }
@@ -615,15 +628,33 @@ export async function processCompletion(
   setSessionCredentialContext(sessionId, { agentName: agentId, userId: currentUserId });
 
   try {
-    // All workspaces are ephemeral — git repo is the source of truth
-    workspace = mkdtempSync(join(tmpdir(), 'ax-ws-'));
-    // Separate gitdir keeps .git metadata outside workspace (agent can't see it)
-    gitDir = mkdtempSync(join(tmpdir(), 'ax-git-'));
+    // Reuse workspace from a previous turn if the session manager has it.
+    // The workspace directory (with cloned git repo, installed deps) persists
+    // across turns — only the container process is fresh each turn.
+    // hostGitCommit does git reset --hard + git clean -fd after each turn
+    // to prevent prompt-injected files from persisting.
+    const prevSession = deps.sessionManager?.get(sessionId);
+    if (prevSession?.workspace && prevSession?.gitDir && existsSync(prevSession.workspace)) {
+      workspace = prevSession.workspace;
+      gitDir = prevSession.gitDir;
+      reqLogger.debug('workspace_reuse', { workspace, gitDir, sessionId });
+      // Pull latest from the repo (another turn may have pushed)
+      if (existsSync(join(gitDir, 'HEAD'))) {
+        const gitEnv = { GIT_DIR: gitDir, GIT_WORK_TREE: workspace };
+        const gitOpts = { cwd: workspace, stdio: 'pipe' as const, env: { ...process.env, ...gitEnv } };
+        try { execFileSync('git', ['pull', '--rebase', 'origin', 'main'], gitOpts); } catch { /* first push or no remote */ }
+        hostManagedGit = true;
+      }
+    } else {
+      workspace = mkdtempSync(join(tmpdir(), 'ax-ws-'));
+      // Separate gitdir keeps .git metadata outside workspace (agent can't see it)
+      gitDir = mkdtempSync(join(tmpdir(), 'ax-git-'));
+    }
 
     // Git repo is the persistence layer — always sync for persistent sessions.
     // For file:// workspace URLs (git-local provider), clone/pull on the host side.
     // Container sandboxes can't access host file paths, so the host manages git.
-    if (providers.workspace) {
+    if (!hostManagedGit && providers.workspace) {
       const repoUrl = await providers.workspace.getRepoUrl(agentId);
       if (repoUrl.startsWith('file://')) {
         try {
@@ -633,7 +664,7 @@ export async function processCompletion(
           reqLogger.warn('host_git_sync_failed', { error: (err as Error).message });
         }
       }
-    } else if (persistentSessionId) {
+    } else if (!hostManagedGit && persistentSessionId) {
       // No workspace provider — init a bare repo at ~/.ax/data/repos/{agentId}
       const repoPath = join(dataDir(), 'repos', agentId);
       const repoUrl = `file://${repoPath}`;
@@ -1014,8 +1045,10 @@ export async function processCompletion(
           const realValue = await providers.credentials.get(envName, scope);
           if (realValue) {
             if (config.web_proxy) {
+              // Container sandboxes: web_proxy is always true — use placeholder
               credentialMap.register(envName, realValue);
             } else {
+              // Subprocess sandbox: no proxy — inject real values directly
               credentialEnv[envName] = realValue;
             }
             reqLogger.info('credential_injected', { envName, scope: scope ?? 'global' });
@@ -1159,8 +1192,7 @@ export async function processCompletion(
       // so include them in the payload for the agent to set via process.env.
       credentialEnv: {
         ...credentialMap.toEnvMap(),
-        // When web_proxy is off, real credential values must be delivered via payload
-        // since per-turn extraEnv is only applied on spawn (not reused session pods).
+        // Subprocess sandbox (no proxy): deliver real values via payload
         ...(!config.web_proxy ? credentialEnv : {}),
       },
       // MITM CA cert — sandbox pods need this to trust the proxy's TLS certs.
@@ -1182,10 +1214,10 @@ export async function processCompletion(
     const sandboxConfig = {
       workspace,
       ipcSocket: ipcSocketPath,
-      // Session pods live across turns — session-pod-manager owns idle lifecycle.
+      // Session-long sandboxes: session manager owns idle lifecycle.
       // watchPodExit's safety timer is a distant backstop (24h) so it never races
-      // with the session-pod-manager's idle timer or premature watch disconnects.
-      timeoutSec: deps.registerSessionPod
+      // with the session manager's idle timer or premature watch disconnects.
+      timeoutSec: deps.sessionManager
         ? 86400
         : config.sandbox.timeout_sec,
       memoryMB: config.sandbox.memory_mb,
@@ -1212,60 +1244,67 @@ export async function processCompletion(
       stderr = '';
       const attemptStartTime = Date.now();
 
-      // K8s session-long pods: reuse existing pod if available
-      const existingPod = deps.getSessionPod?.(sessionId);
+      // Session-long sandboxes: reuse existing sandbox if available (k8s only).
+      // Apple Container / Docker: fresh container each turn, workspace reuse via git.
+      const existingSession = deps.sessionManager?.get(sessionId);
       let proc: Awaited<ReturnType<typeof agentSandbox.spawn>>;
 
-      if (existingPod && deps.agentResponsePromise) {
-        // Reuse session pod — skip spawn, just queue work
-        reqLogger.debug('session_pod_reuse', { podName: existingPod.podName, sessionId });
-        // Create a minimal proc wrapper for the existing pod
+      if (existingSession && deps.agentResponsePromise) {
+        // K8s: reuse existing pod — skip spawn, just queue work
+        reqLogger.debug('session_reuse', { podName: existingSession.podName, sessionId });
         const { PassThrough } = await import('node:stream');
         const dummyStream = new PassThrough();
         dummyStream.end();
         proc = {
-          pid: existingPod.pid,
-          podName: existingPod.podName,
-          exitCode: new Promise<number>(() => {}), // never resolves — session pod stays alive
+          pid: existingSession.pid,
+          podName: existingSession.podName,
+          exitCode: new Promise<number>(() => {}), // never resolves — session sandbox stays alive
           stdout: dummyStream,
           stderr: new PassThrough().end() as any,
           stdin: new PassThrough().end() as any,
-          kill: existingPod.kill,
+          kill: existingSession.kill,
         };
       } else {
-        eventBus?.emit({
-          type: 'status',
-          requestId,
-          timestamp: Date.now(),
-          data: {
-            operation: 'pod',
-            phase: attempt === 0 ? 'creating' : 'retrying',
-            message: attempt === 0 ? 'Starting sandbox\u2026' : `Retrying sandbox (attempt ${attempt + 1})\u2026`,
-          },
-        });
+        // Only show "Starting sandbox…" on k8s (where pod creation is slow).
+        // Local containers (docker, apple) boot fast and spawn every turn —
+        // showing the status each time is noisy.
+        if (isK8s) {
+          eventBus?.emit({
+            type: 'status',
+            requestId,
+            timestamp: Date.now(),
+            data: {
+              operation: 'pod',
+              phase: attempt === 0 ? 'creating' : 'retrying',
+              message: attempt === 0 ? 'Starting sandbox\u2026' : `Retrying sandbox (attempt ${attempt + 1})\u2026`,
+            },
+          });
+        }
         proc = await agentSandbox.spawn(sandboxConfig);
 
-        // Register newly spawned pod for session reuse
-        if (deps.registerSessionPod && proc.podName) {
-          deps.registerSessionPod(sessionId, {
+        // Register newly spawned sandbox for session reuse
+        if (deps.sessionManager) {
+          deps.sessionManager.register(sessionId, {
             podName: proc.podName,
             pid: proc.pid,
             kill: proc.kill,
+            workspace,
+            gitDir,
+            authToken: deps.extraSandboxEnv?.AX_IPC_TOKEN,
           });
 
-          // Safety net: clean up session mapping if pod exits unexpectedly
-          // (k8s OOM kill, node crash, watchPodExit backstop, watch disconnect)
-          // so the next turn spawns a fresh pod. Also kill the pod to prevent
-          // orphans if watchPodExit resolved without successful k8s deletion.
+          // Safety net: clean up session if sandbox exits unexpectedly
+          // (OOM kill, node crash, watch disconnect) so the next turn
+          // spawns a fresh sandbox.
           const podName = proc.podName;
           const podKill = proc.kill;
           proc.exitCode.then(() => {
-            reqLogger.info('session_pod_exit_detected', { sessionId, podName });
+            reqLogger.info('session_exit_detected', { sessionId, podName });
             podKill();
-            deps.removeSessionPod?.(sessionId);
+            deps.sessionManager?.remove(sessionId);
           }).catch(() => {
             podKill();
-            deps.removeSessionPod?.(sessionId);
+            deps.sessionManager?.remove(sessionId);
           });
         }
       }
@@ -1278,15 +1317,17 @@ export async function processCompletion(
       });
 
       // Apple containers use an IPC bridge via --publish-socket / virtio-vsock.
-      // The agent listens inside the VM and the host connects in. We must wait
-      // for the agent's "[signal] ipc_ready" on stderr before connecting — the
-      // runtime only forwards connections when the container-side listener exists.
-      let bridge: { close: () => void } | undefined;
+      // Bridge is per-turn: created, used for IPC during the turn, then
+      // cleaned up when the container exits (no explicit close needed).
+      // The workspace directory persists across turns (stored in session entry).
 
-      // Start stderr collection immediately — we need to watch for the
-      // ipc_ready signal AND collect all stderr for logging/diagnostics.
-      // Use a callback-based approach so both signal detection and collection
-      // share the same stream.
+      // Set up per-turn promise for agent_response (bridge or k8s mode).
+      let bridgeResponseResolve: ((content: string) => void) | undefined;
+      const bridgeResponsePromise = proc.bridgeSocketPath
+        ? new Promise<string>((resolve) => { bridgeResponseResolve = resolve; })
+        : undefined;
+
+      // Collect stdout and stderr for diagnostics.
       let ipcReadyResolve: (() => void) | undefined;
       const ipcReadyPromise = proc.bridgeSocketPath
         ? new Promise<void>((resolve) => { ipcReadyResolve = resolve; })
@@ -1302,10 +1343,9 @@ export async function processCompletion(
         for await (const chunk of proc.stderr) {
           const text = chunk.toString();
           stderr += text;
-          // Check for IPC ready signal from agent (Apple Container)
           if (ipcReadyResolve && text.includes('[signal] ipc_ready')) {
             ipcReadyResolve();
-            ipcReadyResolve = undefined; // only resolve once
+            ipcReadyResolve = undefined;
           }
           if (deps.verbose) {
             for (const line of text.split('\n').filter((l: string) => l.trim())) {
@@ -1318,13 +1358,11 @@ export async function processCompletion(
             }
           }
         }
-        // If agent exits before signaling, resolve to avoid hanging
         ipcReadyResolve?.();
       })();
 
       if (proc.bridgeSocketPath && deps.ipcHandler) {
         // Wait for agent's listener to be ready (with timeout).
-        // Clear the timer when the signal wins to avoid leaking the 15s handle.
         let readyTimerId: ReturnType<typeof setTimeout> | undefined;
         let signaled = false;
         const readyTimeout = new Promise<void>(r => { readyTimerId = setTimeout(r, 15_000); });
@@ -1333,17 +1371,24 @@ export async function processCompletion(
         if (readyTimerId !== undefined) clearTimeout(readyTimerId);
         reqLogger.debug('ipc_agent_ready', {
           bridgeSocketPath: proc.bridgeSocketPath,
-          signaled, // true = agent signaled, false = 15s timeout (agent may still be booting)
+          signaled,
         });
 
         try {
           const bridgeCtx = { sessionId, agentId, userId: currentUserId };
-          bridge = await connectIPCBridge(proc.bridgeSocketPath, deps.ipcHandler, bridgeCtx);
+          const bridgeHandler = async (raw: string, ctx: import('./ipc-server.js').IPCContext): Promise<string> => {
+            try {
+              const parsed = JSON.parse(raw);
+              if (parsed.action === 'agent_response') {
+                bridgeResponseResolve?.(parsed.content ?? '');
+                return JSON.stringify({ ok: true });
+              }
+            } catch { /* fall through to real handler */ }
+            return deps.ipcHandler!(raw, ctx);
+          };
+          await connectIPCBridge(proc.bridgeSocketPath, bridgeHandler, bridgeCtx);
           reqLogger.debug('ipc_bridge_connected', { bridgeSocketPath: proc.bridgeSocketPath });
         } catch (err) {
-          // Bridge connect failed — agent may have crashed or the socket isn't
-          // available. Kill the process to avoid it hanging until enforceTimeout,
-          // then let the retry loop handle the failure.
           reqLogger.error('ipc_bridge_failed', {
             error: (err as Error).message,
             bridgeSocketPath: proc.bridgeSocketPath,
@@ -1354,9 +1399,16 @@ export async function processCompletion(
         }
       }
 
-      // Deliver work payload to agent via stdin (docker/apple mode).
-      // In k8s HTTP mode, pods fetch work via GET /internal/work instead.
-      if (!deps.agentResponsePromise) {
+      // Deliver work payload to the agent.
+      if (deps.agentResponsePromise) {
+        // K8s HTTP mode: queue work for agent to fetch via GET /internal/work
+        if (deps.sessionManager) {
+          deps.sessionManager.queueWork(sessionId, stdinPayload);
+          reqLogger.debug('work_queued', { sessionId });
+        }
+        deps.startAgentResponseTimer?.();
+      } else {
+        // Stdin mode (docker, apple, subprocess): deliver via stdin
         try {
           reqLogger.debug('stdin_write', { payloadBytes: stdinPayload.length });
           proc.stdin.write(stdinPayload);
@@ -1364,24 +1416,18 @@ export async function processCompletion(
         } catch {
           // Process already killed (bridge failure) — stdin write throws EPIPE
         }
-      } else {
-        // K8s HTTP mode: queue work for pod to fetch via GET /internal/work
-        if (deps.queueWork) {
-          deps.queueWork(sessionId, stdinPayload);
-          reqLogger.debug('work_queued', { sessionId });
-        }
-        // Start the response timeout timer now
-        deps.startAgentResponseTimer?.();
       }
 
       // Wait for agent to complete.
       // K8s HTTP mode: response comes via agent_response IPC (agentResponsePromise).
+      // Apple Container bridge mode: response comes via agent_response IPC (bridgeResponsePromise).
       // Stdin mode: response comes from stdout.
+      const effectiveResponsePromise = deps.agentResponsePromise ?? bridgeResponsePromise;
       let agentResponseReceived = false;
-      if (deps.agentResponsePromise) {
-        // In k8s mode, we race the agent_response promise against pod exit.
+      if (effectiveResponsePromise) {
+        // Response comes via IPC (k8s or Apple Container bridge).
         try {
-          response = await deps.agentResponsePromise;
+          response = await effectiveResponsePromise;
           agentResponseReceived = true;
           reqLogger.debug('agent_response_received', { responseLength: response.length });
         } catch (err) {
@@ -1389,22 +1435,17 @@ export async function processCompletion(
           // Fall through to let exitCode determine retry
         }
 
-        // In k8s HTTP mode, the pod fetches work via GET /internal/work.
-        // Don't block on proc.exitCode — it would hang until the pod's idle timeout.
-        // If we got the response, treat it as success; otherwise let retry logic handle it.
-        // NOTE: Use !== undefined (not truthiness) because an empty string ('')
-        // is a valid agent response (e.g. agent only made tool calls with no text).
         if (agentResponseReceived) {
           exitCode = 0;
-          // Session-long pods stay alive for reuse — idle timeout handles cleanup.
-          // Only kill if session pod manager is not tracking this pod.
-          if (!deps.getSessionPod?.(sessionId)) {
+          // Session-long sandboxes stay alive for reuse — idle timeout handles cleanup.
+          // Only kill if session manager is not tracking this session.
+          if (!deps.sessionManager?.has(sessionId)) {
             proc.kill();
           }
         } else {
-          // Don't block indefinitely on session pods — they stay alive for reuse,
+          // Don't block indefinitely on session sandboxes — they stay alive for reuse,
           // so proc.exitCode may never resolve. Race against a short timeout.
-          if (deps.getSessionPod?.(sessionId)) {
+          if (deps.sessionManager?.has(sessionId)) {
             exitCode = 1; // Trigger retry logic
           } else {
             exitCode = await proc.exitCode;
@@ -1414,7 +1455,10 @@ export async function processCompletion(
         await Promise.all([stdoutDone, stderrDone]);
         exitCode = await proc.exitCode;
       }
-      bridge?.close();
+      // Don't close bridge explicitly — the container exits after each turn
+      // and the socket cleans up naturally. Closing early races with the
+      // {ok: true} response flush, causing the agent's agent_response IPC
+      // call to time out (harmless but noisy).
 
       reqLogger.debug('agent_exit', {
         exitCode,
@@ -1682,18 +1726,24 @@ export async function processCompletion(
     if (deps.sharedCredentialRegistry) {
       deps.sharedCredentialRegistry.deregister(sessionId);
     }
-    // Commit workspace changes to the bare repo before cleanup.
+    // Commit workspace changes to the bare repo.
+    // git reset --hard + git clean -fd happens inside hostGitCommit to prevent
+    // prompt-injected files from persisting to the next turn.
     if (hostManagedGit && workspace && gitDir) {
       hostGitCommit(workspace, gitDir, reqLogger);
     }
-    if (workspace) {
-      try { rmSync(workspace, { recursive: true, force: true }); } catch {
-        reqLogger.debug('workspace_cleanup_failed', { workspace });
+    // Only clean up workspace/gitDir if session manager is NOT tracking this session.
+    // When tracked, the workspace persists for the next turn (git clone reuse).
+    if (!deps.sessionManager?.has(sessionId)) {
+      if (workspace) {
+        try { rmSync(workspace, { recursive: true, force: true }); } catch {
+          reqLogger.debug('workspace_cleanup_failed', { workspace });
+        }
       }
-    }
-    if (gitDir) {
-      try { rmSync(gitDir, { recursive: true, force: true }); } catch {
-        reqLogger.debug('gitdir_cleanup_failed', { gitDir });
+      if (gitDir) {
+        try { rmSync(gitDir, { recursive: true, force: true }); } catch {
+          reqLogger.debug('gitdir_cleanup_failed', { gitDir });
+        }
       }
     }
   }

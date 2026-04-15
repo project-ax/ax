@@ -621,11 +621,54 @@ if (isMain) {
       config.ipcClient = client;
     }
 
-    readStdin().then((data) => {
+    // Socket mode: read first turn from stdin, then enter work loop via fetch_work IPC
+    (async () => {
+      const data = await readStdin();
       const payload = parseStdinPayload(data);
       applyPayload(config, payload);
-      return run(config);
-    }).catch((err) => {
+
+      await run(config);
+
+      // Enter work loop for subsequent turns (session-long containers)
+      if (!payload.singleTurn && config.ipcClient) {
+        const client = config.ipcClient;
+        const maxIdlePolls = parseInt(process.env.AX_MAX_IDLE_POLLS || '', 10) || 2;
+        let idlePolls = 0;
+
+        while (true) {
+          logger.info('work_loop_waiting');
+          const result = await client.call({ action: 'fetch_work' }, 5 * 60 * 1000);
+
+          if (!result.payload) {
+            idlePolls++;
+            logger.info('work_loop_no_work', { idlePolls, maxIdlePolls });
+            if (idlePolls >= maxIdlePolls) {
+              logger.info('idle_timeout_exit', { idlePolls });
+              process.exit(0);
+            }
+            await new Promise(r => setTimeout(r, 2000));
+            continue;
+          }
+          idlePolls = 0;
+
+          try {
+            const workPayload = parseStdinPayload(result.payload as string);
+            applyPayload(config, workPayload);
+            await run(config);
+
+            if (workPayload.singleTurn) {
+              logger.info('single_turn_exit');
+              process.exit(0);
+            }
+          } catch (err) {
+            logger.error('work_loop_error', { error: (err as Error).message });
+            try {
+              await client.call({ action: 'agent_response', content: `Agent error: ${(err as Error).message}`, error: true });
+            } catch { /* best effort */ }
+          }
+        }
+      }
+    })().catch((err) => {
       logger.error('main_error', { error: (err as Error).message, stack: (err as Error).stack });
       process.exitCode = 1;
       process.stderr.write(`Agent runner error: ${(err as Error).message ?? err}\n`);

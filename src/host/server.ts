@@ -1,15 +1,23 @@
 /**
- * AX Server — composition root.
+ * AX Server — unified composition root for both local and k8s deployment.
  *
  * Wires together HTTP handling (server-http.ts), completion processing
  * (server-completions.ts), channel ingestion (server-channels.ts), and
  * lifecycle management (server-lifecycle.ts).
  *
- * Exposes OpenAI-compatible API over Unix socket (and optionally TCP).
+ * Transport listeners (config-driven):
+ *   Local: Unix socket (~/.ax/ax.sock) + optional TCP port
+ *   K8s: TCP on 0.0.0.0:PORT
+ *
+ * Internal routes (/internal/ipc, /internal/work, /internal/llm-proxy)
+ * are registered in k8s mode for HTTP-based IPC from sandbox pods.
  */
 
 import { createServer as createHttpServer, type Server as HttpServer } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { existsSync, rmSync, unlinkSync } from 'node:fs';
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { axHome } from '../paths.js';
 import type { Config } from '../types.js';
 import { loadProviders } from './registry.js';
@@ -30,6 +38,21 @@ import {
 } from './server-request-handlers.js';
 import { setupWebhookHandler, setupAdminHandler } from './server-webhook-admin.js';
 import { isAgentBootstrapMode, isAdmin, claimBootstrapAdmin } from './server-admin-helpers.js';
+import { createSessionManager, type SessionManager } from './session-manager.js';
+import { sendError, readBody } from './server-http.js';
+import type { IPCContext } from './ipc-server.js';
+import { dataDir } from '../paths.js';
+import { startWebProxy, type WebProxy } from './web-proxy.js';
+import { SharedCredentialRegistry } from './credential-placeholders.js';
+
+/**
+ * Token registry: maps per-turn tokens to their bound IPC handler + context.
+ * Used by /internal/ipc, /internal/work, and /internal/llm-proxy HTTP routes (k8s mode).
+ */
+export const activeTokens = new Map<string, {
+  handleIPC: (raw: string, ctx: IPCContext) => Promise<string>;
+  ctx: IPCContext;
+}>();
 
 // =====================================================
 // Types
@@ -106,12 +129,72 @@ export async function createServer(
   const core = await initHostCore({ config, providers, eventBus, verbose: opts.verbose });
   const {
     completionDeps, conversationStore, sessionStore, router, taintBudget, fileStore, gcsFileStorage,
-    ipcServer, ipcSocketDir, orchestrator, disableAutoState,
+    handleIPC, ipcServer, ipcSocketDir, orchestrator, disableAutoState,
     agentRegistry, agentId: agentName, adminCtx, sessionCanaries,
-    modelId,
+    domainList, defaultUserId, modelId,
   } = core;
 
-  // ── Deduplication (server.ts-only) ──
+  const isK8s = config.providers.sandbox === 'k8s';
+
+  // ── Session manager (tracks session-long sandboxes across turns) ──
+  const sessionManager = createSessionManager({
+    idleTimeoutMs: (config.sandbox?.idle_timeout_sec ?? 300) * 1000,
+    cleanIdleTimeoutMs: (config.sandbox?.clean_idle_timeout_sec ?? 300) * 1000,
+    warningLeadMs: 120_000,
+    onKill: (sessionId, entry) => {
+      logger.info('session_killed', { sessionId });
+      // Clean up reusable workspace/gitDir when session is torn down
+      if (entry.workspace) {
+        try { rmSync(entry.workspace, { recursive: true, force: true }); } catch { /* ignore */ }
+      }
+      if (entry.gitDir) {
+        try { rmSync(entry.gitDir, { recursive: true, force: true }); } catch { /* ignore */ }
+      }
+    },
+  });
+
+  // ── Shared credential registry (k8s shared MITM proxy needs cross-session lookup) ──
+  const sharedCredentialRegistry = isK8s ? new SharedCredentialRegistry() : undefined;
+  if (sharedCredentialRegistry) {
+    completionDeps.sharedCredentialRegistry = sharedCredentialRegistry;
+  }
+
+  // ── Shared web proxy (k8s: TCP port for all pods; local: per-session in processCompletion) ──
+  let webProxy: WebProxy | undefined;
+  if (isK8s && config.web_proxy) {
+    const webProxyPort = parseInt(process.env.AX_PROXY_LISTEN_PORT ?? '3128', 10);
+    const { getOrCreateCA } = await import('./proxy-ca.js');
+    const caDir = join(dataDir(), 'ca');
+    const ca = await getOrCreateCA(caDir);
+
+    webProxy = await startWebProxy({
+      listen: webProxyPort,
+      bindHost: '0.0.0.0',
+      sessionId: 'host-process',
+      onAudit: (entry) => {
+        providers.audit.log({
+          action: entry.action,
+          sessionId: entry.sessionId,
+          args: { method: entry.method, url: entry.url, status: entry.status, requestBytes: entry.requestBytes, responseBytes: entry.responseBytes, blocked: entry.blocked },
+          result: entry.blocked ? 'blocked' : 'success',
+          durationMs: entry.durationMs,
+        }).catch(() => {});
+      },
+      allowedDomains: { has: (d: string) => domainList.isAllowed(d) },
+      onDenied: (domain) => domainList.addPending(domain, 'host-process'),
+      mitm: {
+        ca,
+        credentials: sharedCredentialRegistry!,
+        bypassDomains: new Set(config.mitm_bypass_domains ?? []),
+      },
+      urlRewrites: config.url_rewrites
+        ? new Map(Object.entries(config.url_rewrites))
+        : undefined,
+    });
+    logger.info('web_proxy_started', { port: webProxyPort, mitm: true });
+  }
+
+  // ── Deduplication ──
   const deduplicator = new ChannelDeduplicator({
     windowMs: opts.dedupeWindowMs,
   });
@@ -195,6 +278,162 @@ export async function createServer(
     });
   }
 
+  // ── processCompletion wrapper (k8s: per-turn tokens + session manager) ──
+
+  const agentType = config.agent ?? 'pi-coding-agent';
+  const DIRTY_ACTIONS = new Set(['sandbox_bash', 'sandbox_write_file', 'sandbox_edit_file']);
+
+  async function processCompletionForSession(
+    content: string | import('../types.js').ContentBlock[],
+    requestId: string,
+    messages: { role: string; content: string | import('../types.js').ContentBlock[] }[],
+    sessionId: string,
+    userId?: string,
+    _agentType?: string,
+    preProcessed?: { sessionId: string; messageId: string; canaryToken: string },
+    baseDeps?: CompletionDeps,
+  ): Promise<{ responseContent: string; finishReason: 'stop' | 'content_filter'; contentBlocks?: import('../types.js').ContentBlock[] }> {
+    const turnToken = randomUUID();
+
+    // Set up agent_response interceptor
+    let agentResponseResolve: ((content: string) => void) | undefined;
+    let agentResponseReject: ((err: Error) => void) | undefined;
+    let agentResponsePromise: Promise<string> | undefined;
+    let agentTimer: ReturnType<typeof setTimeout> | undefined;
+
+    if (isK8s) {
+      agentResponsePromise = new Promise<string>((resolve, reject) => {
+        agentResponseResolve = resolve;
+        agentResponseReject = reject;
+      });
+      agentResponsePromise.catch(() => {});
+    }
+
+    // Wrap handleIPC to intercept agent_response and mark session dirty
+    const wrappedHandleIPC = isK8s
+      ? async (raw: string, ctx: IPCContext): Promise<string> => {
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed.action === 'agent_response') {
+              agentResponseResolve?.(parsed.content ?? '');
+              return JSON.stringify({ ok: true });
+            }
+            if (parsed.action && DIRTY_ACTIONS.has(parsed.action)) {
+              sessionManager.markDirty(sessionId);
+            }
+          } catch { /* fall through */ }
+          return handleIPC(raw, ctx);
+        }
+      : handleIPC;
+
+    // Register turn token for HTTP IPC route
+    if (isK8s) {
+      activeTokens.set(turnToken, {
+        handleIPC: wrappedHandleIPC,
+        ctx: { sessionId, agentId: baseDeps?.config.agent_name ?? agentName, userId: userId ?? defaultUserId, requestId },
+      });
+    }
+
+    const startAgentResponseTimer = isK8s
+      ? () => {
+          if (agentTimer) return;
+          const effectiveTimeout = baseDeps?.config.sandbox.timeout_sec ?? config.sandbox?.timeout_sec ?? 600;
+          const agentTimeoutMs = (effectiveTimeout + 60) * 1000;
+          agentTimer = setTimeout(() => {
+            agentResponseReject?.(new Error('agent_response timeout'));
+          }, agentTimeoutMs);
+          if (agentTimer.unref) agentTimer.unref();
+        }
+      : undefined;
+
+    const turnDeps: CompletionDeps = {
+      ...(baseDeps ?? completionDeps),
+      sessionManager,
+      extraSandboxEnv: isK8s ? {
+        AX_IPC_TOKEN: turnToken,
+        AX_IPC_REQUEST_ID: requestId,
+        AX_HOST_URL: `http://ax-host.${config.namespace ?? 'ax'}.svc`,
+        ...(config.web_proxy ? { AX_WEB_PROXY_URL: `http://ax-web-proxy.${config.namespace ?? 'ax'}.svc:3128` } : {}),
+      } : undefined,
+      ...(agentResponsePromise ? { agentResponsePromise } : {}),
+      ...(startAgentResponseTimer ? { startAgentResponseTimer } : {}),
+    };
+
+    const sessionStartTime = Date.now();
+    try {
+      const result = await processCompletion(
+        turnDeps, content, requestId, messages, sessionId, preProcessed, userId,
+      );
+      logger.debug('session_completed', {
+        requestId, sessionId,
+        responseLength: result.responseContent.length,
+        finishReason: result.finishReason,
+        durationMs: Date.now() - sessionStartTime,
+      });
+      return result;
+    } finally {
+      if (agentTimer) clearTimeout(agentTimer);
+      activeTokens.delete(turnToken);
+      if (sessionManager.has(sessionId)) {
+        sessionManager.touch(sessionId);
+      }
+    }
+  }
+
+  // ── k8s internal HTTP routes ──
+
+  async function handleInternalRoutes(req: IncomingMessage, res: ServerResponse, url: string): Promise<boolean> {
+    if (!isK8s) return false;
+
+    // LLM proxy over HTTP from sandbox pods
+    if (url.startsWith('/internal/llm-proxy/') && req.method === 'POST') {
+      const token = req.headers['x-api-key'] as string;
+      const entry = token ? activeTokens.get(token) : undefined;
+      if (!entry) { res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'invalid token' })); return true; }
+      try {
+        const targetPath = url.replace('/internal/llm-proxy', '');
+        const body = await readBody(req, 10_485_760);
+        const { forwardLLMRequest } = await import('./llm-proxy-core.js');
+        await forwardLLMRequest({ targetPath, body: body.toString(), incomingHeaders: req.headers, res });
+      } catch (err) {
+        logger.error('internal_llm_proxy_failed', { error: (err as Error).message });
+        if (!res.headersSent) sendError(res, 502, 'LLM proxy request failed');
+      }
+      return true;
+    }
+
+    // Pod work fetch
+    if (url === '/internal/work' && req.method === 'GET') {
+      const token = req.headers.authorization?.replace('Bearer ', '');
+      if (!token) { res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'missing token' })); return true; }
+      const sid = sessionManager.findSessionByToken(token);
+      const work = sid ? sessionManager.claimWork(sid) : undefined;
+      if (!work) { res.writeHead(404, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'no pending work for token' })); return true; }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(work);
+      return true;
+    }
+
+    // IPC over HTTP from sandbox pods
+    if (url === '/internal/ipc' && req.method === 'POST') {
+      const token = req.headers.authorization?.replace('Bearer ', '');
+      const entry = token ? activeTokens.get(token) : undefined;
+      if (!entry) { res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'invalid token' })); return true; }
+      try {
+        const body = await readBody(req, 1_048_576);
+        const result = await entry.handleIPC(body.toString(), entry.ctx);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(result);
+      } catch (err) {
+        logger.error('internal_ipc_failed', { error: (err as Error).message });
+        if (!res.headersSent) sendError(res, 500, 'IPC request failed');
+      }
+      return true;
+    }
+
+    return false;
+  }
+
   // --- Request Handler (via shared factory) ---
 
   const handleRequest = createRequestHandler({
@@ -212,7 +451,7 @@ export async function createServer(
       adminCtx,
       eventBus,
       runCompletion: async (content, requestId, messages, sessionId, userId) => {
-        return processCompletion(completionDeps, content, requestId, messages, sessionId, undefined, userId);
+        return processCompletionForSession(content, requestId, messages, sessionId, userId, agentType);
       },
       preFlightCheck: async (_sessionId: string, userId: string | undefined) => {
         if (userId && await isAgentBootstrapMode(core.adminCtx)) {
@@ -235,6 +474,7 @@ export async function createServer(
     isDraining: () => draining,
     trackRequestStart,
     trackRequestEnd,
+    extraRoutes: handleInternalRoutes,
   });
 
   // --- Lifecycle ---
@@ -309,8 +549,12 @@ export async function createServer(
           ...(config.scheduler.timeout_sec ? { sandbox: { ...config.sandbox, timeout_sec: config.scheduler.timeout_sec } } : {}),
           ...(agentId ? { agent_name: agentId } : {}),
         };
-        const deps = { ...completionDeps, config: schedConfig };
-        return processCompletion(deps, content, requestId, messages, sessionId, preProcessed, userId);
+        const deps: CompletionDeps = { ...completionDeps, config: schedConfig, singleTurn: true };
+        return processCompletionForSession(
+          content, requestId,
+          messages as { role: string; content: string | import('../types.js').ContentBlock[] }[],
+          sessionId, userId, undefined, preProcessed, deps,
+        );
       },
     });
     await providers.scheduler.start(schedulerCallback);
@@ -452,6 +696,10 @@ export async function createServer(
     // Stop orchestrator (disableAutoState first to unsubscribe event listener)
     disableAutoState();
     orchestrator.shutdown();
+
+    // Stop session manager and web proxy
+    sessionManager.shutdown();
+    if (webProxy) webProxy.stop();
 
     // Stop IPC server
     try { ipcServer.close(); } catch {

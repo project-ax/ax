@@ -34,7 +34,7 @@ Validated by `ConfigSchema` (Zod `strictObject` -- rejects unknown keys).
 | `providers.security` | string | required | Security provider (scanner + screener) |
 | `providers.channels` | string[] | required | Active channel providers |
 | `providers.web` | string | required | Web provider |
-| `providers.credentials` | string | required | Credentials provider |
+| `providers.credentials` | string | `database` | Credentials provider (database-only) |
 | `providers.skills` | string | required | Skill store provider (only `database` supported) |
 | `providers.audit` | string | required | Audit provider (only `database` supported) |
 | `providers.sandbox` | string | required | Sandbox provider (`docker`, `apple`, `k8s`) |

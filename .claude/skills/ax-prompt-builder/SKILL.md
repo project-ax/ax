@@ -35,7 +35,7 @@ Every module receives a `PromptContext` with:
 interface PromptContext {
   agentType: string;          // 'pi-coding-agent' | 'claude-code'
   workspace: string;          // Absolute path (sanitized by RuntimeModule)
-  sandboxType: string;        // 'docker' | 'apple' | 'k8s' | 'subprocess' etc.
+  sandboxType: string;        // 'docker' | 'apple' | 'k8s'
   profile: string;            // 'paranoid' | 'balanced' | 'yolo'
   taintRatio: number;         // 0.0-1.0
   taintThreshold: number;     // Profile-dependent threshold

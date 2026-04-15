@@ -27,8 +27,8 @@ spec:
         runAsNonRoot: true
       containers:
       - name: git
-        image: "{{ .Values.gitServer.image.repository }}:{{ .Values.gitServer.image.tag }}"
-        imagePullPolicy: {{ .Values.gitServer.image.pullPolicy | default "IfNotPresent" }}
+        image: {{ include "ax.image" (dict "image" .Values.gitServer.image "imageDefaults" .Values.imageDefaults "context" $) }}
+        {{- include "ax.imagePullPolicy" (dict "image" .Values.gitServer.image "imageDefaults" .Values.imageDefaults) | nindent 8 }}
         ports:
         - name: http
           containerPort: 8000

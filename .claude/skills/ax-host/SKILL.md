@@ -20,7 +20,7 @@ The host subsystem is the trusted half of AX. It runs the HTTP server (OpenAI-co
 | `src/host/server-channels.ts` | Channel ingestion, message deduplication, thread gating/backfill, emoji reactions, attachment handling, per-message agent routing (`resolveAgentForMessage`), thread ownership tracking (`ThreadOwnershipMap`), response prefix for personal agents in shared channels (`maybeAddResponsePrefix`) |
 | `src/host/server-files.ts` | File upload/download API, workspace file storage, MIME type handling |
 | `src/host/server-http.ts` | HTTP utilities, SSE chunking, body reading, error responses |
-| `src/host/server-lifecycle.ts` | Workspace cleanup, graceful shutdown, stale session cleanup |
+| `src/host/server-lifecycle.ts` | Stub — lifecycle duties now distributed to server-local.ts and server-k8s.ts |
 | `src/host/event-bus.ts` | Typed pub/sub for real-time completion observability, global + per-request listeners |
 | `src/host/router.ts` | Inbound scan + taint-wrap + canary inject; outbound scan + canary check |
 | `src/host/ipc-server.ts` | Unix socket server, IPC action dispatch, Zod validation, taint budget gate, heartbeat, event emission. Concurrent IPC call fix (misrouted responses on shared socket). proxy.sock race prevention (await IPC server listen). `agent_response` timeout handling without crashing |
@@ -201,8 +201,8 @@ Per-agent plugin lifecycle managed via IPC:
 - **Plugin Registration**: runtime allowlist (`_pluginProviderMap`) for Phase 3 plugins
 - **URL Scheme Guard**: post-resolution check ensures all paths are file:// URLs (SC-SEC-002)
 - Functions: `resolveProviderPath()`, `registerPluginProvider()`, `unregisterPluginProvider()`, `listPluginProviders()`
-- **sandbox** category: subprocess, docker, apple, k8s
-- **workspace** category: none, local, gcs
+- **sandbox** category: docker, apple, k8s
+- **workspace** category: git-http, git-local
 - **skills** category: database only
 
 ## Image Generation (ipc-handlers/image.ts)
@@ -259,11 +259,11 @@ For Kubernetes deployments, k8s sandbox pods communicate with the host over HTTP
 
 **Removed files**: `nats-ipc-handler.ts`, `nats-llm-proxy.ts`, and `nats-session-protocol.ts` have been replaced by HTTP routes in `server-k8s.ts` using shared `llm-proxy-core.ts` and `SessionPodManager` for session-long pod reuse.
 
-### Workspace Operations (K8s)
+### Workspace Operations
 
-In k8s mode, workspace operations are handled by IPC handlers in `src/host/ipc-handlers/workspace.ts`. The host is the single GCS credential holder — pods never access GCS directly. Agent-side workspace files (`workspace-cli.ts`, `workspace-release.ts`, `workspace.ts`) have been deleted; all workspace operations now go through IPC.
-
-**GCS prefix resolution** (`server-completions.ts`): `resolveWorkspaceGcsPrefixes()` derives agent/user/session GCS prefixes from `config.workspace.prefix` (authoritative, same source as gcs.ts) with `AX_WORKSPACE_GCS_PREFIX` env var fallback. Both the write path (gcs.ts commit) and provision path must use the same prefix source.
+Workspace persistence uses git-based providers:
+- **Local mode** (`git-local`): Bare repos at `~/.ax/repos/{encodedAgentId}`. Host handles git clone/pull/commit for file:// URLs.
+- **K8s mode** (`git-http`): Repos created via HTTP POST to `ax-git.{namespace}.svc.cluster.local:8000/repos`. Agents clone via HTTP. Git sidecar handles commit/push in k8s pods.
 
 The `AX_HOST_URL` env var (`http://ax-host.{namespace}.svc`) is passed to sandbox pods via `extraSandboxEnv` so they can reach HTTP endpoints. NetworkPolicy allows sandbox pods egress to host on port 8080.
 
@@ -327,10 +327,8 @@ Admin endpoints for agent management and diagnostics. Protected by admin token (
 - **K8s web proxy**: In k8s mode, web proxy runs as a TCP server (port 3128, bound to `0.0.0.0`) in the host process. Sandbox pods connect via k8s Service (`ax-web-proxy.{namespace}.svc:3128`), passed as `AX_WEB_PROXY_URL`. Requires: (1) `config.web_proxy: true` in config, (2) `webProxy.enabled: true` in Helm values, (3) host network policy allowing ingress on port 3128 from execution plane. The `web_proxy` field must be in the Zod schema in `config.ts`.
 - **K8s env var naming**: Never use env var names that K8s service discovery auto-generates. The `ax-web-proxy` Service generates `AX_WEB_PROXY_PORT=tcp://IP:PORT` in all pods. Our custom env var is `AX_PROXY_LISTEN_PORT` to avoid collision.
 - **Session pod payload propagation**: Per-request env vars must be in the pod spec (`sandboxConfig.extraEnv`). The runner's `parseStdinPayload()` must extract and `applyPayload()` must set them in `process.env`. `SessionPodManager` handles session-long pod reuse via HTTP.
-- **K8s workspace staging store**: In-memory Map with 5-min TTL and 50MB max per entry. Periodic cleanup runs every 60s. Staging key is consumed (deleted) on workspace_release IPC lookup.
-- **AX_HOST_URL env var**: Passed to sandbox pods for HTTP workspace provision and release. Points to `http://ax-host.{namespace}.svc`. NetworkPolicy must allow sandbox→host on port 8080.
-- **GCS prefix must come from same source for read and write**: The GCS backend commits files using `config.workspace.prefix`. The provision path must use the same source via `resolveWorkspaceGcsPrefixes()`. If only the env var `AX_WORKSPACE_GCS_PREFIX` is set (not `config.workspace.prefix`), provisioning may silently point to the wrong path.
-- **WorkspaceProvider.downloadScope()**: Optional method used by the provision endpoint. Only GCS provider implements it. The host calls `providers.workspace.downloadScope(scope, id)` and returns gzipped JSON to the pod.
+- **AX_HOST_URL env var**: Passed to sandbox pods for HTTP endpoints. Points to `http://ax-host.{namespace}.svc`. NetworkPolicy must allow sandbox→host on port 8080.
+- **Workspace is git-based**: `git-local` (file:// bare repos) for local mode, `git-http` (HTTP repos via ax-git Service) for k8s. Old GCS/local/none workspace providers and staging store have been removed.
 - **Status SSE events**: `server-completions.ts` emits `type: 'status'` events via EventBus with `{operation, phase, message}` data. `server-request-handlers.ts` validates all three fields are strings before forwarding as SSE named events. Invalid payloads are logged and dropped.
 - **MCP fast path runs in host process**: `inprocess.ts` has no sandbox isolation — tools execute directly. Only safe for trusted MCP providers. `FAST_PATH_LIMITS` enforces per-turn resource limits.
 - **MCP provider category**: `mcp` category in provider-map.ts with `none` (no-op) and `database` implementations. The `database` provider requires `{ database, credentials }` deps passed via registry.ts (not the generic `loadProvider` path). Admin API endpoints under `/admin/api/agents/:id/mcp-servers`. Unified tool discovery via `McpConnectionManager` — tools from plugins, database MCP servers, and default provider resolved in one pass.
