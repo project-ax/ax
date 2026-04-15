@@ -7,7 +7,7 @@ import type { Config } from '../../src/types.js';
  * config.scheduler.timeout_sec when configured.
  *
  * The actual override happens in the `runCompletion` lambda wired by
- * server-local.ts / server-k8s.ts. These tests exercise the same pattern:
+ * server.ts / server-k8s.ts. These tests exercise the same pattern:
  * wrapping runCompletion to override sandbox timeout.
  */
 
@@ -36,7 +36,7 @@ describe('scheduler sandbox timeout override', () => {
     const config = makeConfig(60);
     let capturedConfig: Config | undefined;
 
-    // Simulate the pattern from server-local.ts
+    // Simulate the pattern from server.ts
     const runCompletion = async (
       content: string, _requestId: string,
       _messages: { role: string; content: string }[],

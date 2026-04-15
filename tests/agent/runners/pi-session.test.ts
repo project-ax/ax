@@ -17,7 +17,8 @@ import { startAnthropicProxy } from '../../../src/host/proxy.js';
 
 // We'll dynamically import runPiSession so the test module loads cleanly
 
-function createMockIPCServer(socketPath: string): { server: Server; close: () => void } {
+function createMockIPCServer(socketPath: string): { server: Server; close: () => void; agentResponses: string[] } {
+  const agentResponses: string[] = [];
   const server = createServer((socket: Socket) => {
     let buffer = Buffer.alloc(0);
 
@@ -44,6 +45,9 @@ function createMockIPCServer(socketPath: string): { server: Server; close: () =>
               { type: 'done', usage: { inputTokens: 10, outputTokens: 8 } },
             ],
           };
+        } else if (request.action === 'agent_response') {
+          agentResponses.push(request.content ?? '');
+          response = { ok: true };
         } else {
           response = { ok: true };
         }
@@ -61,6 +65,7 @@ function createMockIPCServer(socketPath: string): { server: Server; close: () =>
   server.listen(socketPath);
   return {
     server,
+    agentResponses,
     close: () => {
       server.close();
     },
@@ -188,28 +193,17 @@ describe('pi-session (IPC mode — no proxy)', () => {
   test('runPiSession completes without error for a simple message (IPC fallback)', async () => {
     const { runPiSession } = await import('../../../src/agent/runners/pi-session.js');
 
-    // Capture stdout
-    const chunks: string[] = [];
-    const originalWrite = process.stdout.write;
-    process.stdout.write = ((chunk: string | Uint8Array) => {
-      chunks.push(chunk.toString());
-      return true;
-    }) as typeof process.stdout.write;
+    await runPiSession({
+      agent: 'pi-coding-agent',
+      ipcSocket: socketPath,
+      workspace,
+      skills: skillsDir,
+      userMessage: 'hello',
+      // No proxySocket → should fall back to IPC
+    });
 
-    try {
-      await runPiSession({
-        agent: 'pi-coding-agent',
-        ipcSocket: socketPath,
-        workspace,
-        skills: skillsDir,
-        userMessage: 'hello',
-        // No proxySocket → should fall back to IPC
-      });
-    } finally {
-      process.stdout.write = originalWrite;
-    }
-
-    const output = chunks.join('');
+    // Response is sent back via agent_response IPC action (not stdout)
+    const output = mockServer.agentResponses.join('');
     expect(output.length).toBeGreaterThan(0);
     expect(output).toContain('Hello from mock LLM via IPC');
   }, 30_000);
@@ -404,7 +398,7 @@ describe('pi-session (proxy mode — LLM via Anthropic SDK)', () => {
   let skillsDir: string;
   let ipcSocketPath: string;
   let proxySocketPath: string;
-  let mockIPC: { server: Server; close: () => void };
+  let mockIPC: { server: Server; close: () => void; agentResponses: string[] };
   let mockApi: HttpServer;
   let proxyResult: { server: HttpServer; stop: () => void };
   const originalStdoutWrite = process.stdout.write;
@@ -491,13 +485,8 @@ describe('pi-session (proxy mode — LLM via Anthropic SDK)', () => {
 
     const { runPiSession } = await import('../../../src/agent/runners/pi-session.js');
 
-    // Capture stdout and stderr
-    const chunks: string[] = [];
+    // Capture stderr for diagnostics
     const stderrChunks: string[] = [];
-    process.stdout.write = ((chunk: string | Uint8Array) => {
-      chunks.push(chunk.toString());
-      return true;
-    }) as typeof process.stdout.write;
     process.stderr.write = ((chunk: string | Uint8Array) => {
       stderrChunks.push(chunk.toString());
       return true;
@@ -513,11 +502,9 @@ describe('pi-session (proxy mode — LLM via Anthropic SDK)', () => {
         userMessage: 'hello via proxy',
       });
     } finally {
-      process.stdout.write = originalStdoutWrite;
       process.stderr.write = originalStderrWrite;
     }
 
-    const output = chunks.join('');
     const stderrOutput = stderrChunks.join('');
 
     // Verify the proxy forwarded the request to the Anthropic API
@@ -531,7 +518,8 @@ describe('pi-session (proxy mode — LLM via Anthropic SDK)', () => {
     expect(reqBody).toHaveProperty('messages');
     expect(reqBody).toHaveProperty('stream', true); // SDK .stream() sets this
 
-    // Verify we got LLM text output
+    // Verify we got LLM text output via agent_response IPC
+    const output = mockIPC.agentResponses.join('');
     expect(output.length).toBeGreaterThan(0);
     expect(output).toContain('Hello from mock LLM via proxy!');
   }, 30_000);

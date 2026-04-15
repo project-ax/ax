@@ -428,6 +428,11 @@ export const ToolBatchSchema = ipcAction('tool_batch', {
   })),
 });
 
+// ── Agent Work Loop ─────────────────────────────────
+
+/** Agent polls for queued work (multi-turn sessions). Returns { ok, payload } */
+export const FetchWorkSchema = ipcAction('fetch_work', {});
+
 // ── Plugin Management ────────────────────────────────
 
 export const PluginListSchema = ipcAction('plugin_list', {});

@@ -622,11 +622,10 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
     });
   }
 
-  // In k8s mode, buffer text instead of writing to stdout — response goes via IPC
-  const isK8sTransport = !!process.env.AX_HOST_URL;
-  const textBuffer: string[] | undefined = isK8sTransport ? [] : undefined;
+  // Always buffer text — response goes back to host via agent_response IPC action
+  const textBuffer: string[] = [];
 
-  // Subscribe to events — stream text to stdout (or buffer for HTTP IPC), log tools/errors to stderr
+  // Subscribe to events — buffer text, log tools/errors to stderr
   const eventState = subscribeAgentEvents(session, config, { buffer: textBuffer });
 
   // Send message and wait — log tools that are actually on the agent
@@ -690,17 +689,17 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
     }
   }
 
-  // In k8s mode, send agent_response via IPC
-  if (isK8sTransport) {
-
-    const buffered = eventState.getBuffered();
-    logger.debug('k8s_agent_response', { contentLength: buffered.length });
-    try {
-      await client.call({ action: 'agent_response', content: buffered });
-    } catch (err) {
-      logger.error('agent_response_failed', { error: (err as Error).message });
-      process.stderr.write(`Failed to send agent_response: ${(err as Error).message}\n`);
-    }
+  // Send response back to host via agent_response IPC action.
+  // Short timeout (5s) — the host handler just resolves a promise and returns {ok: true}.
+  // If the bridge is already closed (host killed the process), fail fast instead of
+  // waiting the full 30s heartbeat timeout.
+  const buffered = eventState.getBuffered();
+  logger.debug('agent_response', { contentLength: buffered.length });
+  try {
+    await client.call({ action: 'agent_response', content: buffered }, 5000);
+  } catch (err) {
+    logger.error('agent_response_failed', { error: (err as Error).message });
+    process.stderr.write(`Failed to send agent_response: ${(err as Error).message}\n`);
   }
 
   session.dispose();

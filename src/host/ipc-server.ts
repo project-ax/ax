@@ -98,6 +98,8 @@ export interface IPCHandlerOptions {
   fileStore?: import('../file-store.js').FileStore;
   /** Callback when a file is written and uploaded to GCS (for SSE content_block events). */
   onArtifactWritten?: (fileId: string, mimeType: string, filename: string) => void;
+  /** Unified session manager — used by fetch_work handler to return queued work. */
+  sessionManager?: import('./session-manager.js').SessionManager;
 }
 
 export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerOptions) {
@@ -143,6 +145,13 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
       onArtifactWritten: opts?.onArtifactWritten,
     }) : {}),
     ...(opts?.toolBatchProvider ? createToolBatchHandlers(opts.toolBatchProvider) : {}),
+    // Session work loop — agent polls for queued work
+    ...(opts?.sessionManager ? {
+      fetch_work: async (_req: unknown, ctx: IPCContext) => {
+        const payload = opts.sessionManager!.claimWork(ctx.sessionId);
+        return { ok: true, payload: payload ?? null };
+      },
+    } : {}),
   };
 
   return async function handleIPC(raw: string, ctx: IPCContext): Promise<string> {

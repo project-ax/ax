@@ -256,8 +256,7 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
     fullPrompt = userMessage;
   }
 
-  // In k8s mode, buffer text instead of writing to stdout — response goes via IPC
-  const isK8sTransport = !!process.env.AX_HOST_URL;
+  // Always buffer text — response goes back to host via agent_response IPC action
   const textBuffer: string[] = [];
 
   try {
@@ -310,18 +309,14 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
       },
     });
 
-    // 7. Stream output (buffer in HTTP IPC mode, write to stdout otherwise)
+    // 7. Stream output — buffer text for agent_response IPC
     let hasOutput = false;
     for await (const msg of result) {
       if (msg.type === 'assistant') {
         for (const block of msg.message.content) {
           if (block.type === 'text') {
-            if (hasOutput) {
-              if (isK8sTransport) textBuffer.push('\n\n');
-              else process.stdout.write('\n\n');
-            }
-            if (isK8sTransport) textBuffer.push(block.text);
-            else process.stdout.write(block.text);
+            if (hasOutput) textBuffer.push('\n\n');
+            textBuffer.push(block.text);
             hasOutput = true;
           }
         }
@@ -331,7 +326,6 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
         process.stderr.write(`Claude Code error: ${errText}\n`);
       }
     }
-    if (hasOutput && !isK8sTransport) process.stdout.write('\n');
 
     // Persist workspace changes
     if (gitWorkspace) {
@@ -357,17 +351,17 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
       }
     }
 
-    // In k8s mode, send agent_response via IPC
-    if (isK8sTransport) {
-
-      const buffered = textBuffer.join('');
-      logger.debug('k8s_agent_response', { contentLength: buffered.length });
-      try {
-        await client.call({ action: 'agent_response', content: buffered });
-      } catch (err) {
-        logger.error('agent_response_failed', { error: (err as Error).message });
-        process.stderr.write(`Failed to send agent_response: ${(err as Error).message}\n`);
-      }
+    // Send response back to host via agent_response IPC action.
+    // Short timeout (5s) — the host handler just resolves a promise and returns {ok: true}.
+    // If the bridge is already closed (host killed the process), fail fast instead of
+    // waiting the full 30s heartbeat timeout.
+    const buffered = textBuffer.join('');
+    logger.debug('agent_response', { contentLength: buffered.length });
+    try {
+      await client.call({ action: 'agent_response', content: buffered }, 5000);
+    } catch (err) {
+      logger.error('agent_response_failed', { error: (err as Error).message });
+      process.stderr.write(`Failed to send agent_response: ${(err as Error).message}\n`);
     }
   } catch (err) {
     // Surface the error clearly — expired OAuth, network failures, etc.

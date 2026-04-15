@@ -348,7 +348,7 @@ describe('spawn command construction', () => {
 
   test('agent-runner parseArgs does not expose paths beyond what is passed in', () => {
     // The agent-runner receives paths from CLI args (--workspace, --skills, --ipc-socket).
-    // These are already workspace-local paths set by server-local.ts.
+    // These are already workspace-local paths set by server.ts.
     // Verify it doesn't use resolve() or process.cwd() to construct additional paths.
     const { readFileSync } = require('node:fs');
     const source = readFileSync(resolve('src/agent/runner.ts'), 'utf-8');

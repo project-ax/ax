@@ -185,7 +185,7 @@ describe('claimBootstrapAdmin', () => {
 // ── Integration test for channel bootstrap gate ──
 
 describe('bootstrap gate (channel integration)', () => {
-  let server: import('../../src/host/server-local.js').AxServer;
+  let server: import('../../src/host/server.js').AxServer;
   let socketPath: string;
   let originalAxHome: string | undefined;
   let axHome: string;
@@ -209,7 +209,7 @@ describe('bootstrap gate (channel integration)', () => {
   });
 
   test('auto-promotes first channel user to admin during bootstrap', async () => {
-    const { createServer } = await import('../../src/host/server-local.js');
+    const { createServer } = await import('../../src/host/server.js');
     const { loadConfig } = await import('../../src/config.js');
     type SessionAddress = import('../../src/providers/channel/types.js').SessionAddress;
     type OutboundMessage = import('../../src/providers/channel/types.js').OutboundMessage;

@@ -52,7 +52,8 @@ describe('agent-runner', () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  test('run() connects to IPC, sends llm_call, and returns response text', async () => {
+  test('run() connects to IPC, sends llm_call, and returns response via agent_response', async () => {
+    let agentResponseContent = '';
     server = createMockIPCServer(socketPath, (req) => {
       if (req.action === 'llm_call') {
         return {
@@ -63,30 +64,21 @@ describe('agent-runner', () => {
           ],
         };
       }
+      if (req.action === 'agent_response') {
+        agentResponseContent = (req as Record<string, unknown>).content as string;
+        return { ok: true };
+      }
       return { ok: true };
     });
     await new Promise<void>((r) => server.on('listening', r));
 
-    // Capture stdout
-    const stdoutChunks: string[] = [];
-    const origWrite = process.stdout.write;
-    process.stdout.write = ((chunk: string | Uint8Array) => {
-      stdoutChunks.push(chunk.toString());
-      return true;
-    }) as typeof process.stdout.write;
+    await run({
+      ipcSocket: socketPath,
+      workspace,
+      userMessage: 'Say hello',
+    });
 
-    try {
-      await run({
-        ipcSocket: socketPath,
-        workspace,
-        userMessage: 'Say hello',
-      });
-    } finally {
-      process.stdout.write = origWrite;
-    }
-
-    const output = stdoutChunks.join('');
-    expect(output).toContain('Hello from mock LLM');
+    expect(agentResponseContent).toContain('Hello from mock LLM');
   });
 
   test('run() includes conversation history in LLM call', async () => {

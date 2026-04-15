@@ -206,6 +206,8 @@ describe('tool-catalog <-> IPC schemas sync', () => {
       'tool_batch',
       // Company identity management (read/write via IPC, admin-only writes)
       'company_identity_read', 'company_identity_write',
+      // Agent work loop (multi-turn sessions — agent polls for queued work)
+      'fetch_work',
     ]);
 
     for (const action of schemaActions) {
