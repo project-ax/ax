@@ -1290,6 +1290,7 @@ export async function processCompletion(
             kill: proc.kill,
             workspace,
             gitDir,
+            authToken: deps.extraSandboxEnv?.AX_IPC_TOKEN,
           });
 
           // Safety net: clean up session if sandbox exits unexpectedly

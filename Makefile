@@ -82,9 +82,7 @@ load-image:
 helm-upgrade:
 	@echo "Helm upgrade (tag: $(TAG))..."
 	helm upgrade --install ax ./charts/ax -f $(VALUES_FILE) -n $(NAMESPACE) \
-		--set imageDefaults.tag=$(TAG) \
-		--set gitServer.image.repository=$(GIT_SERVER_IMAGE) \
-		--set gitServer.image.tag=$(TAG)
+		--set-string imageDefaults.tag=$(TAG)
 	@echo "✓ Helm upgrade complete"
 	@echo "Waiting for deployments to be ready..."
 	kubectl rollout status deployment/ax-host -n $(NAMESPACE) --timeout=120s

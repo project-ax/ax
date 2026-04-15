@@ -9,7 +9,7 @@ When preset is empty, chart defaults are used (backward compatible).
 
 {{/*
 ax.preset.hostReplicas — Host deployment replicas.
-Preset: small=1, large=3. Chart default: 2.
+Preset: small=1, large=3. Chart default: 1.
 */}}
 {{- define "ax.preset.hostReplicas" -}}
 {{- if not (kindIs "invalid" .Values.host.replicas) -}}
@@ -18,7 +18,7 @@ Preset: small=1, large=3. Chart default: 2.
   {{- $p := .Values.preset | default "" -}}
   {{- if eq $p "small" -}}1
   {{- else if eq $p "large" -}}3
-  {{- else -}}2{{- end -}}
+  {{- else -}}1{{- end -}}
 {{- end -}}
 {{- end -}}
 
