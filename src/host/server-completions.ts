@@ -152,83 +152,9 @@ export interface IdentityPayload {
  */
 
 /** Paths to identity files in the git tree. */
-/** Identity files loaded from git (agent-written, evolving). */
-const IDENTITY_FILE_MAP: Array<{ gitPath: string; field: keyof IdentityPayload }> = [
-  { gitPath: '.ax/AGENTS.md', field: 'agents' },
-  { gitPath: '.ax/HEARTBEAT.md', field: 'heartbeat' },
-  { gitPath: '.ax/SOUL.md', field: 'soul' },
-  { gitPath: '.ax/IDENTITY.md', field: 'identity' },
-  // BOOTSTRAP.md and USER_BOOTSTRAP.md are always loaded from templates/ (static).
-];
-
-/**
- * Load identity files from committed git state in a local clone.
- * Uses `git show HEAD:<path>` — only needs GIT_DIR, no working tree.
- */
-export function loadIdentityFromGit(workspace: string, gitDir: string): IdentityPayload {
-  const identity: IdentityPayload = {};
-  const gitEnv = { GIT_DIR: gitDir, GIT_WORK_TREE: workspace };
-  const opts = { cwd: workspace, encoding: 'utf-8' as const, stdio: 'pipe' as const, env: { ...process.env, ...gitEnv } };
-
-  for (const { gitPath, field } of IDENTITY_FILE_MAP) {
-    try {
-      const content = execFileSync('git', ['show', `HEAD:${gitPath}`], opts).toString();
-      if (content) identity[field] = content;
-    } catch {
-      // File doesn't exist in git — leave as undefined (empty)
-    }
-  }
-
-  return identity;
-}
-
-/**
- * Fetch identity files from a remote git repo without cloning the full workspace.
- * Uses a shallow bare fetch (depth 1) — only downloads the latest commit's tree.
- * Ideal for HTTP repos in k8s where the host only needs to read identity, not
- * manage the working tree (the sidecar handles workspace persistence).
- *
- * Returns the bare gitDir path for later cleanup, plus the identity payload.
- */
-export function fetchIdentityFromRemote(
-  repoUrl: string, logger: Logger,
-): { gitDir: string; identity: IdentityPayload } {
-  // Partial clone: --filter=blob:none downloads only tree objects (directory listings).
-  // Individual file blobs are lazily fetched on demand by `git show`.
-  // Combined with --depth 1, this means only the ~6 identity file blobs are ever
-  // downloaded — not the entire workspace. Falls back to full shallow fetch if
-  // the server doesn't support partial clone.
-  const gitDir = mkdtempSync(join(tmpdir(), 'ax-id-'));
-  const barOpts = { cwd: gitDir, encoding: 'utf-8' as const, stdio: 'pipe' as const };
-  execFileSync('git', ['init', '--bare'], { cwd: gitDir, stdio: 'pipe' });
-  execFileSync('git', ['remote', 'add', 'origin', repoUrl], { cwd: gitDir, stdio: 'pipe' });
-  try {
-    execFileSync('git', ['fetch', '--depth', '1', '--filter=blob:none', 'origin', 'main'], { cwd: gitDir, stdio: 'pipe' });
-    execFileSync('git', ['update-ref', 'HEAD', 'FETCH_HEAD'], { cwd: gitDir, stdio: 'pipe' });
-  } catch {
-    // Partial clone not supported or empty repo — try plain shallow fetch
-    try {
-      execFileSync('git', ['fetch', '--depth', '1', 'origin', 'main'], { cwd: gitDir, stdio: 'pipe' });
-      execFileSync('git', ['update-ref', 'HEAD', 'FETCH_HEAD'], { cwd: gitDir, stdio: 'pipe' });
-    } catch {
-      logger.debug('identity_fetch_empty_repo', { repoUrl });
-      return { gitDir, identity: {} };
-    }
-  }
-
-  // Read identity files via git show — each triggers a lazy blob fetch for just that file
-  const identity: IdentityPayload = {};
-  for (const { gitPath, field } of IDENTITY_FILE_MAP) {
-    try {
-      const content = execFileSync('git', ['show', `HEAD:${gitPath}`], barOpts).toString();
-      if (content) identity[field] = content;
-    } catch {
-      // File doesn't exist — leave as undefined
-    }
-  }
-
-  return { gitDir, identity };
-}
+// Re-export for backward compatibility (tests import from here)
+export { loadIdentityFromGit, fetchIdentityFromRemote } from './identity-reader.js';
+import { loadIdentityFromGit, fetchIdentityFromRemote } from './identity-reader.js';
 
 /**
  * Try to parse structured agent output.
@@ -799,7 +725,7 @@ export async function processCompletion(
           // HTTP repo reuse — lightweight fetch for identity reading
           try {
             const { url: repoUrl } = await providers.workspace.getRepoUrl(agentId);
-            const result = fetchIdentityFromRemote(repoUrl, reqLogger);
+            const result = fetchIdentityFromRemote(repoUrl);
             identityGitDir = result.gitDir;
           } catch { /* identity fetch failed — will use empty */ }
         }
@@ -839,7 +765,7 @@ export async function processCompletion(
           seedRemoteRepo(repoUrl, reqLogger);
         }
         try {
-          const result = fetchIdentityFromRemote(repoUrl, reqLogger);
+          const result = fetchIdentityFromRemote(repoUrl);
           identityGitDir = result.gitDir;
           hostManagedGit = true;
           hostOwnsGitCommit = false;
@@ -1255,9 +1181,9 @@ export async function processCompletion(
     let identityPayload: IdentityPayload;
     if (identityGitDir) {
       // Bare fetch — read directly, no workspace needed
-      identityPayload = loadIdentityFromGit(identityGitDir, identityGitDir);
+      identityPayload = loadIdentityFromGit(identityGitDir);
     } else if (workspace && gitDir) {
-      identityPayload = loadIdentityFromGit(workspace, gitDir);
+      identityPayload = loadIdentityFromGit(gitDir);
     } else {
       identityPayload = {} as IdentityPayload;
     }
@@ -1923,41 +1849,6 @@ export async function processCompletion(
     if (hostOwnsGitCommit && hostManagedGit && workspace && gitDir) {
       // file:// repos: host commits+pushes, then resets working tree.
       hostGitCommit(workspace, gitDir, reqLogger);
-    }
-
-    // TRANSITIONAL: Sync identity from git → DocumentStore.
-    // Several consumers (isAgentBootstrapMode, admin API, channels, scheduler)
-    // still read identity from DocumentStore. This bridge keeps them working
-    // until they're migrated to read from git directly.
-    try {
-      let updatedIdentity: IdentityPayload;
-      if (!hostOwnsGitCommit && providers.workspace) {
-        // Lightweight re-fetch — only downloads the latest commit
-        const { url: repoUrl } = await providers.workspace.getRepoUrl(agentId);
-        const { gitDir: fetchDir, identity } = fetchIdentityFromRemote(repoUrl, reqLogger);
-        updatedIdentity = identity;
-        try { rmSync(fetchDir, { recursive: true, force: true }); } catch { /* best effort */ }
-      } else if (workspace && gitDir) {
-        updatedIdentity = loadIdentityFromGit(workspace, gitDir);
-      } else {
-        updatedIdentity = {};
-      }
-      const docs = deps.providers.storage?.documents;
-      if (docs) {
-        const syncPairs: Array<{ field: keyof IdentityPayload; key: string }> = [
-          { field: 'soul', key: `${agentId}/SOUL.md` },
-          { field: 'identity', key: `${agentId}/IDENTITY.md` },
-          { field: 'agents', key: `${agentId}/AGENTS.md` },
-          { field: 'heartbeat', key: `${agentId}/HEARTBEAT.md` },
-        ];
-        for (const { field, key } of syncPairs) {
-          const val = updatedIdentity[field];
-          // Write current value or clear stale entry when file deleted from git
-          await docs.put('identity', key, val ?? '');
-        }
-      }
-    } catch (err) {
-      reqLogger.debug('identity_sync_to_docstore_failed', { error: (err as Error).message });
     }
 
     // Clean up workspace/gitDir temp directories.

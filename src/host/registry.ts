@@ -103,6 +103,8 @@ export async function loadProviders(config: Config, opts?: LoadProvidersOptions)
     mcp = await loadProvider('mcp', config.providers.mcp, config);
   }
 
+  const workspace = config.providers.workspace ? await loadProvider('workspace', config.providers.workspace, config) : undefined;
+
   const registry: ProviderRegistry = {
     llm:         tracedLlm,
     memory,
@@ -114,8 +116,8 @@ export async function loadProviders(config: Config, opts?: LoadProvidersOptions)
     credentials,
     audit,
     sandbox:     await loadProvider('sandbox', config.providers.sandbox, config),
-    workspace:   config.providers.workspace ? await loadProvider('workspace', config.providers.workspace, config) : undefined,
-    scheduler:   await loadScheduler(config, database, eventbus, storage?.documents),
+    workspace,
+    scheduler:   await loadScheduler(config, database, eventbus, workspace as import('../providers/workspace/types.js').WorkspaceProvider | undefined),
     storage,
     database,
     eventbus,
@@ -152,8 +154,8 @@ async function loadSecurity(config: Config, llm: import('../providers/llm/types.
   return securityMod.create(config, config.providers.security, { llm });
 }
 
-async function loadScheduler(config: Config, database?: DatabaseProvider, eventbus?: import('../providers/eventbus/types.js').EventBusProvider, documents?: import('../providers/storage/types.js').DocumentStore) {
+async function loadScheduler(config: Config, database?: DatabaseProvider, eventbus?: import('../providers/eventbus/types.js').EventBusProvider, workspace?: import('../providers/workspace/types.js').WorkspaceProvider) {
   const modulePath = resolveProviderPath('scheduler', config.providers.scheduler);
   const mod = await import(modulePath);
-  return mod.create(config, { database, eventbus, documents });
+  return mod.create(config, { database, eventbus, workspace });
 }

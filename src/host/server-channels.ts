@@ -13,6 +13,7 @@ import { IMAGE_MIME_TYPES, UPLOAD_MIME_TYPES } from '../types.js';
 import { userWorkspaceDir } from '../paths.js';
 import { safePath } from '../utils/safe-path.js';
 import type { GcsFileStorage } from './gcs-file-storage.js';
+import { isAgentBootstrapMode } from './server-admin-helpers.js';
 import type { FileStore } from '../file-store.js';
 import type { ConversationStoreProvider, SessionStoreProvider } from '../providers/storage/types.js';
 import type { Router } from './router.js';
@@ -366,25 +367,20 @@ export function registerChannelHandler(
     // Bootstrap gate: only admins can interact while the agent is being set up.
     // The first channel user to message during bootstrap is auto-promoted to admin.
     {
-      const bootstrap = await adminCtx.documents.get('identity', `${agentName}/BOOTSTRAP.md`);
-      if (bootstrap) {
-        const soul = await adminCtx.documents.get('identity', `${agentName}/SOUL.md`);
-        const identity = await adminCtx.documents.get('identity', `${agentName}/IDENTITY.md`);
-        const isBootstrap = !soul || !identity;
-        if (isBootstrap) {
-          const entry = await adminCtx.registry.get(adminCtx.agentId);
-          const userIsAdmin = entry?.admins.includes(msg.sender) ?? false;
-          if (!userIsAdmin) {
-            const claimed = await adminCtx.registry.claimBootstrapAdmin(adminCtx.agentId, msg.sender);
-            if (claimed) {
-              logger.info('bootstrap_admin_claimed', { provider: channel.name, sender: msg.sender });
-            } else {
-              logger.info('bootstrap_gate_blocked', { provider: channel.name, sender: msg.sender });
-              await channel.send(msg.session, {
-                content: 'This agent is still being set up. Only admins can interact during bootstrap.',
-              });
-              return;
-            }
+      const isBootstrap = await isAgentBootstrapMode(adminCtx);
+      if (isBootstrap) {
+        const entry = await adminCtx.registry.get(adminCtx.agentId);
+        const userIsAdmin = entry?.admins.includes(msg.sender) ?? false;
+        if (!userIsAdmin) {
+          const claimed = await adminCtx.registry.claimBootstrapAdmin(adminCtx.agentId, msg.sender);
+          if (claimed) {
+            logger.info('bootstrap_admin_claimed', { provider: channel.name, sender: msg.sender });
+          } else {
+            logger.info('bootstrap_gate_blocked', { provider: channel.name, sender: msg.sender });
+            await channel.send(msg.session, {
+              content: 'This agent is still being set up. Only admins can interact during bootstrap.',
+            });
+            return;
           }
         }
       }

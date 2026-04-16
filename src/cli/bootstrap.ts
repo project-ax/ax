@@ -1,30 +1,33 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { templatesDir as resolveTemplatesDir } from '../utils/assets.js';
-import type { DocumentStore } from '../providers/storage/types.js';
+import type { WorkspaceProvider } from '../providers/workspace/types.js';
+import { readIdentityForAgent } from '../host/identity-reader.js';
 
-const EVOLVABLE_FILES = ['SOUL.md', 'IDENTITY.md'];
+/**
+ * Reset an agent's identity by removing SOUL.md and IDENTITY.md from the git repo.
+ * The next session will enter bootstrap mode (no soul or identity = bootstrap).
+ */
+export async function resetAgent(agentName: string, workspace: WorkspaceProvider): Promise<void> {
+  const { url: repoUrl } = await workspace.getRepoUrl(agentName);
 
-/** Reset an agent's identity by deleting evolvable files and seeding BOOTSTRAP.md in DocumentStore. */
-export async function resetAgent(agentName: string, templatesDir: string, documents: DocumentStore): Promise<void> {
-  // Delete evolvable identity files from DocumentStore
-  for (const file of EVOLVABLE_FILES) {
-    await documents.delete('identity', `${agentName}/${file}`);
-  }
-
-  // Delete BOOTSTRAP.md (will be re-seeded below)
-  await documents.delete('identity', `${agentName}/BOOTSTRAP.md`);
-
-  // Seed BOOTSTRAP.md from templates
-  const src = join(templatesDir, 'BOOTSTRAP.md');
-  if (existsSync(src)) {
-    await documents.put('identity', `${agentName}/BOOTSTRAP.md`, readFileSync(src, 'utf-8'));
-  }
-
-  // Seed USER_BOOTSTRAP.md from templates
-  const ubSrc = join(templatesDir, 'USER_BOOTSTRAP.md');
-  if (existsSync(ubSrc)) {
-    await documents.put('identity', `${agentName}/USER_BOOTSTRAP.md`, readFileSync(ubSrc, 'utf-8'));
+  if (repoUrl.startsWith('file://')) {
+    // file:// — commit deletion directly to the bare repo via a temp worktree
+    const bareRepoPath = repoUrl.replace('file://', '');
+    const gitOpts = { cwd: bareRepoPath, stdio: 'pipe' as const };
+    // Remove identity files from the index (bare repo, no worktree needed)
+    for (const file of ['.ax/SOUL.md', '.ax/IDENTITY.md']) {
+      try { execFileSync('git', ['rm', '--cached', '--ignore-unmatch', file], gitOpts); } catch { /* may not exist */ }
+    }
+    try {
+      const status = execFileSync('git', ['status', '--porcelain'], { ...gitOpts, encoding: 'utf-8' }).trim();
+      if (status) {
+        execFileSync('git', ['commit', '-m', 'bootstrap: reset identity'], gitOpts);
+      }
+    } catch { /* nothing to commit */ }
+  } else {
+    // http:// — would need a temp clone to commit. For now, log guidance.
+    console.log('For HTTP repos: delete .ax/SOUL.md and .ax/IDENTITY.md in the agent workspace and commit.');
   }
 }
 
@@ -41,16 +44,19 @@ export async function runBootstrap(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  // Open a lightweight DocumentStore to check/modify identity
   const { loadConfig } = await import('../config.js');
   const { loadProviders } = await import('../host/registry.js');
   const config = loadConfig();
   const providers = await loadProviders(config);
-  const documents = providers.storage.documents;
+
+  if (!providers.workspace) {
+    console.error('No workspace provider configured.');
+    process.exit(1);
+  }
 
   try {
-    const hasSoul = await documents.get('identity', `${agentName}/SOUL.md`);
-    if (hasSoul) {
+    const identity = await readIdentityForAgent(agentName, providers.workspace);
+    if (identity.soul) {
       const readline = await import('node:readline');
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
       const answer = await new Promise<string>(resolve => {
@@ -67,7 +73,7 @@ export async function runBootstrap(args: string[]): Promise<void> {
       }
     }
 
-    await resetAgent(agentName, templatesDir, documents);
+    await resetAgent(agentName, providers.workspace);
     console.log(`[bootstrap] Reset complete. Run 'ax serve' and open the admin dashboard to begin the bootstrap ritual.`);
   } finally {
     try { providers.storage.close(); } catch { /* ignore */ }

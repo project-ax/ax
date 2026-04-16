@@ -115,45 +115,9 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
   const templatesDir = resolveTemplatesDir();
   const documents = providers.storage.documents;
 
-  // Check DocumentStore for bootstrap completion
-  let bootstrapAlreadyComplete = false;
-  try {
-    const dbSoul = await documents.get('identity', `${agentId}/SOUL.md`);
-    const dbIdentity = await documents.get('identity', `${agentId}/IDENTITY.md`);
-    bootstrapAlreadyComplete = !!(dbSoul && dbIdentity);
-  } catch { /* DocumentStore may not support get-or-null, treat as not complete */ }
-
-  // Identity files → DocumentStore
-  for (const file of ['AGENTS.md', 'HEARTBEAT.md']) {
-    const src = join(templatesDir, file);
-    if (existsSync(src)) {
-      const key = `${agentId}/${file}`;
-      try {
-        const existing = await documents.get('identity', key);
-        if (!existing) await documents.put('identity', key, readFileSync(src, 'utf-8'));
-      } catch { /* non-fatal */ }
-    }
-  }
-
-  // BOOTSTRAP.md + USER_BOOTSTRAP.md → DocumentStore
-  // Always overwrite with latest template so stale instructions are refreshed.
-  if (!bootstrapAlreadyComplete) {
-    const src = join(templatesDir, 'BOOTSTRAP.md');
-    if (existsSync(src)) {
-      try {
-        await documents.put('identity', `${agentId}/BOOTSTRAP.md`, readFileSync(src, 'utf-8'));
-      } catch { /* non-fatal */ }
-    }
-    const ubSrc = join(templatesDir, 'USER_BOOTSTRAP.md');
-    if (existsSync(ubSrc)) {
-      try {
-        await documents.put('identity', `${agentId}/USER_BOOTSTRAP.md`, readFileSync(ubSrc, 'utf-8'));
-      } catch { /* non-fatal */ }
-    }
-  }
-
-  // Skills are seeded into the git workspace (.ax/skills/) by seedAxDirectory().
-  // No DB seeding needed — skills live in git.
+  // Identity and skills are git-native. Templates are seeded into the workspace
+  // git repo by seedAxDirectory() in server-completions.ts on first creation.
+  // No DocumentStore seeding needed.
 
   const defaultUserId = process.env.USER ?? 'default';
 
@@ -259,7 +223,7 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
   }
 
   // ── Admin context (DB-backed) ──
-  const adminCtx: AdminContext = { registry: agentRegistry, documents, agentId };
+  const adminCtx: AdminContext = { registry: agentRegistry, agentId, workspace: providers.workspace };
 
   // ── IPC handler ──
   const handleIPC = createIPCHandler(providers, {

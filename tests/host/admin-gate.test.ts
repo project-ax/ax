@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,39 +6,34 @@ import { randomUUID } from 'node:crypto';
 import { unlinkSync } from 'node:fs';
 import { isAgentBootstrapMode, isAdmin, addAdmin, claimBootstrapAdmin, type AdminContext } from '../../src/host/server-admin-helpers.js';
 import { createSqliteRegistry } from '../../src/host/agent-registry-db.js';
-import type { DocumentStore } from '../../src/providers/storage/types.js';
+import type { WorkspaceProvider } from '../../src/providers/workspace/types.js';
 
-/** In-memory DocumentStore for testing. */
-function createMemoryDocumentStore(): DocumentStore {
-  const store = new Map<string, string>();
+/** Mock workspace provider that returns identity from a map. */
+function createMockWorkspace(identityMap: Record<string, string> = {}): WorkspaceProvider {
   return {
-    async get(collection: string, key: string) {
-      return store.get(`${collection}:${key}`);
-    },
-    async put(collection: string, key: string, content: string) {
-      store.set(`${collection}:${key}`, content);
-    },
-    async delete(collection: string, key: string) {
-      return store.delete(`${collection}:${key}`);
-    },
-    async list(collection: string) {
-      return [...store.keys()]
-        .filter(k => k.startsWith(`${collection}:`))
-        .map(k => k.slice(collection.length + 1));
-    },
+    async getRepoUrl() { return { url: 'file:///mock-repo', created: false }; },
+    async close() {},
   };
 }
+
+// Mock identity-reader to return controlled identity payloads
+vi.mock('../../src/host/identity-reader.js', () => ({
+  readIdentityForAgent: vi.fn(async () => ({})),
+  loadIdentityFromGit: vi.fn(() => ({})),
+  fetchIdentityFromRemote: vi.fn(() => ({ gitDir: '/tmp/mock', identity: {} })),
+  IDENTITY_FILE_MAP: [],
+}));
+
+import { readIdentityForAgent } from '../../src/host/identity-reader.js';
 
 // ── Unit tests for helpers ──
 
 describe('isAgentBootstrapMode', () => {
   let ctx: AdminContext;
-  let documents: DocumentStore;
 
   beforeEach(async () => {
     const dbPath = join(mkdtempSync(join(tmpdir(), 'ax-admin-test-')), 'registry.db');
     const registry = await createSqliteRegistry(dbPath);
-    documents = createMemoryDocumentStore();
     await registry.register({
       id: 'main',
       name: 'main',
@@ -48,40 +43,32 @@ describe('isAgentBootstrapMode', () => {
       capabilities: [],
       createdBy: 'system',
     });
-    ctx = { registry, documents, agentId: 'main' };
+    ctx = { registry, agentId: 'main', workspace: createMockWorkspace() };
   });
 
-  test('returns true when BOOTSTRAP.md exists and SOUL.md does not', async () => {
-    await documents.put('identity', 'main/BOOTSTRAP.md', '# Bootstrap');
+  test('returns true when SOUL.md is missing', async () => {
+    vi.mocked(readIdentityForAgent).mockResolvedValue({ identity: 'I am AX.' });
     expect(await isAgentBootstrapMode(ctx)).toBe(true);
   });
 
-  test('returns true when only SOUL.md exists (still missing IDENTITY.md)', async () => {
-    await documents.put('identity', 'main/BOOTSTRAP.md', '# Bootstrap');
-    await documents.put('identity', 'main/SOUL.md', '# Soul');
+  test('returns true when IDENTITY.md is missing', async () => {
+    vi.mocked(readIdentityForAgent).mockResolvedValue({ soul: 'I am thoughtful.' });
     expect(await isAgentBootstrapMode(ctx)).toBe(true);
   });
 
-  test('returns true when only IDENTITY.md exists (still missing SOUL.md)', async () => {
-    await documents.put('identity', 'main/BOOTSTRAP.md', '# Bootstrap');
-    await documents.put('identity', 'main/IDENTITY.md', '# Identity');
+  test('returns true when both are missing', async () => {
+    vi.mocked(readIdentityForAgent).mockResolvedValue({});
     expect(await isAgentBootstrapMode(ctx)).toBe(true);
   });
 
-  test('returns false when both SOUL.md and IDENTITY.md exist (bootstrap complete)', async () => {
-    await documents.put('identity', 'main/BOOTSTRAP.md', '# Bootstrap');
-    await documents.put('identity', 'main/SOUL.md', '# Soul');
-    await documents.put('identity', 'main/IDENTITY.md', '# Identity');
+  test('returns false when both SOUL.md and IDENTITY.md exist', async () => {
+    vi.mocked(readIdentityForAgent).mockResolvedValue({ soul: 'Soul.', identity: 'Identity.' });
     expect(await isAgentBootstrapMode(ctx)).toBe(false);
   });
 
-  test('returns false when neither file exists', async () => {
-    expect(await isAgentBootstrapMode(ctx)).toBe(false);
-  });
-
-  test('returns false when only SOUL.md exists (no BOOTSTRAP.md)', async () => {
-    await documents.put('identity', 'main/SOUL.md', '# Soul');
-    expect(await isAgentBootstrapMode(ctx)).toBe(false);
+  test('returns true when no workspace provider', async () => {
+    const noWsCtx = { ...ctx, workspace: undefined };
+    expect(await isAgentBootstrapMode(noWsCtx)).toBe(true);
   });
 });
 
@@ -101,7 +88,7 @@ describe('isAdmin', () => {
       createdBy: 'system',
       admins: ['alice', 'bob'],
     });
-    ctx = { registry, documents: createMemoryDocumentStore(), agentId: 'test-agent' };
+    ctx = { registry, agentId: 'test-agent' };
   });
 
   test('returns true when userId is in admins list', async () => {
@@ -135,7 +122,7 @@ describe('addAdmin', () => {
       createdBy: 'system',
       admins: ['alice'],
     });
-    ctx = { registry, documents: createMemoryDocumentStore(), agentId: 'test-agent' };
+    ctx = { registry, agentId: 'test-agent' };
   });
 
   test('adds userId to admins list', async () => {
@@ -167,7 +154,7 @@ describe('claimBootstrapAdmin', () => {
       createdBy: 'system',
       admins: [defaultUser],
     });
-    ctx = { registry, documents: createMemoryDocumentStore(), agentId: 'test-agent' };
+    ctx = { registry, agentId: 'test-agent' };
   });
 
   test('first claim succeeds and adds user to admins', async () => {

@@ -20,7 +20,7 @@ interface PlainJobSchedulerDeps {
   jobStore?: JobStore;
   database?: DatabaseProvider;
   eventbus?: EventBusProvider;
-  documents?: import('../storage/types.js').DocumentStore;
+  workspace?: import('../workspace/types.js').WorkspaceProvider;
 }
 
 export async function create(config: Config, deps: PlainJobSchedulerDeps = {}): Promise<SchedulerProvider> {
@@ -78,8 +78,6 @@ export async function create(config: Config, deps: PlainJobSchedulerDeps = {}): 
   };
 
   const heartbeatIntervalMs = config.scheduler.heartbeat_interval_min * 60 * 1000;
-  const documents = deps.documents;
-
   // ─── Proactive hint gating ─────────────────────────
   const confidenceThreshold = config.scheduler.proactive_hint_confidence_threshold ?? 0.7;
   const cooldownSec = config.scheduler.proactive_hint_cooldown_sec ?? 1800;
@@ -147,10 +145,11 @@ export async function create(config: Config, deps: PlainJobSchedulerDeps = {}): 
     inFlight.add(HEARTBEAT_JOB_ID);
 
     let content = 'Heartbeat check — review pending tasks and proactive hints.';
-    if (documents) {
+    if (deps.workspace) {
       try {
-        const md = await documents.get('identity', `${agentName}/HEARTBEAT.md`);
-        if (md?.trim()) content = md;
+        const { readIdentityForAgent } = await import('../../host/identity-reader.js');
+        const identity = await readIdentityForAgent(agentName, deps.workspace);
+        if (identity.heartbeat?.trim()) content = identity.heartbeat;
       } catch { /* no HEARTBEAT.md — use default */ }
     }
     let result: unknown;
