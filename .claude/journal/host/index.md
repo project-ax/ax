@@ -4,6 +4,8 @@ Host process work: server, router, IPC handlers, event console, event bus, deleg
 
 ## Entries
 
+- 2026-04-15 12:15 — Git-based identity system: Tasks 1-4 (validate-commit, loadIdentityFromGit, hostGitCommit integration, validate_commit IPC) [git-identity.md](git-identity.md)
+
 - 2026-03-31 11:55 — File attachments & artifact downloads (14-task plan: types, FileStore, GCS, server-files, completions, workspace IPC, sandbox provisioning, Slack, chat UI, E2E tests) [file-attachments.md](file-attachments.md)
 - 2026-04-04 09:55 — Multi-agent personal agents: all 11 tasks implemented [multi-agent.md](multi-agent.md)
 - 2026-03-31 01:30 — Fix chat UI markdown rendering (tables, code, headings) and transport text-appending bug [chat-ui.md](chat-ui.md)

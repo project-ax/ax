@@ -1,30 +1,36 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { templatesDir as resolveTemplatesDir } from '../utils/assets.js';
-import type { DocumentStore } from '../providers/storage/types.js';
+import type { WorkspaceProvider } from '../providers/workspace/types.js';
+import { readIdentityForAgent } from '../host/identity-reader.js';
 
-const EVOLVABLE_FILES = ['SOUL.md', 'IDENTITY.md'];
+/**
+ * Reset an agent's identity by removing SOUL.md and IDENTITY.md from the git repo.
+ * The next session will enter bootstrap mode (no soul or identity = bootstrap).
+ */
+export async function resetAgent(agentName: string, workspace: WorkspaceProvider): Promise<void> {
+  const { url: repoUrl } = await workspace.getRepoUrl(agentName);
 
-/** Reset an agent's identity by deleting evolvable files and seeding BOOTSTRAP.md in DocumentStore. */
-export async function resetAgent(agentName: string, templatesDir: string, documents: DocumentStore): Promise<void> {
-  // Delete evolvable identity files from DocumentStore
-  for (const file of EVOLVABLE_FILES) {
-    await documents.delete('identity', `${agentName}/${file}`);
-  }
-
-  // Delete BOOTSTRAP.md (will be re-seeded below)
-  await documents.delete('identity', `${agentName}/BOOTSTRAP.md`);
-
-  // Seed BOOTSTRAP.md from templates
-  const src = join(templatesDir, 'BOOTSTRAP.md');
-  if (existsSync(src)) {
-    await documents.put('identity', `${agentName}/BOOTSTRAP.md`, readFileSync(src, 'utf-8'));
-  }
-
-  // Seed USER_BOOTSTRAP.md from templates
-  const ubSrc = join(templatesDir, 'USER_BOOTSTRAP.md');
-  if (existsSync(ubSrc)) {
-    await documents.put('identity', `${agentName}/USER_BOOTSTRAP.md`, readFileSync(ubSrc, 'utf-8'));
+  // Temp clone → delete identity files → commit → push → cleanup.
+  // Works for both file:// and http:// repos.
+  const tmpWs = mkdtempSync(join(tmpdir(), 'ax-reset-ws-'));
+  try {
+    execFileSync('git', ['clone', repoUrl, tmpWs], { stdio: 'pipe' });
+    const gitOpts = { cwd: tmpWs, stdio: 'pipe' as const };
+    execFileSync('git', ['config', 'user.email', 'ax-host@ax.local'], gitOpts);
+    execFileSync('git', ['config', 'user.name', 'ax-host'], gitOpts);
+    for (const file of ['.ax/SOUL.md', '.ax/IDENTITY.md']) {
+      try { execFileSync('git', ['rm', '--ignore-unmatch', file], gitOpts); } catch { /* may not exist */ }
+    }
+    const status = execFileSync('git', ['status', '--porcelain'], { ...gitOpts, encoding: 'utf-8' }).trim();
+    if (status) {
+      execFileSync('git', ['commit', '-m', 'bootstrap: reset identity'], gitOpts);
+      execFileSync('git', ['push', 'origin', 'main'], gitOpts);
+    }
+  } catch { /* empty repo or nothing to reset */ } finally {
+    try { rmSync(tmpWs, { recursive: true, force: true }); } catch { /* best effort */ }
   }
 }
 
@@ -41,16 +47,19 @@ export async function runBootstrap(args: string[]): Promise<void> {
     process.exit(1);
   }
 
-  // Open a lightweight DocumentStore to check/modify identity
   const { loadConfig } = await import('../config.js');
   const { loadProviders } = await import('../host/registry.js');
   const config = loadConfig();
   const providers = await loadProviders(config);
-  const documents = providers.storage.documents;
+
+  if (!providers.workspace) {
+    console.error('No workspace provider configured.');
+    process.exit(1);
+  }
 
   try {
-    const hasSoul = await documents.get('identity', `${agentName}/SOUL.md`);
-    if (hasSoul) {
+    const identity = await readIdentityForAgent(agentName, providers.workspace);
+    if (identity.soul) {
       const readline = await import('node:readline');
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
       const answer = await new Promise<string>(resolve => {
@@ -67,7 +76,7 @@ export async function runBootstrap(args: string[]): Promise<void> {
       }
     }
 
-    await resetAgent(agentName, templatesDir, documents);
+    await resetAgent(agentName, providers.workspace);
     console.log(`[bootstrap] Reset complete. Run 'ax serve' and open the admin dashboard to begin the bootstrap ritual.`);
   } finally {
     try { providers.storage.close(); } catch { /* ignore */ }

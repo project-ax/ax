@@ -20,15 +20,21 @@ export async function create(_config: Config): Promise<WorkspaceProvider> {
   const reposDir = join(axHome(), 'repos');
 
   return {
-    async getRepoUrl(agentId: string): Promise<string> {
+    async getRepoUrl(agentId: string): Promise<{ url: string; created: boolean }> {
       // Lossless encoding — prevents aliasing (e.g. user:alice vs user-alice)
       const repoName = encodeURIComponent(agentId);
 
       // safePath validates the constructed path is within reposDir
       const repoPath = safePath(reposDir, repoName);
 
-      // Lazily create repos directory and bare repo
+      // Lazily create repos directory and bare repo.
+      // Atomic mkdir (no recursive) detects new vs existing — avoids race
+      // where concurrent callers both see "not exists" before git init.
       mkdirSync(reposDir, { recursive: true });
+      let created = false;
+      try { mkdirSync(repoPath); created = true; } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+      }
       try {
         execFileSync('git', ['init', '--bare', repoPath], {
           stdio: 'pipe',
@@ -50,7 +56,7 @@ export async function create(_config: Config): Promise<WorkspaceProvider> {
         throw err;
       }
 
-      return `file://${repoPath}`;
+      return { url: `file://${repoPath}`, created };
     },
 
     async close(): Promise<void> {

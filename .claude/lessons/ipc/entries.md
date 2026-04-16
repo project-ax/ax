@@ -1,5 +1,11 @@
 # IPC
 
+### Removing IPC actions has a massive blast radius across tests
+**Date:** 2026-04-15
+**Context:** Removing identity/governance IPC schemas, handlers, and tools required updating 20+ test files across agent, host, integration, and e2e directories.
+**Lesson:** When removing an IPC action: update ipc-schemas.ts, handler files, tool-catalog.ts, mcp-server.ts, pi-session.ts, ipc-tools.ts, then search ALL test files for the action name, related tool names, tool counts, and ToolFilterContext flags. Also check taint-budget DEFAULT_SENSITIVE_ACTIONS and prompt module references. The `npm test` sync tests (tool-catalog-sync, sandbox-isolation) catch count mismatches but won't catch behavioral references in other tests.
+**Tags:** ipc, testing, refactoring, identity, governance
+
 ### "catalog" grep matches both tool-catalog and catalog-store — different systems
 **Date:** 2026-04-06
 **Context:** Removing the catalog-store IPC system (catalog_publish/get/list/unpublish/set_required). Grepping for "catalog" returned many matches from src/agent/tool-catalog.ts which is the agent-side tool metadata registry — a completely different system.

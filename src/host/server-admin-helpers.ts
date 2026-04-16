@@ -1,24 +1,20 @@
-// src/host/server-admin-helpers.ts — Admin helper functions backed by AgentRegistry + DocumentStore.
-//
-// All state is stored in the database. No filesystem access.
+// src/host/server-admin-helpers.ts — Admin helper functions backed by AgentRegistry + git workspace.
 
 import type { AgentRegistry } from './agent-registry.js';
-import type { DocumentStore } from '../providers/storage/types.js';
+import type { WorkspaceProvider } from '../providers/workspace/types.js';
+import { readIdentityForAgent } from './identity-reader.js';
 
 export interface AdminContext {
   registry: AgentRegistry;
-  documents: DocumentStore;
   agentId: string;
+  workspace?: WorkspaceProvider;
 }
 
-/** Returns true when the agent is still in bootstrap mode (missing SOUL.md or IDENTITY.md while BOOTSTRAP.md present). */
+/** Returns true when the agent is still in bootstrap mode (missing SOUL.md or IDENTITY.md). */
 export async function isAgentBootstrapMode(ctx: AdminContext): Promise<boolean> {
-  const { documents, agentId } = ctx;
-  const bootstrap = await documents.get('identity', `${agentId}/BOOTSTRAP.md`);
-  if (!bootstrap) return false;
-  const soul = await documents.get('identity', `${agentId}/SOUL.md`);
-  const identity = await documents.get('identity', `${agentId}/IDENTITY.md`);
-  return !soul || !identity;
+  if (!ctx.workspace) return true; // No workspace provider = can't read identity = bootstrap
+  const identity = await readIdentityForAgent(ctx.agentId, ctx.workspace);
+  return !identity.soul || !identity.identity;
 }
 
 /** Returns true when the given userId is an admin for this agent. */

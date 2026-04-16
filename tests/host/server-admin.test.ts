@@ -11,6 +11,14 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initLogger } from '../../src/logger.js';
 
+// Mock identity-reader to return controlled identity
+vi.mock('../../src/host/identity-reader.js', () => ({
+  readIdentityForAgent: vi.fn(async () => ({ soul: 'Test soul.', identity: 'Test identity.' })),
+  loadIdentityFromGit: vi.fn(() => ({})),
+  fetchIdentityFromRemote: vi.fn(() => ({ gitDir: '/tmp/mock', identity: {} })),
+  IDENTITY_FILE_MAP: [],
+}));
+
 // Suppress pino output in tests
 initLogger({ file: false, level: 'silent' });
 
@@ -87,6 +95,10 @@ async function mockDeps(configOverrides: Partial<Config['admin']> = {}): Promise
       },
       memory: {
         recall: vi.fn().mockResolvedValue([]),
+      },
+      workspace: {
+        getRepoUrl: vi.fn().mockResolvedValue({ url: 'file:///mock-repo', created: false }),
+        close: vi.fn(),
       },
     } as unknown as AdminDeps['providers'],
     eventBus: createEventBus(),
@@ -486,7 +498,8 @@ describe('GET /admin/api/agents/:id/identity', () => {
     expect(res.status).toBe(200);
     const docs = res.body as Array<{ key: string; content: string }>;
     expect(docs).toEqual([
-      { key: 'persona.md', content: 'You are a helpful assistant.' },
+      { key: 'SOUL.md', content: 'Test soul.' },
+      { key: 'IDENTITY.md', content: 'Test identity.' },
     ]);
   });
 
@@ -552,6 +565,10 @@ describe('tab endpoints handle provider errors gracefully', () => {
         memory: {
           list: vi.fn().mockRejectedValue(new Error('memory provider error')),
         },
+        workspace: {
+          getRepoUrl: vi.fn().mockResolvedValue({ url: 'file:///mock-repo', created: false }),
+          close: vi.fn(),
+        },
       } as unknown as AdminDeps['providers'],
       eventBus: createEventBus(),
       agentRegistry: registry,
@@ -567,11 +584,14 @@ describe('tab endpoints handle provider errors gracefully', () => {
   afterEach(() => { server.close(); });
 
   it('identity endpoint returns 500 with specific error when provider fails', async () => {
+    // Mock readIdentityForAgent to throw for this test
+    const { readIdentityForAgent } = await import('../../src/host/identity-reader.js');
+    vi.mocked(readIdentityForAgent).mockRejectedValueOnce(new Error('git fetch failed'));
     const res = await fetchAdmin(port, '/admin/api/agents/main/identity', { token: 'test-secret-token' });
     expect(res.status).toBe(500);
     const body = res.body as { error: { message: string } };
-    expect(body.error.message).toContain('Failed to list identity documents');
-    expect(body.error.message).toContain('database connection lost');
+    expect(body.error.message).toContain('Failed to read identity');
+    expect(body.error.message).toContain('git fetch failed');
   });
 
   it('skills endpoint returns 500 with specific error when provider fails', async () => {

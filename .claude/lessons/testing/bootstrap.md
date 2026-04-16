@@ -12,6 +12,12 @@
 **Lesson:** When writing tests for multi-step completion logic (like bootstrap), always trace through the actual condition. `isAgentBootstrapMode` checks `!existsSync(SOUL.md) || !existsSync(IDENTITY.md)` — both must exist for it to return false. Tests must create both files before asserting completion behavior.
 **Tags:** bootstrap, testing, conditions, identity
 
+### Test fixtures for normal mode MUST have non-empty soul AND identity
+**Date:** 2026-04-15
+**Context:** Simplified `isBootstrapMode()` to `return !soul || !identity` (removed bootstrap flag guard). This broke 12 test files whose `makeContext()` helpers used empty soul/identity but expected normal mode behavior.
+**Lesson:** Every test `makeContext()` or `makeCtx()` helper that creates a PromptContext for normal (non-bootstrap) mode MUST include non-empty `soul` and `identity` in `identityFiles`. Use `soul: 'Test soul.', identity: 'Test identity.'` as defaults. When changing bootstrap detection logic, grep for `soul: ''` and `identity: ''` across ALL test files, not just the ones you know about.
+**Tags:** bootstrap, testing, fixtures, prompt-context, isBootstrapMode
+
 ### Bootstrap creates a taint deadlock — bypass taint for SOUL.md/IDENTITY.md during bootstrap
 **Date:** 2026-03-27
 **Context:** In k8s, bootstrap never completed. Chat-UI messages are 100% tainted (external content). The identity handler's taint gate queued ALL identity writes, including SOUL.md/IDENTITY.md. Since bootstrap can only complete when both are written, this creates an unrecoverable deadlock.

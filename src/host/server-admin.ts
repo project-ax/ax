@@ -286,19 +286,18 @@ async function handleAdminAPI(
     const agent = await agentRegistry.get(id);
     if (!agent) { sendError(res, 404, 'Agent not found'); return; }
     try {
-      // Documents are keyed by agent ID (e.g. "main/AGENTS.md"), not display name
-      const allKeys = await providers.storage.documents.list('identity');
-      const prefix = `${id}/`;
+      const { readIdentityForAgent } = await import('./identity-reader.js');
+      if (!providers.workspace) { sendError(res, 500, 'No workspace provider'); return; }
+      const identity = await readIdentityForAgent(id, providers.workspace);
       const files = [];
-      for (const key of allKeys) {
-        if (!key.startsWith(prefix)) continue;
-        const content = await providers.storage.documents.get('identity', key);
-        files.push({ key: key.slice(prefix.length), content: content ?? '' });
-      }
+      if (identity.soul) files.push({ key: 'SOUL.md', content: identity.soul });
+      if (identity.identity) files.push({ key: 'IDENTITY.md', content: identity.identity });
+      if (identity.agents) files.push({ key: 'AGENTS.md', content: identity.agents });
+      if (identity.heartbeat) files.push({ key: 'HEARTBEAT.md', content: identity.heartbeat });
       sendJSON(res, files);
     } catch (err) {
       logger.error('admin_identity_failed', { agentId: id, error: (err as Error).message });
-      sendError(res, 500, `Failed to list identity documents: ${(err as Error).message}`);
+      sendError(res, 500, `Failed to read identity: ${(err as Error).message}`);
     }
     return;
   }

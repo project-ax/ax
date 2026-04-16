@@ -2,6 +2,50 @@
 
 Server core, completions pipeline, file handling, bootstrap, admin gate, session management.
 
+## [2026-04-15 19:12] — Fix bootstrap flow: template seeding, git command removal, DocumentStore sync
+
+**Task:** Fix agent bootstrap so BOOTSTRAP.md is actually loaded and agents don't run git commands after identity writes
+**What I did:**
+- `seedAxDirectory()` now copies template files (BOOTSTRAP.md, USER_BOOTSTRAP.md, AGENTS.md, HEARTBEAT.md) into `.ax/` dirs and commits them to the git repo
+- Removed `git add && git commit` instructions from identity module's evolution guidance — host handles git automatically via `hostGitCommit()`
+- Updated BOOTSTRAP.md template to reference `write_file` tool instead of non-existent `identity()` tool
+- Updated USER_BOOTSTRAP.md to reference `write_file` instead of non-existent `user_write` tool
+- Added DocumentStore sync after `hostGitCommit()` so `isAgentBootstrapMode()` admin helper reflects actual git state
+- Removed bash/git tool call from E2E bootstrap test script
+- Updated identity module tests to assert no git command instructions
+**Files touched:** src/host/server-completions.ts, src/agent/prompt/modules/identity.ts, templates/BOOTSTRAP.md, templates/USER_BOOTSTRAP.md, tests/e2e/scripts/bootstrap.ts, tests/agent/prompt/modules/identity.test.ts
+**Outcome:** Success — all 394 agent+host tests pass, tsc clean
+**Notes:** Root cause was disconnect between DocumentStore (where server-init seeds templates) and git (where loadIdentityFromGit reads from). seedAxDirectory was creating dirs but never copying template content into them.
+
+## [2026-04-15 19:20] — Fix bootstrap: agent immediately writing files instead of having conversation
+
+**Task:** Agent responds to "hi" by immediately calling write_file for SOUL.md and IDENTITY.md instead of talking first
+**What I did:**
+- Removed evolution guidance from bootstrap mode render — BOOTSTRAP.md is self-contained
+- Strengthened BOOTSTRAP.md with explicit "Do NOT write any identity files yet" warning
+- Changed "Next Steps" to "After the Conversation" to make sequencing clearer
+**Files touched:** src/agent/prompt/modules/identity.ts, templates/BOOTSTRAP.md, tests/agent/prompt/modules/identity.test.ts
+**Outcome:** Success — bootstrap prompt now only contains BOOTSTRAP.md content (no duplicate write_file examples)
+**Notes:** Root cause: evolution guidance appended write_file examples + "During bootstrap: write your initial SOUL.md" bullet, which the LLM interpreted as immediate action items. The doubled tool syntax overwhelmed the "talk first" instructions in BOOTSTRAP.md.
+
+## [2026-04-15 19:35] — Fix k8s bootstrap: host must clone HTTP workspace repos for identity loading
+
+**Task:** Bootstrap still broken in k8s — agent writes identity files immediately on "hi"
+**What I did:**
+- Removed `repoUrl.startsWith('file://')` guard from workspace sync — host now clones both file:// and http:// repos
+- Root cause: in k8s, workspace provider returns HTTP URL (e.g. `http://ax-git.ax.svc/...`). The `file://` check caused `hostGitSync()` and `seedAxDirectory()` to be skipped entirely for k8s. Identity was never loaded from git → `isBootstrapMode()` returned false → agent fell through to default "You are AX" + evolution guidance → wrote files immediately.
+**Files touched:** src/host/server-completions.ts
+**Outcome:** Success — host now clones workspace repos regardless of URL scheme, seeds templates, loads identity
+**Notes:** The host MUST have a local git clone to read identity files for the system prompt. This was always true but the file:// guard prevented it for k8s HTTP repos. Both local and k8s paths now converge. Verified working in kind-ax cluster: identity_loaded shows hasBootstrap:true, hasSoul:false → bootstrap mode activates correctly. Agent responds with conversation instead of writing files.
+
+## [2026-04-15 20:17] — Debug: kind-ax cluster was NOT using volume-mounted dist/
+
+**Task:** Debug why code changes weren't taking effect in kind-ax
+**What I did:** Discovered the kind-ax cluster was set up via `helm install` (not `k8s:dev setup`), so no hostPath volume mounts for dist/templates/skills. Pod was running baked-in Docker image code. Fixed by building new Docker image and loading into kind.
+**Files touched:** (none — deployment issue, not code)
+**Outcome:** After loading new image, all fixes confirmed working in k8s
+**Notes:** `npm run k8s:dev cycle all` only works when the cluster was created with `k8s:dev setup` (which sets up kind extraMounts). For non-dev clusters, must rebuild Docker image + `kind load docker-image` + set image on deployment.
+
 ## [2026-04-05 17:00] — Load auth providers from config in registry
 
 **Task:** Task 6 of auth provider series: wire auth provider loading into registry.ts and pass them through server-local.ts

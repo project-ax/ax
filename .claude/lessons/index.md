@@ -65,6 +65,7 @@
 - SQLite autoincrement IDs don't respect logical ordering after delete+insert [testing/sqlite.md](testing/sqlite.md)
 - Bootstrap lifecycle must be tested end-to-end including server restarts [testing/bootstrap.md](testing/bootstrap.md)
 - isAgentBootstrapMode requires BOTH SOUL.md and IDENTITY.md to complete bootstrap [testing/bootstrap.md](testing/bootstrap.md)
+- Test fixtures for normal mode MUST have non-empty soul AND identity [testing/bootstrap.md](testing/bootstrap.md)
 
 ### architecture
 

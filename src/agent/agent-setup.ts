@@ -50,21 +50,16 @@ export interface PromptBuildResult {
  * → no HeartbeatModule → no scheduler tools).
  */
 export function buildSystemPrompt(config: AgentConfig): PromptBuildResult {
-  // Load skills from workspace/skills/ directory.
-  // In k8s mode, the runner writes DB-loaded skills to the workspace
-  // skills/ directory before we get here (see applyPayload in runner.ts).
+  // Load skills from .ax/skills/ in the git workspace.
   const skillDirs: Array<{ dir: string; scope: 'agent' | 'user' }> = [
-    { dir: join(config.workspace, 'skills'), scope: 'agent' as const },
+    { dir: join(config.workspace, '.ax', 'skills'), scope: 'agent' as const },
   ];
   const skills = loadSkillsMultiDir(skillDirs);
 
-  // Identity is pre-loaded from host (via stdin payload from DocumentStore).
-  const identityFiles = loadIdentityFiles({
-    userId: config.userId,
-    preloaded: config.identity,
-  });
+  // Identity is pre-loaded from host (via stdin payload from committed git state).
+  const identityFiles = loadIdentityFiles(config.identity);
 
-  const hasGovernance = config.profile === 'paranoid' || config.profile === 'balanced';
+  const hasGovernance = false; // Governance removed — identity changes are validated at git commit time
 
   // Detect skill install intent from user message
   let skillInstallEnabled = false;
@@ -100,7 +95,6 @@ export function buildSystemPrompt(config: AgentConfig): PromptBuildResult {
 
   const toolFilter: ToolFilterContext = {
     hasHeartbeat: !!identityFiles.heartbeat?.trim(),
-    hasGovernance,
     skillInstallEnabled,
   };
 

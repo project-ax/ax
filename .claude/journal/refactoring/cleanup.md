@@ -2,6 +2,26 @@
 
 General refactoring, stale reference cleanup, path realignment, dependency updates.
 
+## [2026-04-15 12:40] — Remove old identity system (Tasks 5-12 of git-identity plan)
+
+**Task:** Remove database-backed identity IPC schemas, handlers, tools, and governance system; simplify identity-loader; update prompt modules to use git-based identity evolution; seed .ax/ directory in workspace init
+**What I did:**
+- Removed 13 IPC schemas (identity, company identity, governance, agent registry) from ipc-schemas.ts
+- Deleted 3 handler files: identity.ts, governance.ts, company.ts (and their test files)
+- Removed identity and governance tools from tool-catalog.ts, mcp-server.ts, pi-session.ts
+- Removed normalizeOrigin, normalizeIdentityFile, TOOLS_WITH_ORIGIN, GOVERNANCE_ACTIONS
+- Simplified identity-loader.ts to just unpack preloaded payload (no filesystem fallback)
+- Removed `user` field from IdentityFiles and IdentityPayload (USER.md dropped)
+- Rewrote identity prompt module evolution guidance for git-based workflow
+- Removed loadIdentityFromDB and IDENTITY_FILE_MAP from server-completions.ts
+- Added seedAxDirectory() function and calls after hostGitSync
+- Updated k8s git-init to create .ax/ directories
+- Removed proposalsDir from paths.ts, identity_write/user_write from taint budget sensitive actions
+- Updated 20+ test files, deleted 4 test files
+**Files touched:** src/ipc-schemas.ts, src/host/ipc-server.ts, src/host/server-completions.ts, src/host/server-init.ts, src/host/taint-budget.ts, src/agent/tool-catalog.ts, src/agent/mcp-server.ts, src/agent/identity-loader.ts, src/agent/agent-setup.ts, src/agent/runner.ts, src/agent/ipc-tools.ts, src/agent/runners/pi-session.ts, src/agent/prompt/types.ts, src/agent/prompt/modules/identity.ts, src/agent/prompt/modules/runtime.ts, src/agent/prompt/modules/security.ts, src/providers/sandbox/k8s.ts, src/paths.ts, and 20+ test files
+**Outcome:** Success — build passes, all test failures are pre-existing socket path issues
+**Notes:** The 5 remaining test failures (server.test.ts, smoke.test.ts, etc.) are EINVAL socket path length errors on macOS — pre-existing, not caused by these changes
+
 ## [2026-04-14 06:20] — Replace ClawHub filesystem cache with in-memory cache
 
 **Task:** Remove filesystem cache from ClawHub registry client (part of removing ~/.ax/cache/ directory)
