@@ -2,6 +2,26 @@
 
 Kysely migration infrastructure: runner, database factory, store integration, upgrade-path tests.
 
+## [2026-04-15 23:20] — Fix 12 test files for simplified isBootstrapMode()
+
+**Task:** Fix all tests broken by removing the bootstrap flag check from `isBootstrapMode()`, which was simplified from `if (!bootstrap) return false; return !soul || !identity` to just `return !soul || !identity`.
+**What I did:** Updated test fixtures in 12 files to add non-empty `soul` and `identity` values where tests expected normal (non-bootstrap) mode. Updated `types.test.ts` to test the new logic directly. Updated `claude-code.test.ts` fallback test to expect bootstrap mode behavior instead of normal mode default identity.
+**Files touched:**
+- tests/agent/prompt/types.test.ts — rewrote isBootstrapMode test cases for new logic
+- tests/agent/prompt/builder.test.ts — added soul+identity to makeContext and 4 overrides
+- tests/agent/prompt/integration.test.ts — added identity to budget test fixture
+- tests/agent/prompt/modules/heartbeat.test.ts — added identity to makeContext and 5 overrides
+- tests/agent/prompt/modules/injection-defense.test.ts — added soul+identity to makeContext
+- tests/agent/prompt/modules/memory-recall.test.ts — added soul+identity to makeContext
+- tests/agent/prompt/modules/reply-gate.test.ts — added soul+identity to makeCtx
+- tests/agent/prompt/modules/tool-style.test.ts — added soul+identity to makeContext
+- tests/agent/prompt/modules/security.test.ts — added soul+identity to makeContext
+- tests/agent/prompt/modules/runtime.test.ts — added soul+identity to makeContext
+- tests/agent/runners/claude-code.test.ts — changed fallback test to expect bootstrap mode
+- tests/agent/tool-catalog-sync.test.ts — added identity to makePromptContext
+**Outcome:** Success. All 41 agent test files pass (369 tests). Remaining failures in host/integration are pre-existing socket path issues unrelated to this change.
+**Notes:** The simplified isBootstrapMode means ANY test with empty soul OR identity triggers bootstrap mode. This is the intended behavior: agents without both identity files should always be in bootstrap mode.
+
 ## [2026-04-12 10:30] — Fix failing tests for workspace-git-ssh branch merge
 
 **Task:** Fix test failures caused by source code changes on workspace-git-ssh-src that weren't reflected in the test files from workspace-git-ssh-tests.

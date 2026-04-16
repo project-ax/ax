@@ -1,7 +1,19 @@
 # Storage Provider Lessons
 
-### Template seeding must write to BOTH filesystem AND DocumentStore
-**Date:** 2026-03-15
-**Context:** First-run bootstrap was broken when using GCS-backed DocumentStore — template files were only seeded to filesystem, but identity files are loaded from DocumentStore for agent prompts.
-**Lesson:** When seeding template files (BOOTSTRAP.md, AGENTS.md, etc.) on first run, always write to both the filesystem (for `isAgentBootstrapMode()` compat) and the DocumentStore (for `loadIdentityFromDB()`). The DocumentStore is the authoritative source for agent prompt assembly. Any new template seeding code must handle both storage layers.
-**Tags:** bootstrap, identity, DocumentStore, GCS, first-run, dual-storage
+### Git repo is authoritative for identity; DocumentStore must be synced
+**Date:** 2026-04-15
+**Context:** After the git-native identity refactor, `loadIdentityFromGit()` reads from `git show HEAD:<path>`, but admin helpers (`isAgentBootstrapMode()`) still check DocumentStore. If DocumentStore isn't synced after git commits, admin state gets stuck.
+**Lesson:** The git workspace repo is now the authoritative source for agent identity files. `seedAxDirectory()` must copy template files (BOOTSTRAP.md, USER_BOOTSTRAP.md, AGENTS.md, HEARTBEAT.md) into the `.ax/` directory and commit them. After `hostGitCommit()`, sync identity files from git back to DocumentStore so admin helpers reflect actual state. Both storage layers must stay in sync.
+**Tags:** bootstrap, identity, DocumentStore, git, first-run, dual-storage
+
+### Agent prompts must reference actual tool names, not stale ones
+**Date:** 2026-04-15
+**Context:** BOOTSTRAP.md referenced `identity()` tool and USER_BOOTSTRAP.md referenced `user_write` — neither exists in the tool catalog. Agent was told to use tools it couldn't find.
+**Lesson:** When updating the tool catalog (adding/removing tools), grep templates/ and prompt modules for references to the old tool names. The agent only has access to tools in `TOOL_CATALOG` — prompts that reference anything else will confuse the LLM.
+**Tags:** bootstrap, tools, templates, prompt, identity
+
+### Agent must NOT run git commands — host handles git
+**Date:** 2026-04-15
+**Context:** Identity evolution guidance told agents to run `git add .ax/identity/ && git commit` after writing files. But `hostGitCommit()` already commits all workspace changes after each turn. Agents running git commands caused duplicate commits and confused state.
+**Lesson:** Never instruct agents to run git commands in prompt modules or templates. The host manages all git operations (commit, push, reset) via `hostGitCommit()` after each agent turn. Agent writes files via `write_file`; host commits them. If you see `git add`, `git commit`, or `git push` in prompt text, it's a bug.
+**Tags:** git, identity, prompt, agent, host
