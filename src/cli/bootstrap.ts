@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { templatesDir as resolveTemplatesDir } from '../utils/assets.js';
 import type { WorkspaceProvider } from '../providers/workspace/types.js';
 import { readIdentityForAgent } from '../host/identity-reader.js';
@@ -11,23 +13,24 @@ import { readIdentityForAgent } from '../host/identity-reader.js';
 export async function resetAgent(agentName: string, workspace: WorkspaceProvider): Promise<void> {
   const { url: repoUrl } = await workspace.getRepoUrl(agentName);
 
-  if (repoUrl.startsWith('file://')) {
-    // file:// — commit deletion directly to the bare repo via a temp worktree
-    const bareRepoPath = repoUrl.replace('file://', '');
-    const gitOpts = { cwd: bareRepoPath, stdio: 'pipe' as const };
-    // Remove identity files from the index (bare repo, no worktree needed)
+  // Temp clone → delete identity files → commit → push → cleanup.
+  // Works for both file:// and http:// repos.
+  const tmpWs = mkdtempSync(join(tmpdir(), 'ax-reset-ws-'));
+  try {
+    execFileSync('git', ['clone', repoUrl, tmpWs], { stdio: 'pipe' });
+    const gitOpts = { cwd: tmpWs, stdio: 'pipe' as const };
+    execFileSync('git', ['config', 'user.email', 'ax-host@ax.local'], gitOpts);
+    execFileSync('git', ['config', 'user.name', 'ax-host'], gitOpts);
     for (const file of ['.ax/SOUL.md', '.ax/IDENTITY.md']) {
-      try { execFileSync('git', ['rm', '--cached', '--ignore-unmatch', file], gitOpts); } catch { /* may not exist */ }
+      try { execFileSync('git', ['rm', '--ignore-unmatch', file], gitOpts); } catch { /* may not exist */ }
     }
-    try {
-      const status = execFileSync('git', ['status', '--porcelain'], { ...gitOpts, encoding: 'utf-8' }).trim();
-      if (status) {
-        execFileSync('git', ['commit', '-m', 'bootstrap: reset identity'], gitOpts);
-      }
-    } catch { /* nothing to commit */ }
-  } else {
-    // http:// — would need a temp clone to commit. For now, log guidance.
-    console.log('For HTTP repos: delete .ax/SOUL.md and .ax/IDENTITY.md in the agent workspace and commit.');
+    const status = execFileSync('git', ['status', '--porcelain'], { ...gitOpts, encoding: 'utf-8' }).trim();
+    if (status) {
+      execFileSync('git', ['commit', '-m', 'bootstrap: reset identity'], gitOpts);
+      execFileSync('git', ['push', 'origin', 'main'], gitOpts);
+    }
+  } catch { /* empty repo or nothing to reset */ } finally {
+    try { rmSync(tmpWs, { recursive: true, force: true }); } catch { /* best effort */ }
   }
 }
 

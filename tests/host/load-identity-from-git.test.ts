@@ -49,7 +49,7 @@ describe('loadIdentityFromGit', () => {
 
   // BOOTSTRAP.md and USER_BOOTSTRAP.md are loaded from templates/, not git.
   it('loads identity files from committed git state', () => {
-    const result = loadIdentityFromGit('/workspace', '/gitdir');
+    const result = loadIdentityFromGit('/gitdir');
     expect(result.soul).toBe('I am thoughtful.');
     expect(result.identity).toBe('I am AX.');
     expect(result.agents).toBe('You are a helpful agent.');
@@ -61,7 +61,7 @@ describe('loadIdentityFromGit', () => {
       throw new Error('not found');
     });
 
-    const result = loadIdentityFromGit('/workspace', '/gitdir');
+    const result = loadIdentityFromGit('/gitdir');
     expect(result.soul).toBeUndefined();
     expect(result.identity).toBeUndefined();
     expect(result.agents).toBeUndefined();
@@ -80,7 +80,7 @@ describe('loadIdentityFromGit', () => {
       return '';
     });
 
-    const result = loadIdentityFromGit('/workspace', '/gitdir');
+    const result = loadIdentityFromGit('/gitdir');
     expect(result.soul).toBe('I am thoughtful.');
     expect(result.identity).toBeUndefined();
     expect(result.agents).toBeUndefined();

@@ -2,6 +2,12 @@ import { describe, test, expect, afterEach, vi, beforeEach } from 'vitest';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+
+// Mock identity-reader before importing scheduler (which dynamic-imports it)
+vi.mock('../../../src/host/identity-reader.js', () => ({
+  readIdentityForAgent: vi.fn(async () => ({})),
+}));
+
 import { create } from '../../../src/providers/scheduler/plainjob.js';
 import { MemoryJobStore } from '../../../src/providers/scheduler/types.js';
 import { KyselyJobStore } from '../../../src/job-store.js';
@@ -340,17 +346,17 @@ describe('scheduler-plainjob', () => {
     expect(hbMsg!.content).toContain('Heartbeat check');
   });
 
-  test('heartbeat message includes HEARTBEAT.md content from DocumentStore', async () => {
-    const memDocs = {
-      _store: new Map<string, string>(),
-      async get(collection: string, key: string) { return this._store.get(`${collection}:${key}`); },
-      async put(collection: string, key: string, content: string) { this._store.set(`${collection}:${key}`, content); },
-      async delete(collection: string, key: string) { return this._store.delete(`${collection}:${key}`); },
-      async list(collection: string) {
-        return [...this._store.keys()].filter(k => k.startsWith(`${collection}:`)).map(k => k.slice(collection.length + 1));
-      },
+  test('heartbeat message includes HEARTBEAT.md content from git workspace', async () => {
+    const mockWorkspace = {
+      async getRepoUrl() { return { url: 'file:///mock-repo', created: false }; },
+      async close() {},
     };
-    await memDocs.put('identity', `${mockConfig.agent_name}/HEARTBEAT.md`, '# My Checks\n- check emails (every 2h)');
+
+    // Configure mock to return heartbeat content
+    const { readIdentityForAgent } = await import('../../../src/host/identity-reader.js');
+    vi.mocked(readIdentityForAgent).mockResolvedValue({
+      heartbeat: '# My Checks\n- check emails (every 2h)',
+    });
 
     const config = {
       ...mockConfig,
@@ -360,7 +366,7 @@ describe('scheduler-plainjob', () => {
       },
     } as Config;
 
-    const scheduler = await create(config, { jobStore: new MemoryJobStore(), documents: memDocs });
+    const scheduler = await create(config, { jobStore: new MemoryJobStore(), workspace: mockWorkspace as any });
     const received: InboundMessage[] = [];
 
     await scheduler.start(msg => received.push(msg));

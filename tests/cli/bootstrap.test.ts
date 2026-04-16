@@ -1,80 +1,69 @@
-import { describe, test, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { resetAgent } from '../../src/cli/bootstrap.js';
-import type { DocumentStore } from '../../src/providers/storage/types.js';
-
-/** In-memory DocumentStore for testing. */
-function createMemoryDocumentStore(): DocumentStore {
-  const store = new Map<string, string>();
-  return {
-    async get(collection: string, key: string) {
-      return store.get(`${collection}:${key}`);
-    },
-    async put(collection: string, key: string, content: string) {
-      store.set(`${collection}:${key}`, content);
-    },
-    async delete(collection: string, key: string) {
-      return store.delete(`${collection}:${key}`);
-    },
-    async list(collection: string) {
-      return [...store.keys()]
-        .filter(k => k.startsWith(`${collection}:`))
-        .map(k => k.slice(collection.length + 1));
-    },
-  };
-}
+import type { WorkspaceProvider } from '../../src/providers/workspace/types.js';
 
 describe('bootstrap command', () => {
-  let templatesDir: string;
-  let documents: DocumentStore;
+  let repoDir: string;
+  let workspace: WorkspaceProvider;
 
   beforeEach(() => {
     const id = randomUUID();
-    templatesDir = join(tmpdir(), `ax-test-templates-${id}`);
-    mkdirSync(templatesDir, { recursive: true });
-    documents = createMemoryDocumentStore();
+    repoDir = join(tmpdir(), `ax-test-repo-${id}`);
+    // Create a bare git repo with identity files
+    execFileSync('git', ['init', '--bare', repoDir], { stdio: 'pipe' });
+    execFileSync('git', ['symbolic-ref', 'HEAD', 'refs/heads/main'], { cwd: repoDir, stdio: 'pipe' });
+
+    // Add identity files via a temp worktree
+    const tmpWs = join(tmpdir(), `ax-test-ws-${id}`);
+    execFileSync('git', ['clone', repoDir, tmpWs], { stdio: 'pipe' });
+    const gitOpts = { cwd: tmpWs, stdio: 'pipe' as const };
+    execFileSync('git', ['config', 'user.email', 'test@test.local'], gitOpts);
+    execFileSync('git', ['config', 'user.name', 'test'], gitOpts);
+    mkdirSync(join(tmpWs, '.ax'), { recursive: true });
+
+    workspace = {
+      async getRepoUrl() { return { url: `file://${repoDir}`, created: false }; },
+      async close() {},
+    };
   });
 
   afterEach(() => {
-    rmSync(templatesDir, { recursive: true, force: true });
+    rmSync(repoDir, { recursive: true, force: true });
   });
 
-  test('resetAgent deletes SOUL.md and IDENTITY.md from DocumentStore', async () => {
-    await documents.put('identity', 'main/SOUL.md', '# Old soul');
-    await documents.put('identity', 'main/IDENTITY.md', '# Old identity');
-    await documents.put('identity', 'main/AGENTS.md', '# Rules');
+  test('resetAgent removes SOUL.md and IDENTITY.md from git repo', async () => {
+    // Seed identity files into the repo
+    const tmpWs = join(tmpdir(), `ax-test-ws-reset-${randomUUID()}`);
+    execFileSync('git', ['clone', repoDir, tmpWs], { stdio: 'pipe' });
+    const gitOpts = { cwd: tmpWs, stdio: 'pipe' as const };
+    execFileSync('git', ['config', 'user.email', 'test@test.local'], gitOpts);
+    execFileSync('git', ['config', 'user.name', 'test'], gitOpts);
+    mkdirSync(join(tmpWs, '.ax'), { recursive: true });
+    require('fs').writeFileSync(join(tmpWs, '.ax', 'SOUL.md'), '# Old soul');
+    require('fs').writeFileSync(join(tmpWs, '.ax', 'IDENTITY.md'), '# Old identity');
+    require('fs').writeFileSync(join(tmpWs, '.ax', 'AGENTS.md'), '# Rules');
+    execFileSync('git', ['add', '.ax/'], gitOpts);
+    execFileSync('git', ['commit', '-m', 'seed'], gitOpts);
+    execFileSync('git', ['push', 'origin', 'main'], gitOpts);
+    rmSync(tmpWs, { recursive: true, force: true });
 
-    await resetAgent('main', templatesDir, documents);
+    await resetAgent('main', workspace);
 
-    expect(await documents.get('identity', 'main/SOUL.md')).toBeUndefined();
-    expect(await documents.get('identity', 'main/IDENTITY.md')).toBeUndefined();
-    // AGENTS.md should NOT be deleted
-    expect(await documents.get('identity', 'main/AGENTS.md')).toBe('# Rules');
+    // Verify SOUL.md and IDENTITY.md are gone
+    const barOpts = { cwd: repoDir, encoding: 'utf-8' as const, stdio: 'pipe' as const };
+    expect(() => execFileSync('git', ['show', 'HEAD:.ax/SOUL.md'], barOpts)).toThrow();
+    expect(() => execFileSync('git', ['show', 'HEAD:.ax/IDENTITY.md'], barOpts)).toThrow();
+    // AGENTS.md should still exist
+    const agents = execFileSync('git', ['show', 'HEAD:.ax/AGENTS.md'], barOpts);
+    expect(agents).toContain('# Rules');
   });
 
-  test('resetAgent seeds BOOTSTRAP.md to DocumentStore', async () => {
-    writeFileSync(join(templatesDir, 'BOOTSTRAP.md'), '# Bootstrap\nDiscover yourself.');
-
-    await resetAgent('main', templatesDir, documents);
-
-    const content = await documents.get('identity', 'main/BOOTSTRAP.md');
-    expect(content).toContain('Bootstrap');
-  });
-
-  test('resetAgent seeds USER_BOOTSTRAP.md to DocumentStore', async () => {
-    writeFileSync(join(templatesDir, 'USER_BOOTSTRAP.md'), '# Welcome\nTell me about yourself.');
-
-    await resetAgent('main', templatesDir, documents);
-
-    const content = await documents.get('identity', 'main/USER_BOOTSTRAP.md');
-    expect(content).toContain('Welcome');
-  });
-
-  test('resetAgent is idempotent (no error if files missing)', async () => {
-    // No files exist — should not throw
-    await expect(resetAgent('main', templatesDir, documents)).resolves.not.toThrow();
+  test('resetAgent is idempotent (no error on empty repo)', async () => {
+    await expect(resetAgent('main', workspace)).resolves.not.toThrow();
   });
 });

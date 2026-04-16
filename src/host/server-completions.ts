@@ -760,13 +760,22 @@ export async function processCompletion(
           reqLogger.warn('host_git_sync_failed', { error: (err as Error).message });
         }
       } else {
-        // http:// — seed templates on first creation, then fetch identity
-        if (repoCreated) {
-          seedRemoteRepo(repoUrl, reqLogger);
-        }
+        // http:// — fetch identity, seed if repo is empty
         try {
+          if (repoCreated) {
+            seedRemoteRepo(repoUrl, reqLogger);
+          }
           const result = fetchIdentityFromRemote(repoUrl);
-          identityGitDir = result.gitDir;
+          // Fallback: seed if identity is empty (handles retry race where
+          // created=false but repo has no content yet)
+          if (!repoCreated && Object.keys(result.identity).length === 0) {
+            try { rmSync(result.gitDir, { recursive: true, force: true }); } catch { /* best effort */ }
+            seedRemoteRepo(repoUrl, reqLogger);
+            const seeded = fetchIdentityFromRemote(repoUrl);
+            identityGitDir = seeded.gitDir;
+          } else {
+            identityGitDir = result.gitDir;
+          }
           hostManagedGit = true;
           hostOwnsGitCommit = false;
         } catch (err) {
