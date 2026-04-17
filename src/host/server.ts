@@ -344,6 +344,8 @@ export async function createServer(
     reconcileAgent: adminReconcileAgent,
     defaultUserId,
     credentialRequestQueue: core.credentialRequestQueue,
+    adminOAuthProviderStore: core.adminOAuthProviderStore,
+    adminOAuthFlow: core.adminOAuthFlow,
   });
 
   let httpServer: HttpServer | null = null;
@@ -581,6 +583,8 @@ export async function createServer(
     webhookPrefix,
     webhookHandler,
     adminHandler,
+    adminOAuthFlow: core.adminOAuthFlow,
+    reconcileAgent: adminReconcileAgent,
     authProviders: providers.auth,
     isDraining: () => draining,
     trackRequestStart,

@@ -1,5 +1,15 @@
 # Security
 
+### Always pin GCM auth tag length to 16 — Node accepts 4-16 byte tags by default
+**Date:** 2026-04-17
+**Context:** Semgrep's `javascript.node-crypto.security.gcm-no-tag-length.gcm-no-tag-length` rule flagged `createDecipheriv('aes-256-gcm', key, iv)` in `admin-oauth-providers.ts`. Node's GCM mode accepts any auth tag length from 4 to 16 bytes unless you pass `{ authTagLength: 16 }` as the 4th arg. That means a tamperer could replace our 16-byte tag with a shorter forged one and dramatically lower the work factor for a successful forgery — even if your application logic only ever generates 16-byte tags.
+**Lesson:** Always pass `{ authTagLength: 16 }` to BOTH `createCipheriv` and `createDecipheriv` when using `'aes-256-gcm'` (or any GCM variant). Slicing a 16-byte tag off a stored blob is NOT sufficient — the cipher layer itself needs to reject shorter tags. Add a regression test that truncates the blob by a few bytes (but not enough to trip the structural length guard) and expects `decrypt` to throw. Template:
+```ts
+const cipher = createCipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
+const decipher = createDecipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
+```
+**Tags:** crypto, gcm, aes, auth-tag, tag-length, forgery, node-crypto, semgrep
+
 ### Validate shapes at schema boundaries, not downstream consumers
 **Date:** 2026-04-17
 **Context:** CodeRabbit flagged `domains: z.array(z.string().min(1).max(253))` in the skill frontmatter schema. The values fed a proxy allowlist (`approvedDomains.has(domain)`) and a reconciler that builds `desired.proxyAllowlist` — exact-string matching means `"not a host"` or `"https://api.linear.app"` would silently land in the allowlist if a later refactor ever used fuzzy matching or URL parsing.

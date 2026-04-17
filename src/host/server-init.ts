@@ -7,7 +7,7 @@
 import { existsSync, readFileSync, readdirSync, mkdirSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { getLogger } from '../logger.js';
 import type { Config, ProviderRegistry } from '../types.js';
 import { dataDir } from '../paths.js';
@@ -31,6 +31,8 @@ import type { SkillStateStore } from './skills/state-store.js';
 import type { McpApplier } from './skills/mcp-applier.js';
 import type { ProxyApplier } from './skills/proxy-applier.js';
 import { createCredentialRequestQueue, type CredentialRequestQueue } from './credential-request-queue.js';
+import type { AdminOAuthProviderStore } from './admin-oauth-providers.js';
+import { createAdminOAuthFlow, type AdminOAuthFlow } from './admin-oauth-flow.js';
 
 const logger = getLogger();
 
@@ -92,6 +94,23 @@ export interface HostCore {
    *  restart or dispose the host core should invoke this; otherwise the
    *  subscription lives for the process lifetime. */
   unsubscribeCredentialRequests: () => void;
+  /** Phase 6 Task 1: symmetric key used to encrypt admin-registered OAuth
+   *  client secrets at rest. Derived from `AX_OAUTH_SECRET_KEY` (preferred)
+   *  or sha256(admin.token) as a fallback. Exposed so Task 2's CRUD endpoint
+   *  handler can construct its own store views if needed. Undefined when
+   *  no database provider is available. */
+  adminOAuthKey?: Buffer;
+  /** Phase 6 Task 1: admin-registered OAuth provider store. Pre-configured
+   *  client_id + (encrypted) client_secret + redirect_uri per provider name,
+   *  used by the OAuth start/callback flow in later phase-6 tasks to override
+   *  a skill's frontmatter `client_id` (upgrading a public-client config to
+   *  a confidential one). Undefined when no database provider is available. */
+  adminOAuthProviderStore?: AdminOAuthProviderStore;
+  /** Phase 6 Task 3: in-memory pending-flow map for admin-initiated OAuth.
+   *  Keyed by state, single-use claim, 15-minute TTL. Constructed
+   *  unconditionally (no DB deps) so the /admin/api/skills/oauth/start
+   *  endpoint is available whenever the skill state store is wired. */
+  adminOAuthFlow: AdminOAuthFlow;
 }
 
 /**
@@ -255,6 +274,30 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
   // Only created when a database provider is available; otherwise the
   // skills_index handler silently returns an empty list (Task 3 behavior).
   let stateStore: SkillStateStore | undefined;
+  let adminOAuthKey: Buffer | undefined;
+  let adminOAuthProviderStore: AdminOAuthProviderStore | undefined;
+
+  // Phase 6 Task 3: admin-initiated OAuth pending-flow map. In-memory, no
+  // DB deps — construct unconditionally so the endpoint is available
+  // whenever `skillStateStore` is.
+  const adminOAuthFlow = createAdminOAuthFlow();
+
+  // Auto-generate admin.token if not configured — MUST happen before
+  // `deriveOAuthKey` below. Otherwise, on a fresh install without
+  // `AX_OAUTH_SECRET_KEY` set, `deriveOAuthKey('', ...)` would throw
+  // (refusing sha256('') as an at-rest key), we'd log the misleading
+  // "admin_oauth_provider_store_disabled" warning, and then
+  // `createAdminHandler` would generate a token moments later — leaving
+  // the OAuth provider store disabled even though a usable token DID get
+  // generated. `createAdminHandler` still has the same guard as a
+  // defensive no-op for callers that don't run through `initHostCore`
+  // (e.g. unit tests that construct AdminDeps directly).
+  const authDisabled = config.admin?.disable_auth === true;
+  if (config.admin && !authDisabled && !config.admin.token) {
+    config.admin.token = randomBytes(32).toString('hex');
+    logger.info('admin_token_generated', { source: 'server-init' });
+  }
+
   if (providers.database) {
     const { runMigrations } = await import('../utils/migrator.js');
     const { skillsMigrations } = await import('../migrations/skills.js');
@@ -266,6 +309,47 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     );
     if (migResult.error) throw migResult.error;
     stateStore = createSkillStateStore(providers.database.db);
+
+    // Phase 6 Task 1: admin-registered OAuth providers. Run the migration
+    // alongside the skills one (same Kysely instance, distinct migration
+    // table name so their histories don't collide), derive the encryption
+    // key, and construct the store so Task 2's CRUD endpoints can wire to
+    // it without another round of setup.
+    const { adminOAuthMigrations } = await import('../migrations/admin-oauth-providers.js');
+    const { deriveOAuthKey, createAdminOAuthProviderStore } =
+      await import('./admin-oauth-providers.js');
+    const oauthMigResult = await runMigrations(
+      providers.database.db,
+      adminOAuthMigrations,
+      'admin_oauth_migration',
+    );
+    if (oauthMigResult.error) throw oauthMigResult.error;
+    // Soft-degrade when no key source is configured: `deriveOAuthKey` throws
+    // for installs without AX_OAUTH_SECRET_KEY AND without a sufficiently-long
+    // admin.token (refusing sha256('') as an at-rest key). That's a valid
+    // state for many dev loops, so we warn and skip constructing the store —
+    // OAuth provider CRUD endpoints will 503, matching the DB-less case.
+    try {
+      const derived = deriveOAuthKey(
+        config.admin?.token ?? '',
+        process.env.AX_OAUTH_SECRET_KEY,
+      );
+      adminOAuthKey = derived.key;
+      if (derived.derivedFrom === 'admin-token') {
+        logger.warn('oauth_secret_key_derived_from_admin_token', {
+          msg: 'AX_OAUTH_SECRET_KEY unset — derived from admin.token. Set a dedicated 32-byte key for production.',
+        });
+      }
+      adminOAuthProviderStore = createAdminOAuthProviderStore(
+        providers.database.db,
+        adminOAuthKey,
+      );
+    } catch (err) {
+      logger.warn('admin_oauth_provider_store_disabled', {
+        msg: 'Admin-registered OAuth providers disabled — OAuth provider CRUD endpoints will return 503.',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   // Phase 4: construct live-state appliers when the state store is available.
@@ -459,5 +543,8 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     proxyApplier,
     credentialRequestQueue,
     unsubscribeCredentialRequests,
+    adminOAuthKey,
+    adminOAuthProviderStore,
+    adminOAuthFlow,
   };
 }

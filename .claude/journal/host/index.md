@@ -4,6 +4,15 @@ Host process work: server, router, IPC handlers, event console, event bus, deleg
 
 ## Entries
 
+- 2026-04-17 16:10 — Phase 6 follow-up: fix 2 blocking semgrep findings — AES-256-GCM `authTagLength: 16` pin + OAuth callback HTML lookup-table replaces reason-interpolated template; 44 target tests + tsc clean; semgrep 0 findings [skills.md](skills.md)
+- 2026-04-17 15:30 — Phase 6 follow-up: 5 CodeRabbit review fixes on PR #181 (provider-name lowercase, init-order admin.token, x-forwarded-proto whitelist, fire-and-forget reconcile, 30s timer cleanup on unmount); 258 backend + 13 Playwright tests pass [skills.md](skills.md)
+- 2026-04-17 14:17 — Phase 6 complete: OAuth PKCE + admin-registered providers — 9 commits (Tasks 1-6) + docs (Task 7); 135 backend + 23 Playwright tests pass; tsc clean at root and ui/admin; commits 1a229e8d..1500a6b8 [skills.md](skills.md)
+- 2026-04-17 18:15 — Phase 6 Task 6: end-to-end OAuth verification against local host with mock token endpoint — POST /oauth/start → GET /v1/oauth/callback/linear → credential_store (access_token + __oauth_blob at user:verify-agent:vpulim) + audit (oauth_start, oauth_callback_success, no token leakage) + replay defense [skills.md](skills.md)
+- 2026-04-17 13:51 — Phase 6 Task 4: OAuth callback extension — `resolveCallback` on AdminOAuthFlow (code exchange + scoped credential write + refresh blob + reconcile trigger); matched-but-failed semantics block fall-through to agent flow on consumed state [skills.md](skills.md)
+- 2026-04-17 13:42 — Phase 6 Task 3: admin OAuth flow module + `POST /admin/api/skills/oauth/start` (PKCE initiation, 15-min TTL single-use pending-flow map, admin clientSecret stays server-side) [skills.md](skills.md)
+- 2026-04-17 13:40 — Phase 6 Task 2: admin OAuth provider CRUD endpoints (`/admin/api/oauth/providers*`) — Zod-strict upsert, 503 when store missing, `hasSecret:boolean` audit shape [skills.md](skills.md)
+- 2026-04-17 12:32 — Phase 6 Task 1 follow-up: `deriveOAuthKey` refuses empty / <16-char admin tokens (no more `sha256('')` at-rest key); server-init soft-degrades [skills.md](skills.md)
+- 2026-04-17 12:12 — Phase 6 Task 1: admin OAuth providers table + AES-256-GCM crypto helpers + Kysely store + server-init wiring [skills.md](skills.md)
 - 2026-04-17 10:17 — Phase 5 complete: docs wrap-up (ax-host skill, design doc rollout status, journal entry) [skills.md](skills.md)
 - 2026-04-17 14:15 — Phase 5 Task 8: end-to-end verification of `/admin/api/skills/*` against local host (SQLite, admin token) — all endpoints behaved as specified [skills.md](skills.md)
 - 2026-04-17 12:05 — Phase 5 Task 7: Skills sidebar nav entry (Sparkles icon between Agents and Connectors) + navigation.spec.ts updates [skills.md](skills.md)

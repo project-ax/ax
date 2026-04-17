@@ -77,11 +77,15 @@ export interface AdminSetupOpts {
   defaultUserId?: string;
   /** Phase 5 Task 5: in-memory queue of ad-hoc credential requests. */
   credentialRequestQueue?: import('./credential-request-queue.js').CredentialRequestQueue;
+  /** Phase 6: admin-registered OAuth providers. When absent, /admin/api/oauth/* returns 503. */
+  adminOAuthProviderStore?: import('./admin-oauth-providers.js').AdminOAuthProviderStore;
+  /** Phase 6: admin-initiated OAuth flow module. When absent, /admin/api/skills/oauth/* returns 503. */
+  adminOAuthFlow?: import('./admin-oauth-flow.js').AdminOAuthFlow;
 }
 
 export function setupAdminHandler(opts: AdminSetupOpts) {
-  const { config, providers, eventBus, agentRegistry, startTime, localDevMode, domainList, mcpManager, externalAuth, skillStateStore, reconcileAgent, defaultUserId, credentialRequestQueue } = opts;
+  const { config, providers, eventBus, agentRegistry, startTime, localDevMode, domainList, mcpManager, externalAuth, skillStateStore, reconcileAgent, defaultUserId, credentialRequestQueue, adminOAuthProviderStore, adminOAuthFlow } = opts;
   return config.admin?.enabled
-    ? createAdminHandler({ config, providers, eventBus, agentRegistry, startTime, localDevMode, domainList, mcpManager, externalAuth, skillStateStore, reconcileAgent, defaultUserId, credentialRequestQueue })
+    ? createAdminHandler({ config, providers, eventBus, agentRegistry, startTime, localDevMode, domainList, mcpManager, externalAuth, skillStateStore, reconcileAgent, defaultUserId, credentialRequestQueue, adminOAuthProviderStore, adminOAuthFlow })
     : null;
 }

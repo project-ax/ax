@@ -2,6 +2,18 @@
 
 ## Lessons
 
+### Playwright reuseExistingServer:true silently serves a stale bundle from another worktree
+**Date:** 2026-04-17
+**Context:** Phase 6 Task 5 UI tests — ran `npx playwright test skills.spec.ts` from `.worktrees/skills-phase6`; tests for the new "Connect with <provider>" button timed out with the error-context snapshot showing the OLD phase-5 "OAuth flow — coming in phase 6" stub. Typecheck was clean, code edits were saved, Vite was up on :5173. Culprit: `playwright.config.ts` has `webServer.reuseExistingServer: !process.env.CI`, and a sibling worktree (`skills-phase5`) had already left a Vite dev server listening on :5173 — so Playwright reused THAT server, which was serving `.worktrees/skills-phase5/ui/admin/src/**` not phase6's edits.
+**Lesson:** Before running Playwright UI tests in a worktree, confirm the process listening on the dev port actually belongs to this worktree. Quick check: `lsof -p $(lsof -t -i :5173) | grep cwd`. If it points somewhere else, `kill` the pid and let Playwright start a fresh Vite from your cwd. Symptoms that scream this: all your new tests time out waiting for new UI, all existing tests still pass, and error-context snapshots render the pre-change markup.
+**Tags:** playwright, vite, worktree, dev-server, reuseExistingServer, ui-tests
+
+### vi.stubGlobal('fetch', ...) also intercepts the test's own requests to a local server
+**Date:** 2026-04-17
+**Context:** Phase 6 Task 4 HTTP tests for `/v1/oauth/callback/:provider` needed to mock the OAuth token-exchange fetch while still letting the test issue a real `fetch()` against a locally-bound `http.createServer`. A naive `vi.stubGlobal('fetch', vi.fn())` made the test's `fetch(harness.url + '/v1/oauth/callback/...')` return the mocked token response (`.status === undefined`) instead of actually reaching the server.
+**Lesson:** When a test needs BOTH a real fetch (to its own local server) AND a mocked fetch (for outbound calls the handler makes), split them by hostname. Bind `realFetch = globalThis.fetch.bind(globalThis)` BEFORE stubbing, then install a stub that proxies `127.0.0.1`/`localhost` URLs through `realFetch` and forwards everything else to a `tokenFetch = vi.fn()`. The binding-before-stubbing matters — if the stub reads `globalThis.fetch` at call time it loops into itself.
+**Tags:** vitest, fetch, stubGlobal, http-test, oauth, local-server
+
 ### CommonJS container code in a type:module project needs a nested package.json override
 **Date:** 2026-04-17
 **Context:** Wrote a container-side module `container/git-server/install-hook.js` using `require()`/`module.exports` to match `http-server.js`. Vitest (repo is `type:module`) refused to load it via `createRequire` with "require is not defined in ES module scope."

@@ -468,6 +468,63 @@ export async function mockSkillsSetup(
   });
 }
 
+/**
+ * OAuth-only setup fixture used by phase-6 tests. A single agent with one
+ * card whose only missing credential is an OAuth one — lets us assert the
+ * Connect button flow without api-key inputs in the picture.
+ */
+export const MOCK_SKILL_SETUP_WITH_OAUTH = {
+  agents: [
+    {
+      agentId: 'agent-001-abcdef123456',
+      agentName: 'research-bot',
+      cards: [
+        {
+          skillName: 'linear-oauth',
+          description: 'Linear via OAuth',
+          missingCredentials: [
+            {
+              envName: 'LINEAR_TOKEN',
+              authType: 'oauth',
+              scope: 'user',
+              oauth: {
+                provider: 'linear',
+                clientId: 'frontmatter-cid',
+                authorizationUrl: 'https://linear.app/oauth/authorize',
+                tokenUrl: 'https://api.linear.app/oauth/token',
+                scopes: ['read', 'write'],
+              },
+            },
+          ],
+          unapprovedDomains: ['api.linear.app'],
+          mcpServers: [{ name: 'linear', url: 'https://mcp.linear.app' }],
+        },
+      ],
+    },
+  ],
+};
+
+/**
+ * Route helper that registers the OAuth-variant response. Not part of
+ * mockAllAPIs — callers register it explicitly AFTER gotoAuthenticated (which
+ * installs the default MOCK_SKILL_SETUP route). Playwright applies the most
+ * recently registered matching route first, so re-registering here wins.
+ */
+export async function mockSkillsSetupWithOAuth(
+  page: Page,
+  data: typeof MOCK_SKILL_SETUP_WITH_OAUTH = MOCK_SKILL_SETUP_WITH_OAUTH,
+) {
+  await page.route('**/admin/api/skills/setup', (route) => {
+    const req = route.request();
+    if (req.method() !== 'GET') return route.fallback();
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(data),
+    });
+  });
+}
+
 export async function mockCredentialRequests(
   page: Page,
   data: typeof MOCK_CREDENTIAL_REQUESTS = MOCK_CREDENTIAL_REQUESTS,

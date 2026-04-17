@@ -1,5 +1,59 @@
 # Host
 
+### Defensive factory defaults hide init-order bugs — hoist side effects into the order they're needed
+**Date:** 2026-04-17
+**Context:** PR #181 review: `createAdminHandler` auto-generated `admin.token` if unset, which worked great for anything going through that factory. But `initHostCore` also consumed `admin.token` (via `deriveOAuthKey`), and it ran *first*. On a fresh install with no `AX_OAUTH_SECRET_KEY`, `deriveOAuthKey('', ...)` threw (refusing sha256('') as a key), `adminOAuthProviderStore` stayed undefined, we logged a misleading "OAuth disabled" warning, and THEN `createAdminHandler` generated a token seconds later. The defensive default in the downstream factory gave the illusion everything was fine — while the upstream silently degraded a feature.
+**Lesson:** When two subsystems both touch the same piece of config and order matters, put the generation/derivation step at the *first* point of consumption, not the last. Keep defensive defaults in downstream factories (they're still valuable for tests that construct the downstream directly), but accept that they're no-ops on the happy path. Flag this in the comment so future readers don't assume the downstream gen is the source of truth. The rule: "if initialization order matters, initialize explicitly and early; don't rely on later factories to paper over it."
+**Tags:** initialization, order-of-operations, factories, defensive-defaults, oauth, admin-token
+
+### Fire-and-forget must use `void p.catch(...)`, not `try { await }` — and tests must flush microtasks
+**Date:** 2026-04-17
+**Context:** PR #181 review: `admin-oauth-flow.ts#resolveCallback`'s docstring promised fire-and-forget on `reconcileAgent`, but the implementation was `try { await input.reconcileAgent(...) } catch { logger.warn(...) }`. A slow reconcile (git fetch, lock contention, etc.) would hold up the OAuth success HTML in the user's browser for tens of seconds. The UI polls `/skills/setup` every 2s anyway, so the await bought nothing and hurt perceived latency. Fix: `void input.reconcileAgent(...).catch(err => logger.warn(...))`. Side effect on the test: the existing "reconcile throws → still returns ok" test trivially passed (the rejection now fires AFTER the fn returns), so it no longer verified anything useful.
+**Lesson:** When the contract is "fire-and-forget + log on failure", write `void p.catch(handler)` — NOT `try { await p }`. The `void` operator makes the intent explicit and keeps ESLint happy on the floated promise. For the test: don't just assert the return value — assert NO unhandled promise rejection escaped. Pattern: `process.on('unhandledRejection', listener)`, run the call, `await new Promise(r => setImmediate(r))` to flush the microtask queue, assert the listener captured nothing. This catches both (a) missing `.catch` and (b) accidentally returning the rejected promise from a helper.
+**Tags:** fire-and-forget, promises, void-operator, testing, microtask-flush, unhandled-rejection
+
+### Text PKs in SQLite are case-sensitive by default — normalize to lowercase on read/write for user-supplied identifiers
+**Date:** 2026-04-17
+**Context:** PR #181 review: the admin OAuth provider store used `provider` as a text PK with no normalization. SQLite's default text collation is `BINARY`, so `'Linear'` and `'linear'` hash to different rows. Combined with a lookup site that passed the frontmatter value verbatim (`'linear'` from skill YAML), a duplicate upsert with `'Linear'` would silently create a shadow row that never matched lookups. Outcome: admin-registered provider overrides invisibly disabled.
+**Lesson:** For any SQLite text PK that holds a user-supplied identifier (provider names, envNames, skill names), normalize the case on BOTH read and write inside the store module — don't leave normalization to each caller. Lowercase is the convention in this codebase. Also add duplicate-avoidance tests: upsert(`'Name'`) then upsert(`'NAME'`) should produce ONE row, not two. If you genuinely need case-preservation, either (a) store the original in a separate column and key off the normalized one, or (b) switch the column to `COLLATE NOCASE` — but be aware Postgres + SQLite handle that differently and Kysely doesn't abstract it.
+**Tags:** sqlite, collation, text-pk, normalization, case-sensitivity, kysely
+
+### Use AbortSignal.timeout(ms) for outbound fetch timeouts (Node 18+)
+**Date:** 2026-04-17
+**Context:** Phase 6 Task 4 token-exchange. `fetch(tokenUrl, { body, headers })` against an external OAuth provider will hang indefinitely if the provider is slow/unreachable — Node's global fetch has no default timeout. The pre-Node-18 pattern was a manual `AbortController` + `setTimeout` dance: create controller, schedule `controller.abort()`, pass `signal: controller.signal`, clear the timer on success/failure. Works but verbose and leaks timers on mistakes.
+**Lesson:** For any outbound fetch to a third party (OAuth token endpoints, webhook receivers, etc.), add `signal: AbortSignal.timeout(15_000)` to the request init. It's a Node 18+ static that bundles the abort controller and timeout into one line, auto-cleans up, and surfaces as a `DOMException` with `name === 'TimeoutError'` on timeout. Pick 15s for OAuth-style synchronous exchanges; longer only if the endpoint is known-slow. Pair with status-only logging (see the sibling lesson about OAuth error-body logging) — don't let timeout failures leak the request body into logs either.
+**Tags:** fetch, timeout, abortsignal, node18, outbound-http, oauth
+
+### "matched" is state consumption, not exchange success — callback fall-through must gate on matched, not ok
+**Date:** 2026-04-17
+**Context:** Phase 6 Task 4. The `/v1/oauth/callback/:provider` handler tries the admin-initiated flow first and, on no match, falls through to the agent-initiated `oauth-skills.ts` path. First instinct was `if (adminResult.ok)` to decide when to return; fall-through happened on any failure. That would leak already-claimed admin states to the agent module, and also let a URL-path-mismatch attack carry a valid state into the other handler.
+**Lesson:** Design dispatcher return types as `{ matched: false } | { matched: true; ok: true } | { matched: true; ok: false; reason: ... }`. `matched: true` means the dispatcher *consumed* the routing token (the OAuth state, here), regardless of whether the exchange succeeded. Any fall-through logic MUST gate on `matched: false`, never on `ok`. Apply the same rule when another subsystem also claims states (oauth-skills stores its own pending-flow map — we must NEVER release a state from admin-flow to agent-flow). Provider-path mismatch on the admin flow: consume the state, audit the mismatch, return `matched: true, ok: false` — never `matched: false`.
+**Tags:** oauth, callback, state-machine, fall-through, dispatch, security
+
+### Never log upstream response bodies on OAuth failures — they can echo back secrets
+**Date:** 2026-04-17
+**Context:** Phase 6 Task 4 token-exchange failure path. The existing `oauth-skills.ts` logged the raw response body on non-2xx (`body: text`). Some OAuth providers include the submitted `client_secret` or authorization `code` in their error responses (verbose error echoing), so that log line could persist secrets to pino files or centralized log aggregators.
+**Lesson:** When an external identity provider returns an error, log `{ status, bodyLength }` only — never the body itself. If a particular provider routinely sends structured error codes you want visibility into, parse the body and whitelist specific known-safe fields (`error: 'invalid_grant'` etc.) before logging. Default is: status + length, no body. Same rule applies to token-exchange audit args.
+**Tags:** oauth, logging, secrets, upstream-errors, audit
+
+### Derive redirect_uri scheme from x-forwarded-proto first, req.socket.encrypted second
+**Date:** 2026-04-17
+**Context:** Phase 6 Task 3 — computing the OAuth `redirect_uri` server-side for the admin-initiated flow. In production, the host runs behind a TLS-terminating proxy (nginx, Cloudflare), so `req.socket.encrypted` is `false` even though the user's browser spoke `https` to the proxy. Building `http://<host>/v1/oauth/callback/linear` in that case means the authorization server will refuse (the OAuth app is registered with the `https` URI) or — worse — issue tokens to an `http` endpoint that the browser will downgrade-reject.
+**Lesson:** When constructing a server-origin URL from an incoming request, check `req.headers['x-forwarded-proto']` first (and accept only the FIRST value if it's comma-separated — proxies chain them), fall back to `(req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http'`. If the header exists but is empty, don't use it; fall back. For OAuth specifically, prefer letting operators configure an exact `redirectUri` via admin-registered provider config — proxies add enough uncertainty that "compute from the request" should be a fallback, not the primary path.
+**Tags:** http, proxy, x-forwarded-proto, oauth, redirect_uri, tls
+
+### Kysely's DeleteResult is an array; sum numDeletedRows across it
+**Date:** 2026-04-17
+**Context:** Phase 6 Task 1. The admin OAuth store needs `delete()` to return whether a row was actually removed (idempotent API contract: first delete returns true, second returns false). My first instinct was `const res = await db.deleteFrom(...).execute(); return res.numDeletedRows > 0n` — but Kysely's `execute()` on a delete returns `DeleteResult[]`, not a single object. Single-statement backends give you a one-element array, multi-statement backends (CTE-ful Postgres queries, multi-DB) give you multiple. Accessing `.numDeletedRows` directly on the array silently yields `undefined` (which is not > 0n, so the function always returns false).
+**Lesson:** When consuming Kysely mutation results, always treat them as arrays and sum the `numDeletedRows`/`numUpdatedRows`/`numInsertedOrUpdatedRows` fields across the batch. Pattern: `const total = res.reduce((n: bigint, r) => n + r.numDeletedRows, 0n); return total > 0n`. The bigint literal `0n` matters — these fields are `bigint`, not `number`.
+**Tags:** kysely, database, delete, idempotence, bigint
+
+### AES-256-GCM: encode (iv || ciphertext || tag) into a single blob
+**Date:** 2026-04-17
+**Context:** Phase 6 Task 1 encrypting OAuth client secrets at rest. Node's `crypto` API forces you to keep track of three separate pieces (iv, ciphertext, tag) because `getAuthTag()` is returned *after* `final()`. Storing them in three DB columns is possible but annoying — every read/write gets a third the readability.
+**Lesson:** For AES-256-GCM at rest, concatenate `Buffer.concat([iv(12), ciphertext, tag(16)])` and base64-encode the whole thing into a single TEXT column. On read: slice `iv = buf[0..12)`, `tag = buf[len-16..len)`, `ct = buf[12..len-16)`. Reject blobs shorter than 12+16 bytes up front — `decipher.setAuthTag` will throw on those anyway but a clear error beats an opaque GCM failure. Never reuse IVs; always `randomBytes(12)` per encrypt call.
+**Tags:** crypto, aes-gcm, secrets-at-rest, node-crypto, encryption
+
 ### Admin auth is bypassed on loopback when BIND_HOST defaults to 127.0.0.1
 **Date:** 2026-04-17
 **Context:** Phase 5 Task 8 end-to-end verification. I was curling `/admin/api/*` endpoints with and without `Authorization: Bearer <token>` to confirm auth worked. Both succeeded. My first instinct was "the token check is broken" — it wasn't. `server.ts:332` sets `localDevMode = bindHost === '127.0.0.1' || bindHost === '::1'`, and `server-admin.ts:197` does `skipAuth = authDisabled || externalAuth || (localDevMode && isLoopback(clientIp))`. When the process binds to 127.0.0.1 AND the request comes from a loopback address, the token check is skipped — by design, for local dev.

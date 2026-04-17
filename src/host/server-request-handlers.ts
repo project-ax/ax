@@ -28,6 +28,19 @@ const logger = getLogger();
 /** SSE keepalive interval. */
 const SSE_KEEPALIVE_MS = 15_000;
 
+// Hard-coded HTML responses for OAuth callback outcomes. Each branch renders
+// a string literal so there's no variable interpolation — semgrep's
+// raw-html-format rule was flagging the dynamic template even though we
+// escaped the reason, and `adminResult.reason` is a closed 3-literal union
+// anyway. Using a lookup table also gives us room to write friendlier,
+// more helpful user-facing text than the raw enum identifier.
+const OAUTH_CALLBACK_HTML = {
+  success: '<html><body><h2>Authentication successful</h2><p>You can close this tab and return to the dashboard.</p></body></html>',
+  token_exchange_failed: '<html><body><h2>Authentication failed</h2><p>The authorization server rejected our exchange request. Try again, or check with your admin if this keeps happening.</p></body></html>',
+  invalid_response: '<html><body><h2>Authentication failed</h2><p>The authorization response didn\'t look right — something got mangled between the provider and us. Please start over.</p></body></html>',
+  error: '<html><body><h2>Authentication failed</h2><p>We hit an unexpected error finishing the OAuth flow. Check the server logs for details, or try again in a moment.</p></body></html>',
+} as const;
+
 // ── Auth middleware ──
 
 export async function authenticateRequest(
@@ -491,6 +504,13 @@ export interface RequestHandlerOpts {
   // Admin
   adminHandler: AdminHandler | null;
 
+  // Admin-initiated OAuth flow (phase 6) — used by /v1/oauth/callback/* to
+  // resolve admin-provenance states (set.skillStateStore dashboard) before
+  // falling through to the agent-initiated path (oauth-skills.ts).
+  adminOAuthFlow?: import('./admin-oauth-flow.js').AdminOAuthFlow;
+  /** Paired with adminOAuthFlow — fire-and-forget after tokens are written. */
+  reconcileAgent?: (agentId: string, ref: string) => Promise<{ skills: number; events: number }>;
+
   // Drain state — caller manages the boolean; handler reads it
   isDraining: () => boolean;
 
@@ -510,6 +530,7 @@ export function createRequestHandler(opts: RequestHandlerOpts): (req: IncomingMe
   const {
     modelId, eventBus, providers, fileStore, gcsFileStorage,
     completionOpts, webhookPrefix, webhookHandler, adminHandler,
+    adminOAuthFlow, reconcileAgent,
     isDraining, trackRequestStart, trackRequestEnd, extraRoutes,
     authProviders,
   } = opts;
@@ -680,7 +701,9 @@ export function createRequestHandler(opts: RequestHandlerOpts): (req: IncomingMe
       return;
     }
 
-    // OAuth callback
+    // OAuth callback — admin-initiated flow tries first (claims the state on
+    // match, success or failure), then falls through to the agent-initiated
+    // path in oauth-skills.ts when no admin flow is pending for this state.
     if (url.startsWith('/v1/oauth/callback/') && req.method === 'GET') {
       const provider = url.split('/v1/oauth/callback/')[1]?.split('?')[0];
       const params = new URL(req.url!, `http://${req.headers.host}`).searchParams;
@@ -695,6 +718,37 @@ export function createRequestHandler(opts: RequestHandlerOpts): (req: IncomingMe
       }
 
       try {
+        // Try admin-initiated flow first. If matched (regardless of ok),
+        // we do NOT fall through — matched:true means the state was
+        // consumed, and leaking it back to the agent module would defeat
+        // the single-use replay defense.
+        if (adminOAuthFlow) {
+          const adminResult = await adminOAuthFlow.resolveCallback({
+            provider,
+            code,
+            state,
+            credentials: providers.credentials,
+            reconcileAgent,
+            audit: providers.audit,
+          });
+          if (adminResult.matched) {
+            // Static-string lookup — no variable interpolation. TypeScript
+            // guarantees the `reason` key resolves because the union is
+            // closed over exactly the three OAUTH_CALLBACK_HTML keys.
+            const html = adminResult.ok
+              ? OAUTH_CALLBACK_HTML.success
+              : OAUTH_CALLBACK_HTML[adminResult.reason];
+            const status = adminResult.ok ? 200 : 400;
+            res.writeHead(status, {
+              'Content-Type': 'text/html',
+              'Content-Length': String(Buffer.byteLength(html)),
+            });
+            res.end(html);
+            return;
+          }
+        }
+
+        // Fall through to agent-initiated flow.
         const { resolveOAuthCallback } = await import('./oauth-skills.js');
         const found = await resolveOAuthCallback(provider, code, state, providers.credentials, eventBus);
 

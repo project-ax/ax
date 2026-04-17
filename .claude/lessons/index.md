@@ -55,6 +55,7 @@
 - Mock provider registries must include all sub-providers accessed at handler construction time [testing/infrastructure.md](testing/infrastructure.md)
 - When migrating writes from filesystem to a store, update ALL read-back helpers in tests [testing/infrastructure.md](testing/infrastructure.md)
 - Always disable pino file transport in tests that set AX_HOME to a temp dir [testing/infrastructure.md](testing/infrastructure.md)
+- vi.stubGlobal('fetch', ...) intercepts the test's own local-server calls — split by hostname [testing/infrastructure.md](testing/infrastructure.md)
 - Test concurrent async handlers using the handler factory directly, not the IPC wrapper [testing/concurrency.md](testing/concurrency.md)
 - :memory: SQLite databases don't work with separate connections [testing/sqlite.md](testing/sqlite.md)
 - Separate Kysely + openDatabase connections can't share :memory: databases [testing/sqlite.md](testing/sqlite.md)
@@ -136,6 +137,8 @@
 
 ### host
 
+- "matched" is state consumption, not exchange success — callback fall-through must gate on matched, not ok [host/entries.md](host/entries.md)
+- Never log upstream response bodies on OAuth failures — they can echo back secrets [host/entries.md](host/entries.md)
 - Tool router header lookup must use server URL, not tool name [host/entries.md](host/entries.md)
 - Scope proxy domain keys by agentId to prevent cross-agent collisions [host/entries.md](host/entries.md)
 - IPC defaultCtx.agentId is 'system', not the configured agent name [host/entries.md](host/entries.md)

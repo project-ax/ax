@@ -4,6 +4,136 @@ Git-native skills rollout: snapshot builder, state store, reconcile orchestrator
 
 ## Entries
 
+## [2026-04-17 16:10] — Phase 6 follow-up: fix 2 blocking semgrep findings
+
+**Task:** Address two blocking semgrep findings on `feat/skills-phase6-oauth`: (1) `gcm-no-tag-length` in `admin-oauth-providers.ts` — AES-256-GCM cipher constructors didn't pin `authTagLength: 16`, letting Node technically accept shorter forged tags; (2) `raw-html-format` in `server-request-handlers.ts` — the OAuth callback response template interpolated `adminResult.reason` via `escapeHtml()`, which semgrep's regex didn't understand.
+**What I did:** (1) Passed `{ authTagLength: 16 }` as the 4th arg to both `createCipheriv` and `createDecipheriv`; added a block comment explaining why the explicit pin matters even though our blob layout already forces a 16-byte tag slice. Added a `decryptSecret`-truncation test that strips 2 bytes off the tag and expects `toThrow()` — structural blob guard still passes at that size, so only the cipher-layer pin rejects it. (2) Replaced the template string with a module-scoped `OAUTH_CALLBACK_HTML` lookup table keyed by the closed `reason` union (`token_exchange_failed | invalid_response | error`) plus `success`; each value is a static string literal, so no variable interpolation, so no semgrep hit. The new copy is also friendlier per CLAUDE.md voice. Removed the now-unused `escapeHtml` helper. Updated `server-oauth-callback.test.ts` to assert on the new friendly substring ("didn't look right") instead of the raw `invalid_response` enum identifier.
+**Files touched:** `src/host/admin-oauth-providers.ts`, `src/host/server-request-handlers.ts`, `tests/host/admin-oauth-providers.test.ts`, `tests/host/server-oauth-callback.test.ts`.
+**Outcome:** Success. Semgrep: 0 findings (down from 2 blocking). Target tests: 44/44 pass across `admin-oauth-providers.test.ts`, `server-oauth-callback.test.ts`, `admin-oauth-flow.test.ts`. `tsc --noEmit` clean.
+**Notes:** Scope discipline — left the `req.headers.host` pattern alone (semgrep's warning mentioned "host portion" but the flagged rule was on the reason interpolation).
+
+## [2026-04-17 15:30] — Phase 6 follow-up: 5 CodeRabbit review fixes on PR #181
+
+**Task:** Address all 5 CodeRabbit findings on PR #181 (phase 6 OAuth): provider-name case sensitivity, init-order bug for admin.token + OAuth key derivation, x-forwarded-proto scheme validation, fire-and-forget reconcile docstring/impl mismatch, and un-tracked 30s setTimeout after unmount.
+**What I did:** (1) Normalized provider names to lowercase in `AdminOAuthProviderStore.{get,upsert,delete}` so `'Linear'` and `'linear'` can't produce duplicate rows. (2) Hoisted `admin.token = randomBytes(32).toString('hex')` into `initHostCore` BEFORE `deriveOAuthKey` — the previous order left OAuth provider store disabled on fresh installs with no `AX_OAUTH_SECRET_KEY`. (3) Whitelisted `X-Forwarded-Proto` to `http`/`https`, case-normalized, fall back to socket.encrypted otherwise. (4) Replaced `await input.reconcileAgent(...)` with `void input.reconcileAgent(...).catch(logger.warn)` so the OAuth success HTML returns to the browser immediately (UI polls for state). (5) Tracked per-envName 30s connect timers in a ref Map; unmount effect clears all pending timers.
+**Files touched:** `src/host/admin-oauth-providers.ts`, `src/host/server-init.ts`, `src/host/server-admin.ts`, `src/host/admin-oauth-flow.ts`, `ui/admin/src/components/pages/skills-page.tsx`, plus test additions in `tests/host/admin-oauth-providers.test.ts`, `tests/host/server-admin-oauth-start.test.ts`, `tests/host/admin-oauth-flow.test.ts`.
+**Outcome:** Success. All 258 backend tests pass (26 files, including 3 new test cases for case normalization, 2 for x-forwarded-proto, and an unhandled-rejection guard on the fire-and-forget reconcile). tsc clean at root and ui/admin. 13/13 Playwright skills.spec.ts pass.
+**Notes:** Pre-existing `admin_token_generated` log-leak in `createAdminHandler` was left alone per scope guidance. The `createAdminHandler` defensive auto-gen is now a no-op on the normal path but still protects tests that construct AdminDeps directly.
+
+## [2026-04-17 14:17] — Phase 6 complete: OAuth PKCE + admin-registered providers
+
+**Task:** Implement phase 6 of git-native skills: OAuth PKCE flow for skill credentials, with admin-registered provider fallback for confidential-flow providers (Google etc).
+**What I did:** 9 commits across backend (Tasks 1-4) and UI (Task 5), plus live E2E verification (Task 6) and documentation (Task 7). Tests: 135 backend + 23 Playwright pass. tsc clean at root and ui/admin.
+**Files touched:** See commits 1a229e8d..1500a6b8.
+**Outcome:** Success. The full Connect → authorize → callback → credential persistence → reconcile flow works against a live local host with a mock token endpoint. Credential values, client_secrets, and tokens never appear in audit, logs, or HTTP responses; secret-leak substring guards are locked in tests.
+**Notes:** Kind-ax image rebuild was again skipped (pre-dates phase 4). Background refresh-on-read is deferred — the refresh blob is stored for a future phase. Admin UI for OAuth provider CRUD is deferred — operators POST directly via curl for now.
+
+## [2026-04-17 18:15] — Phase 6 Task 6: end-to-end OAuth verification against local host
+
+**Task:** Live-wire verification of the phase-6 admin-initiated OAuth flow. Walk GET `/skills/setup` → POST `/oauth/start` → GET `/v1/oauth/callback/linear` → DB inspection against a real phase-6 host, with a tiny mock token endpoint standing in for the OAuth provider. Module tests (135+ across admin-oauth-flow/server-admin-oauth-start/server-oauth-callback/admin-oauth-providers) already cover behavior; this task just proves the code boots + the full HTTP path executes against a live process.
+**What I did:** Option A (local host, phase-5 precedent). (1) `npm run build` clean. (2) Wrote `/tmp/ax-phase6-verify/ax.yaml` — SQLite + `apple` sandbox + `admin.token=phase6-verify-token-abc12345678` + `agent_name: verify-agent`. (3) Wrote `/tmp/ax-phase6-verify/mock-token-server.js` — a 30-line node HTTP server listening on 127.0.0.1:9077, responds to `POST /token` with `{access_token:"at-fake-xyz", refresh_token:"rt-fake-abc", expires_in:3600, token_type:"bearer"}` and appends every request body to `/tmp/ax-phase6-verify/mock-token.log`. (4) Started host via `AX_HOME=/tmp/ax-phase6-verify AX_HOOK_SECRET=verify-hook-secret BIND_HOST=127.0.0.1 node dist/cli/index.js serve --port 8099`; default agent `verify-agent` auto-registered; host logged `oauth_secret_key_derived_from_admin_token` (expected — no AX_OAUTH_SECRET_KEY set, phase-6 Task 1 followup soft-degrade path is healthy with a 30-char admin.token). (5) Wrote `/tmp/ax-phase6-verify/seed.js` using `better-sqlite3` from the ax node_modules to upsert one row into `skill_setup_queue` + `skill_states` for skill `e2e-linear` with an OAuth missingCredential whose `tokenUrl` pointed at `http://127.0.0.1:9077/token`, `provider:linear`, `scope:user`. (6) Ran the flow end-to-end, captured outputs, killed host + mock server cleanly.
+
+**The flow:**
+
+1. **GET /admin/api/skills/setup** — returned the seeded card verbatim (agentId=verify-agent, skillName=e2e-linear, missingCredentials=[{envName:LINEAR_TOKEN, authType:oauth, scope:user, oauth:{provider:linear, clientId:e2e-client-id, authorizationUrl, tokenUrl:http://127.0.0.1:9077/token, scopes:[read,write]}}]).
+
+2. **POST /admin/api/skills/oauth/start** with body `{"agentId":"verify-agent","skillName":"e2e-linear","envName":"LINEAR_TOKEN"}` →
+   ```json
+   {
+     "authUrl": "https://linear.app/oauth/authorize?client_id=e2e-client-id&redirect_uri=http%3A%2F%2F127.0.0.1%3A8099%2Fv1%2Foauth%2Fcallback%2Flinear&scope=read+write&response_type=code&code_challenge_method=S256&code_challenge=a802D2IWIA0Bkv6Wn4lk1HvTIq37uVtq-w1u95dlan0&state=d90e22f08d2df73894095e20638996a2",
+     "state": "d90e22f08d2df73894095e20638996a2"
+   }
+   ```
+   All PKCE fields present (code_challenge_method=S256, 43-char code_challenge, state). Host logged `admin_oauth_flow_started` with `hasAdminOverride:false`.
+
+3. **GET /v1/oauth/callback/linear?code=fake-auth-code&state=d90e22f08d2df73894095e20638996a2** → HTTP 200, `<html><body><h2>Authentication successful</h2><p>You can close this tab and return to the dashboard.</p></body></html>`. Exactly the admin-matched success HTML from `server-request-handlers.ts`.
+
+4. **Mock token server observed POST body** (verbatim from `/tmp/ax-phase6-verify/mock-token.log`):
+   ```
+   grant_type=authorization_code
+   &code=fake-auth-code
+   &redirect_uri=http%3A%2F%2F127.0.0.1%3A8099%2Fv1%2Foauth%2Fcallback%2Flinear
+   &client_id=e2e-client-id
+   &code_verifier=koLUTPXM9Q-103xPKWmFnO3LKEHdyPziOmlgvf_nEDQ
+   ```
+   All four required params present. `client_secret` correctly absent (no admin-registered provider for `linear`). Content-Type `application/x-www-form-urlencoded` — RFC 6749 §4.1.3 compliant.
+
+5. **credential_store** — SQL: `SELECT scope, env_name, length(value) FROM credential_store WHERE env_name LIKE 'LINEAR_TOKEN%'`:
+   ```
+   scope=user:verify-agent:vpulim  env_name=LINEAR_TOKEN              value_len=11   (value="at-fake-xyz")
+   scope=user:verify-agent:vpulim  env_name=LINEAR_TOKEN__oauth_blob  value_len=180
+   ```
+   Blob parsed: `{"access_token":"at-fake-xyz","refresh_token":"rt-fake-abc","expires_at":1776453180,"token_url":"http://127.0.0.1:9077/token","client_id":"e2e-client-id","scopes":["read","write"]}` — exactly the shape declared in `admin-oauth-flow.ts#resolveCallback`.
+
+6. **audit_log** — SQL: `SELECT timestamp, action, session_id, args FROM audit_log WHERE action LIKE 'oauth_%' ORDER BY timestamp DESC`:
+   ```
+   oauth_callback_success  sessionId=verify-agent  args={"agentId":"verify-agent","skillName":"e2e-linear","envName":"LINEAR_TOKEN","provider":"linear","hasRefreshToken":true}
+   oauth_start             sessionId=verify-agent  args={"agentId":"verify-agent","skillName":"e2e-linear","envName":"LINEAR_TOKEN","provider":"linear","hasAdminProvider":false}
+   ```
+   Substring-checked the concatenated args JSON for `"at-fake-xyz"` and `"rt-fake-abc"` — neither present. Secret-leak invariant holds.
+
+7. **Replay defense** — re-issued the same callback URL a second time → HTTP 400 with "Invalid or expired OAuth flow" HTML. Confirms single-use state: admin-oauth-flow's `claim()` returned undefined on the second call, path fell through to agent-initiated oauth-skills module, which also didn't know the state, so the 400 came from the agent-path's failure HTML. No token write / no duplicate audit.
+
+**Files touched:** `.claude/journal/host/skills.md` (this entry). No production code changes. Throwaway scratch: `/tmp/ax-phase6-verify/{ax.yaml,seed.js,mock-token-server.js,data/,host.out,mock-token.log}`.
+**Outcome:** Success. Every phase-6 endpoint behaved exactly as the unit tests described. No real bugs surfaced.
+**Notes:** Five observations worth retaining. (a) `BIND_HOST=127.0.0.1` flips `localDevMode=true` (same gotcha phase-5 Task 8 documented) — admin auth is bypassed on loopback regardless of the token. I still passed `Authorization: Bearer <token>` for realism. (b) Proxy didn't intercept the token-endpoint fetch — confirming that OAuth token exchange runs in the host process, not the agent sandbox, as the architecture intends. (c) Post-callback reconcile fires and fails: `git -C /tmp/ax-phase6-verify/repos/verify-agent ls-tree...` (no bare repo exists). The admin-oauth-flow swallow-and-log handles it per `admin-oauth-flow.ts:394-403`; credentials are already written and audit is already emitted. The setup card remains in `skill_setup_queue` because reconcile can't rewrite it — same behavior as phase-5 Task 8 documented. Not a bug. (d) `better-sqlite3` isn't in `/tmp`'s node_modules; seed script requires it via absolute path `/Users/vpulim/dev/ai/ax/node_modules/better-sqlite3`. Phase-5 footgun repro. (e) Kind-ax deployment skipped — same reason as phase 5 (pinned image pre-dates phase-4). Local coverage + module tests are sufficient.
+
+## [2026-04-17 15:30] — Phase 6 Task 5: UI Connect button + polling
+
+**Task:** Replace the phase-5 "OAuth flow — coming in phase 6" stub in `SetupCardView` with a real Connect button. Click POSTs `/admin/api/skills/oauth/start` and opens the returned `authUrl` in a new tab. Parent page auto-polls `/skills/setup` every 2s whenever any card has an unconnected OAuth credential so the callback's reconcile surfaces (card vanishes / missingCredentials shrinks) without a manual refresh.
+**What I did:** Added `StartOAuthResponse` to `lib/types.ts` and `api.startOAuth(body)` to `lib/api.ts`. In `skills-page.tsx`: per-card `connecting: Set<string>` + `connectError: Record<string,string>` state, `handleConnect(envName)` (POST → window.open new tab; popup-blocked path surfaces "Pop-up blocked..." inline; 30s auto-re-enable); renamed `hasOAuth` → `hasUnconnectedOAuth` for intent clarity (same gate). Page-level `useEffect` polls `refreshSetup()` every 2s iff any agent card carries an oauth-typed missing credential — stops when set is empty. Added `MOCK_SKILL_SETUP_WITH_OAUTH` + `mockSkillsSetupWithOAuth` fixture helper (not in `mockAllAPIs`; tests register explicitly so default doesn't win). Updated `skills.spec.ts`: existing gcal test now looks for "Connect with google" button; 5 new cases — Connect renders, click POSTs start + opens authUrl in new tab, Approve enables when missingCreds empty (polling converged state), popup-blocked error, start-404 error.
+**Files touched:** `ui/admin/src/lib/types.ts`, `ui/admin/src/lib/api.ts`, `ui/admin/src/components/pages/skills-page.tsx`, `ui/admin/tests/fixtures.ts`, `ui/admin/tests/skills.spec.ts`.
+**Outcome:** Success. 13/13 skills.spec.ts + 10/10 navigation.spec.ts = 23/23 pass; `tsc --noEmit` clean in both `ui/admin` and root.
+**Notes:** The app strips `?page=...` on boot so `page.reload()` lands on Overview — OAuth-fixture tests must register the mock BOTH before and after `gotoAuthenticated` AND re-navigate with `?page=skills&token=...` (same pattern as the existing empty-state test). Also wasted time on a stale Vite dev server running from the `skills-phase5` worktree (via `reuseExistingServer: true` in playwright.config.ts) — tests served the OLD bundle, Connect button never appeared. Kill cross-worktree dev servers before running tests.
+
+## [2026-04-17 14:00] — Phase 6 Task 4 follow-up: 15s timeout on OAuth token-exchange fetches
+
+**Task:** Review-fix: the three OAuth token-endpoint fetches (admin-initiated in `admin-oauth-flow.ts#resolveCallback`, agent-initiated in `oauth-skills.ts#resolveOAuthCallback` + `refreshOAuthToken`) had no timeout. A hostile or unresponsive IdP hangs the host request forever AND keeps the pending-flow state consumed with no recovery path. DoS hygiene gap on a security-critical path.
+**What I did:** Added `const TOKEN_EXCHANGE_TIMEOUT_MS = 15_000` (same name + comment in both files — same invariant). Passed `signal: AbortSignal.timeout(...)` to each of the three fetch calls. In `admin-oauth-flow.ts`, made the timeout injectable via new `CreateAdminOAuthFlowOpts.tokenExchangeTimeoutMs` so tests can override to 50ms without waiting 15s. Existing catch blocks already surface thrown errors as `{ ok:false, reason:'error' }` with audit — timeout folds in as one more failure mode, no behavior changes otherwise. Added one test in `tests/host/admin-oauth-flow.test.ts` that stubs fetch to hang on its own AbortSignal, fires the injected short timeout, and asserts no credential write / no reconcile call / audit failure emitted.
+**Files touched:** `src/host/admin-oauth-flow.ts`, `src/host/oauth-skills.ts`, `tests/host/admin-oauth-flow.test.ts`.
+**Outcome:** Success. 135/135 across the 8 target files (including pre-existing `tests/host/oauth-skills.test.ts`); `tsc --noEmit` clean.
+**Notes:** `AbortSignal.timeout(ms)` is native in Node 18+; no polyfill. Not touching `oauth-skills.ts` beyond the three-line signal add per scope discipline — existing agent-flow tests still pass, no new coverage there. Test uses a DOMException with name `'AbortError'` to match real fetch-abort semantics; the implementation path doesn't branch on error name, so this is just cosmetic parity.
+
+## [2026-04-17 13:51] — Phase 6 Task 4: OAuth callback extension + reconcile trigger
+
+**Task:** Extend `/v1/oauth/callback/:provider` to handle admin-initiated flows first. Adds `resolveCallback` to `AdminOAuthFlow`: exchanges the auth code (PKCE verifier + optional client_secret for admin-registered confidential providers), writes `access_token` at the declared credential scope, persists a refresh blob at `<envName>__oauth_blob`, audits, and fires `reconcileAgent` best-effort. On match (ok or fail), we do NOT fall through to the agent-initiated oauth-skills path — matched:true consumes the state.
+**What I did:** Added `ResolveCallbackInput` / `ResolveCallbackResult` + `resolveCallback` method in `src/host/admin-oauth-flow.ts`. Refactored shared claim logic into a private `claimState()` helper. Provider-path mismatch returns `{matched:true, ok:false, reason:'invalid_response', details:'provider mismatch'}` and audits `oauth_callback_failed` — we refuse to POST to the stored tokenUrl when the URL path disagrees. Token exchange failures log `status + bodyLength` only (upstream errors can echo back the code/secret). Restructured the callback route in `src/host/server-request-handlers.ts`: try admin first, fall through only on `matched:false`. Added `escapeHtml()` for the failure-reason interpolation. Wired `adminOAuthFlow?` + `reconcileAgent?` through `RequestHandlerOpts`, passed from `server.ts` (reusing the existing `adminReconcileAgent` closure + `core.adminOAuthFlow`).
+**Files touched:** `src/host/admin-oauth-flow.ts` (resolveCallback + types), `src/host/server-request-handlers.ts` (deps + escapeHtml + callback rewrite), `src/host/server.ts` (wiring), `tests/host/admin-oauth-flow.test.ts` (+11 resolveCallback tests), `tests/host/server-oauth-callback.test.ts` (new, 4 HTTP-level cases).
+**Outcome:** Success. 127/127 across the 7 target files; `tsc --noEmit` clean. (`tests/host/server.test.ts` has pre-existing EINVAL listen errors from long Unix-socket paths on macOS `/var/folders/...` tmp dirs — unrelated to this change; same failure reproduces on `main`.)
+**Notes:** HTTP test needed a real/mocked fetch split — `vi.stubGlobal('fetch', ...)` intercepts the test's own request to the local server. Pattern: keep a bound `realFetch = globalThis.fetch.bind(globalThis)` before stubbing, and the stub proxies `127.0.0.1`/`localhost` through real fetch and forwards everything else to `tokenFetch = vi.fn()`. Secret-leak guard: `JSON.stringify(audit.calls)` substring-checked against `'shh'`, `'at-123'`, `'rt-456'`. Matched-but-failed semantics are load-bearing: if mismatch returned `matched:false`, an attacker could null-route an admin-provenance state through the agent path — so we consume the state and audit the mismatch explicitly.
+
+## [2026-04-17 13:42] — Phase 6 Task 3: admin OAuth flow module + /skills/oauth/start endpoint
+
+**Task:** Admin-initiated OAuth flow: new in-memory pending-flow map (state-keyed, 15-min TTL, single-use claim) and `POST /admin/api/skills/oauth/start` — the endpoint the dashboard calls when a user clicks "Connect with <provider>" on a SetupCard. Frontmatter `clientId` is used unless an admin-registered provider overrides it; admin `clientSecret` is stored server-side in the pending flow but NEVER enters audit args or response bodies.
+**What I did:** Created `src/host/admin-oauth-flow.ts` with `createAdminOAuthFlow()` (PKCE via the existing `oauth.ts` helpers — `generateCodeVerifier`/`generateCodeChallenge`/`generateState`). Added `AdminOAuthStartSchema` (Zod strict: `agentId`/`skillName`/`envName`/`userId?`) + route handler in `server-admin.ts` — validates agentId in registry, looks up the setup card, finds the matching OAuth credential, resolves admin-registered provider override, and computes redirectUri from `x-forwarded-proto`/`req.socket.encrypted` + `host` header (or uses `adminRedirectUri` when the provider is admin-registered, for exact OAuth app match). Wired `adminOAuthFlow` through `AdminDeps` → `AdminSetupOpts` → `setupAdminHandler` → `server.ts` call site → `HostCore.adminOAuthFlow` constructed unconditionally in `server-init.ts` (in-memory, no DB deps).
+**Files touched:** `src/host/admin-oauth-flow.ts` (new), `src/host/server-admin.ts` (schema + route + `AdminDeps.adminOAuthFlow`), `src/host/server-webhook-admin.ts` (AdminSetupOpts pass-through), `src/host/server.ts` (call site), `src/host/server-init.ts` (construct + expose on HostCore), `tests/host/admin-oauth-flow.test.ts` (new, 9 cases), `tests/host/server-admin-oauth-start.test.ts` (new, 12 cases).
+**Outcome:** Success. 21/21 new tests pass; 112/112 across the six target files; `tsc --noEmit` clean.
+**Notes:** Scheme detection for redirect_uri: prefer `x-forwarded-proto` (accepting the first value when comma-separated), fall back to `req.socket.encrypted`. Admin-registered provider `redirectUri` wins over the request-derived value — lets operators pin the exact URI that matches their OAuth app registration. The module is parallel to `oauth-skills.ts` (untouched here), with its own flow schema that captures skill setup context (skillName/envName/scope/agentId + admin-override secret). Secret leak audit check substring-guards both `auditCall` and response body against the literal `'admin-shh'`.
+
+## [2026-04-17 13:40] — Phase 6 Task 2: admin OAuth provider CRUD endpoints
+
+**Task:** Expose `GET/POST/DELETE /admin/api/oauth/providers*` so operators can configure admin-registered OAuth providers that override a skill's frontmatter `client_id`/`client_secret` (for providers like Google that don't support PKCE-only public-client flows).
+**What I did:** Added a Zod strict schema (`provider`/`clientId`/`clientSecret?`/`redirectUri:url`, all with max-length caps) and three routes in `server-admin.ts`. GET returns `{ providers }` from the store's secret-free `list()`. POST upserts and emits `oauth_provider_upserted` audit with `{ provider, hasSecret: boolean }` — clientSecret value never touches the audit args. DELETE is idempotent and emits `oauth_provider_deleted` ONLY when a row was removed. Narrowed the POST try/catch to `JSON.parse` only so store/audit throws fall through to the outer 500 handler (phase-5 pattern). Added `adminOAuthProviderStore` to `AdminDeps` and mirrored in `AdminSetupOpts`; passed through from `core.adminOAuthProviderStore` at the single `setupAdminHandler` call site.
+**Files touched:** `src/host/server-admin.ts`, `src/host/server-webhook-admin.ts`, `src/host/server.ts`, `tests/host/server-admin-oauth-providers.test.ts` (new, 10 cases).
+**Outcome:** Success. 91/91 tests pass across the four target files; `tsc --noEmit` clean.
+**Notes:** Test file uses a REAL store over in-memory SQLite (runs `adminOAuthMigrations` per test) so the HTTP round-trip exercises encryption-at-rest. `JSON.stringify(auditCall)` substring-guarded against the literal secret value `'shh'` to catch any future audit-arg leak. The `.url()` zod validator accepts `http/https/ftp/...` — no `.startsWith('https://')` tightening here since self-hosted setups run on `http://localhost`; the OAuth start/callback handlers (Task 3/4) will enforce scheme policy where it matters.
+
+## [2026-04-17 12:32] — Phase 6 Task 1 follow-up: refuse sha256('') as at-rest key
+
+**Task:** PR review finding — `deriveOAuthKey` fell back to `sha256(adminToken)` without a length floor, so installs with neither `AX_OAUTH_SECRET_KEY` nor `admin.token` configured would derive from `sha256('')` (a world-known constant), letting any DB-read attacker decrypt stored client secrets offline.
+**What I did:** `deriveOAuthKey` now throws for empty / <16-char admin tokens when no env key is set. `server-init.ts` wraps the key derivation in try/catch and soft-degrades: on throw, we log `admin_oauth_provider_store_disabled` at warn level and leave both `adminOAuthKey` and `adminOAuthProviderStore` undefined — matching the DB-less case so Task 2's CRUD endpoints will 503 naturally. Added three tests (empty throws, short throws, 16-char works) and adjusted one existing test that used `deriveOAuthKey('test')` (4 chars) to use a 16+ char token.
+**Files touched:** `src/host/admin-oauth-providers.ts`, `src/host/server-init.ts`, `tests/host/admin-oauth-providers.test.ts`.
+**Outcome:** Success. 80/80 tests pass (admin-oauth-providers + server-admin + server-admin-skills); tsc clean.
+**Notes:** 16 chars ≈ 96 bits of entropy if random — minimum we'll accept as a fallback key source. The soft-degrade keeps dev loops without `admin.token` unblocked (they already have no DB in many cases); production installs should set `AX_OAUTH_SECRET_KEY` (32 hex bytes) directly.
+
+## [2026-04-17 12:12] — Phase 6 Task 1: admin OAuth providers table + crypto + storage
+
+**Task:** Foundation for phase 6 OAuth PKCE work — new `admin_oauth_providers` table (provider pk, client_id, encrypted client_secret, redirect_uri, updated_at), AES-256-GCM crypto helpers, Kysely storage module, and server-init wiring.
+**What I did:** Created `src/migrations/admin-oauth-providers.ts` modeled on `skills.ts` (SQLite default export, `buildAdminOAuthMigrations(dbType)` for Postgres path). Created `src/host/admin-oauth-providers.ts` with `encryptSecret`/`decryptSecret` (iv || ct || tag, base64), `deriveOAuthKey` (env var preferred, sha256(admin.token) fallback with warning), and `createAdminOAuthProviderStore` exposing get/list/upsert/delete. `list()` deliberately omits `clientSecret` (wire safety). Extended `server-init.ts`'s `if (providers.database)` block to run the new migration under table name `admin_oauth_migration`, derive the key, and attach `adminOAuthKey` + `adminOAuthProviderStore` to `HostCore`.
+**Files touched:** `src/migrations/admin-oauth-providers.ts` (new), `src/host/admin-oauth-providers.ts` (new), `src/host/server-init.ts` (wiring + HostCore fields), `tests/host/admin-oauth-providers.test.ts` (new, 12 cases).
+**Outcome:** Success. 12/12 new tests pass; 183/183 phase-5 tests still pass; `tsc --noEmit` clean.
+**Notes:** Store's `delete()` sums `numDeletedRows: bigint` across Kysely's `DeleteResult[]` so idempotency returns correct booleans under either single- or multi-statement backends. The conflict branch of upsert explicitly bumps `updated_at = Math.floor(Date.now()/1000)` to match the `sqlEpoch` default applied on first insert. No endpoints/flow logic wired — that's Tasks 2–4.
+
 ## [2026-04-17 10:50] — Phase 5 PR #180 review feedback
 
 **Task:** Address CodeRabbit review comments on PR #180 (phase 5 dashboard setup cards).

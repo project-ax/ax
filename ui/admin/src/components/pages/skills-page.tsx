@@ -9,7 +9,7 @@ import {
   CheckCircle2,
   Loader2,
   Trash2,
-  KeyRound,
+  ExternalLink,
 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useApi } from '../../hooks/use-api';
@@ -44,17 +44,33 @@ function SetupCardView({ agentId, card, onChange }: SetupCardViewProps) {
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [confirmingDismiss, setConfirmingDismiss] = useState(false);
+  // Per-envName state for OAuth "Connect" buttons. `connecting` holds envNames
+  // we've opened an auth window for and are waiting on; `connectError` holds
+  // per-envName error strings (popup blocked, start endpoint 4xx, etc.).
+  const [connecting, setConnecting] = useState<Set<string>>(new Set());
+  const [connectError, setConnectError] = useState<Record<string, string>>({});
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Per-envName 30s re-enable timers (see handleConnect's finally). Tracked
+  // in a ref Map so the unmount effect can clear any still-pending timers —
+  // otherwise a user navigating away within 30s triggers setConnecting on
+  // an unmounted component. React 18 no-ops it silently, but leaks are
+  // leaks.
+  const connectTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   useEffect(() => {
     return () => {
       if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
       if (successTimerRef.current) clearTimeout(successTimerRef.current);
+      for (const t of connectTimersRef.current.values()) clearTimeout(t);
+      connectTimersRef.current.clear();
     };
   }, []);
 
-  const hasOAuth = card.missingCredentials.some((c) => c.authType === 'oauth');
+  // An OAuth cred still listed in missingCredentials means it's not yet
+  // connected. The reconcile after the callback removes it from the list — so
+  // any oauth cred we still see is by definition unconnected.
+  const hasUnconnectedOAuth = card.missingCredentials.some((c) => c.authType === 'oauth');
   const apiKeyCreds = card.missingCredentials.filter((c) => c.authType === 'api_key');
   const missingApiKeyValue = apiKeyCreds.some(
     (c) => (credentialValues[c.envName] ?? '').trim() === ''
@@ -64,7 +80,8 @@ function SetupCardView({ agentId, card, onChange }: SetupCardViewProps) {
   // is visible before the card vanishes. During that window both buttons stay
   // visible — disable them so a second click can't fire a duplicate approve
   // (which would 404 once reconcile drops the setup row) or a stray dismiss.
-  const approveDisabled = submitting || success || hasOAuth || missingApiKeyValue;
+  const approveDisabled =
+    submitting || success || hasUnconnectedOAuth || missingApiKeyValue;
 
   const toggleDomain = useCallback((domain: string) => {
     setDomainChecks((prev) => ({ ...prev, [domain]: !prev[domain] }));
@@ -107,6 +124,60 @@ function SetupCardView({ agentId, card, onChange }: SetupCardViewProps) {
       setErrorDetails(e.details ?? null);
     }
   }, [agentId, card, apiKeyCreds, credentialValues, domainChecks, onChange]);
+
+  const handleConnect = useCallback(
+    async (envName: string) => {
+      setConnectError((prev) => {
+        const next = { ...prev };
+        delete next[envName];
+        return next;
+      });
+      setConnecting((prev) => {
+        const next = new Set(prev);
+        next.add(envName);
+        return next;
+      });
+      try {
+        const { authUrl } = await api.startOAuth({
+          agentId,
+          skillName: card.skillName,
+          envName,
+        });
+        // Open in a new tab. User authorizes; the callback endpoint writes
+        // creds + triggers reconcile. The parent page polls every 2s and will
+        // auto-remove this card (or this envName) when done.
+        const win = window.open(authUrl, '_blank', 'noopener,noreferrer');
+        if (!win) {
+          setConnectError((prev) => ({
+            ...prev,
+            [envName]: 'Pop-up blocked. Allow pop-ups and try again.',
+          }));
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to start OAuth flow';
+        setConnectError((prev) => ({ ...prev, [envName]: msg }));
+      } finally {
+        // Keep the button disabled until the card updates (polling will refresh
+        // the card away). If the user closes the popup without authorizing,
+        // they can retry after 30s when the button auto-re-enables. Track
+        // the timer per-envName so a rapid second click for the same envName
+        // replaces the old timer, and so the unmount effect can cancel any
+        // pending timers and avoid setState-on-unmounted warnings.
+        const prevTimer = connectTimersRef.current.get(envName);
+        if (prevTimer) clearTimeout(prevTimer);
+        const t = setTimeout(() => {
+          setConnecting((prev) => {
+            const next = new Set(prev);
+            next.delete(envName);
+            return next;
+          });
+          connectTimersRef.current.delete(envName);
+        }, 30_000);
+        connectTimersRef.current.set(envName, t);
+      }
+    },
+    [agentId, card.skillName]
+  );
 
   const handleDismissClick = useCallback(async () => {
     if (confirmingDismiss) {
@@ -195,34 +266,65 @@ function SetupCardView({ agentId, card, onChange }: SetupCardViewProps) {
             <div className="space-y-3">
               {card.missingCredentials.map((cred) => (
                 <div key={cred.envName}>
-                  <label
-                    htmlFor={`cred-${agentId}-${card.skillName}-${cred.envName}`}
-                    className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground mb-1.5 block"
-                  >
-                    {cred.envName}{' '}
-                    <span className="text-muted-foreground/70 normal-case">
-                      ({cred.scope}-scoped)
-                    </span>
-                  </label>
                   {cred.authType === 'oauth' ? (
-                    <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-foreground/[0.02] px-3 py-2">
-                      <KeyRound size={14} className="text-muted-foreground/60" />
-                      <span className="text-[12px] text-muted-foreground">
-                        OAuth flow — coming in phase 6
-                      </span>
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-center gap-2 rounded-lg border border-border/50 bg-foreground/[0.02] px-3 py-2">
+                        <span className="text-[12px] text-foreground/90 font-mono">
+                          {cred.envName}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">
+                          ({cred.scope}-scoped)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleConnect(cred.envName)}
+                          disabled={
+                            connecting.has(cred.envName) || submitting || success
+                          }
+                          className="btn-secondary text-[12px] ml-auto flex items-center gap-1.5"
+                        >
+                          {connecting.has(cred.envName) ? (
+                            <>
+                              <Loader2 size={12} className="animate-spin" />
+                              Opening...
+                            </>
+                          ) : (
+                            <>
+                              <ExternalLink size={12} />
+                              Connect with {cred.oauth?.provider ?? 'provider'}
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      {connectError[cred.envName] && (
+                        <p className="text-[11px] text-rose">
+                          {connectError[cred.envName]}
+                        </p>
+                      )}
                     </div>
                   ) : (
-                    <input
-                      id={`cred-${agentId}-${card.skillName}-${cred.envName}`}
-                      type="password"
-                      autoComplete="off"
-                      placeholder="Paste your token here"
-                      value={credentialValues[cred.envName] ?? ''}
-                      onChange={(e) =>
-                        setCredentialValue(cred.envName, e.target.value)
-                      }
-                      className="input w-full"
-                    />
+                    <>
+                      <label
+                        htmlFor={`cred-${agentId}-${card.skillName}-${cred.envName}`}
+                        className="text-[10px] uppercase tracking-wide font-medium text-muted-foreground mb-1.5 block"
+                      >
+                        {cred.envName}{' '}
+                        <span className="text-muted-foreground/70 normal-case">
+                          ({cred.scope}-scoped)
+                        </span>
+                      </label>
+                      <input
+                        id={`cred-${agentId}-${card.skillName}-${cred.envName}`}
+                        type="password"
+                        autoComplete="off"
+                        placeholder="Paste your token here"
+                        value={credentialValues[cred.envName] ?? ''}
+                        onChange={(e) =>
+                          setCredentialValue(cred.envName, e.target.value)
+                        }
+                        className="input w-full"
+                      />
+                    </>
                   )}
                 </div>
               ))}
@@ -444,6 +546,26 @@ export default function SkillsPage() {
     refreshSetup();
     refreshCreds();
   }, [refreshSetup, refreshCreds]);
+
+  // Auto-poll /skills/setup every 2s while at least one card has an
+  // unconnected OAuth credential. The callback endpoint writes the cred and
+  // triggers reconcile server-side — polling catches the resulting
+  // missingCredentials shrink and re-enables the Approve button (or drops the
+  // card entirely). Stops as soon as no OAuth creds are pending.
+  useEffect(() => {
+    const anyOAuth =
+      setup?.agents?.some((a) =>
+        a.cards?.some((c) =>
+          c.missingCredentials.some((mc) => mc.authType === 'oauth')
+        )
+      ) ?? false;
+    if (!anyOAuth) return;
+
+    const id = setInterval(() => {
+      refreshSetup();
+    }, 2000);
+    return () => clearInterval(id);
+  }, [setup, refreshSetup]);
 
   // Error state — block the page (one error is enough; match the other pages)
   const fatalError = setupError ?? credError;

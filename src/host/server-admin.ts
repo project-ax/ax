@@ -21,6 +21,7 @@ import type { SetupRequest } from './skills/types.js';
 import type { CredentialRequestQueue } from './credential-request-queue.js';
 import { ApproveBodySchema, approveSkillSetup } from './server-admin-skills-helpers.js';
 import { parseAgentSkill } from '../utils/skill-format-parser.js';
+import { z } from 'zod';
 import { getLogger } from '../logger.js';
 import { configPath as getConfigPath } from '../paths.js';
 
@@ -161,7 +162,39 @@ export interface AdminDeps {
    *  from the `request_credential` agent tool. When absent, the GET
    *  endpoint soft-degrades to an empty array. */
   credentialRequestQueue?: CredentialRequestQueue;
+  /** Phase 6: admin-registered OAuth providers. When absent, /admin/api/oauth/* returns 503. */
+  adminOAuthProviderStore?: import('./admin-oauth-providers.js').AdminOAuthProviderStore;
+  /** Phase 6: admin-initiated OAuth flow module. When absent, /admin/api/skills/oauth/* returns 503. */
+  adminOAuthFlow?: import('./admin-oauth-flow.js').AdminOAuthFlow;
 }
+
+// ── OAuth provider upsert body schema (Phase 6 Task 2) ──
+
+const AdminOAuthProviderUpsertSchema = z
+  .object({
+    provider: z.string().min(1).max(100),
+    clientId: z.string().min(1).max(500),
+    clientSecret: z.string().min(1).max(500).optional(),
+    redirectUri: z.string().url().max(500),
+  })
+  .strict();
+
+// ── OAuth start body schema (Phase 6 Task 3) ──
+//
+// The dashboard POSTs this when the user clicks "Connect with <provider>" on
+// a SetupCard. The handler uses agentId + skillName + envName to find the
+// pending OAuth credential in the agent's setup queue; no client-controlled
+// OAuth params — everything comes from frontmatter + admin-registered
+// provider config, so an attacker can't coerce a non-whitelisted authorize
+// URL or scope via the request body.
+const AdminOAuthStartSchema = z
+  .object({
+    agentId: z.string().min(1),
+    skillName: z.string().min(1),
+    envName: z.string().min(1),
+    userId: z.string().optional(),
+  })
+  .strict();
 
 // ── Factory ──
 
@@ -719,6 +752,217 @@ async function handleAdminAPI(
       durationMs: 0,
     });
     sendJSON(res, { ok: true, removed: true });
+    return;
+  }
+
+  // ── Admin OAuth Start (Phase 6 Task 3) ──
+  //
+  // POST /admin/api/skills/oauth/start — begin a PKCE OAuth flow for a
+  // pending skill credential. Validates agentId/skillName/envName against
+  // the current setup queue (no arbitrary authorize URLs), applies admin
+  // provider overrides when registered, and returns { authUrl, state } for
+  // the dashboard to open in a new tab. The clientSecret (when
+  // admin-registered) is held server-side — it never enters the response
+  // body or the audit args.
+  if (pathname === '/admin/api/skills/oauth/start' && method === 'POST') {
+    if (!deps.skillStateStore || !deps.adminOAuthFlow || !deps.agentRegistry) {
+      sendError(res, 503, 'Skills not configured');
+      return;
+    }
+
+    // Narrow the catch to JSON parsing only — store / audit / registry
+    // throws should propagate to the outer 500 handler (phase-5 pattern).
+    let body: unknown;
+    try {
+      body = JSON.parse(await readBody(req));
+    } catch (err) {
+      sendError(res, 400, `Invalid request: ${(err as Error).message}`);
+      return;
+    }
+    const parsed = AdminOAuthStartSchema.safeParse(body);
+    if (!parsed.success) { sendError(res, 400, parsed.error.message); return; }
+
+    const agent = await deps.agentRegistry.get(parsed.data.agentId);
+    if (!agent) { sendError(res, 404, 'Agent not found'); return; }
+
+    const queue = await deps.skillStateStore.getSetupQueue(parsed.data.agentId);
+    const card = queue.find(c => c.skillName === parsed.data.skillName);
+    if (!card) { sendError(res, 404, 'No pending setup for this skill'); return; }
+
+    const cred = card.missingCredentials.find(
+      c => c.envName === parsed.data.envName && c.authType === 'oauth',
+    );
+    if (!cred) {
+      sendError(res, 404, 'No pending OAuth credential for this envName');
+      return;
+    }
+    // Defensive: phase-5 Zod schema guarantees cred.oauth is present when
+    // authType === 'oauth', but a drifted persisted queue could still hit
+    // this path. 500 so it stays loud in logs.
+    if (!cred.oauth) {
+      sendError(res, 500, 'OAuth credential missing oauth config');
+      return;
+    }
+
+    // Look up admin-registered override (confidential-client upgrade).
+    let adminOverride: { clientId: string; clientSecret?: string } | undefined;
+    let adminRedirectUri: string | undefined;
+    let hasAdminProvider = false;
+    if (deps.adminOAuthProviderStore) {
+      const registered = await deps.adminOAuthProviderStore.get(cred.oauth.provider);
+      if (registered) {
+        hasAdminProvider = true;
+        adminOverride = {
+          clientId: registered.clientId,
+          clientSecret: registered.clientSecret,
+        };
+        adminRedirectUri = registered.redirectUri;
+      }
+    }
+
+    // Compute redirectUri: admin-registered value wins (so admins can pin an
+    // exact URI matching their OAuth app registration). Otherwise derive
+    // from the request. Behind a proxy, trust `x-forwarded-proto` for scheme
+    // — but only when it's one of the two schemes we're willing to emit.
+    // A caller setting `X-Forwarded-Proto: javascript` would otherwise get a
+    // malformed redirect_uri baked into the authorize URL; we whitelist to
+    // http/https and fall back to `req.socket.encrypted` on anything else.
+    // (An upstream OAuth provider would reject the mismatched URI and the
+    // admin token is required on this endpoint, so the blast radius was
+    // small — but cheap belt-and-braces.)
+    let redirectUri: string;
+    if (adminRedirectUri) {
+      redirectUri = adminRedirectUri;
+    } else {
+      const forwardedProto = req.headers['x-forwarded-proto'];
+      const xfp = typeof forwardedProto === 'string' && forwardedProto
+        ? forwardedProto.split(',')[0].trim().toLowerCase()
+        : '';
+      const proto = (xfp === 'http' || xfp === 'https')
+        ? xfp
+        : ((req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http');
+      const host = req.headers.host ?? 'localhost';
+      redirectUri = `${proto}://${host}/v1/oauth/callback/${cred.oauth.provider}`;
+    }
+
+    // Resolve userId for credential scope (same chain as phase-5 approve).
+    const userId = parsed.data.userId ?? deps.defaultUserId ?? 'admin';
+
+    const { state, authUrl } = deps.adminOAuthFlow.start({
+      agentId: parsed.data.agentId,
+      agentName: agent.name,
+      skillName: parsed.data.skillName,
+      envName: parsed.data.envName,
+      scope: cred.scope,
+      userId,
+      provider: cred.oauth.provider,
+      authorizationUrl: cred.oauth.authorizationUrl,
+      tokenUrl: cred.oauth.tokenUrl,
+      clientId: cred.oauth.clientId,
+      scopes: cred.oauth.scopes,
+      redirectUri,
+      adminOverride,
+    });
+
+    // Audit throws propagate (security invariant). Secret value NEVER enters
+    // args — we ship only the boolean hasAdminProvider flag.
+    await providers.audit.log({
+      action: 'oauth_start',
+      sessionId: parsed.data.agentId,
+      args: {
+        agentId: parsed.data.agentId,
+        skillName: parsed.data.skillName,
+        envName: parsed.data.envName,
+        provider: cred.oauth.provider,
+        hasAdminProvider,
+      },
+      result: 'success',
+      durationMs: 0,
+    });
+
+    sendJSON(res, { authUrl, state });
+    return;
+  }
+
+  // ── Admin-Registered OAuth Providers (Phase 6 Task 2) ──
+
+  // GET /admin/api/oauth/providers — list admin-registered OAuth provider configs.
+  // Never includes clientSecret — the store's list() already excludes it, and the
+  // response shape below preserves that exclusion all the way to the wire.
+  if (pathname === '/admin/api/oauth/providers' && method === 'GET') {
+    if (!deps.adminOAuthProviderStore) {
+      sendError(res, 503, 'OAuth providers not configured');
+      return;
+    }
+    const providers = await deps.adminOAuthProviderStore.list();
+    sendJSON(res, { providers });
+    return;
+  }
+
+  // POST /admin/api/oauth/providers — upsert an admin-registered OAuth provider.
+  // clientSecret is optional (public-client admin-registered is valid). Audit is
+  // emitted with `hasSecret: boolean` only — the clientSecret value itself MUST
+  // NEVER enter the audit args.
+  if (pathname === '/admin/api/oauth/providers' && method === 'POST') {
+    if (!deps.adminOAuthProviderStore) {
+      sendError(res, 503, 'OAuth providers not configured');
+      return;
+    }
+    // Narrow the catch to JSON parsing only — matches the Phase 5 approve
+    // pattern. Store writes + audit throws should propagate to the outer
+    // 500 handler, not masquerade as client-side 400s.
+    let body: unknown;
+    try {
+      body = JSON.parse(await readBody(req));
+    } catch (err) {
+      sendError(res, 400, `Invalid request: ${(err as Error).message}`);
+      return;
+    }
+    const parsed = AdminOAuthProviderUpsertSchema.safeParse(body);
+    if (!parsed.success) { sendError(res, 400, parsed.error.message); return; }
+
+    await deps.adminOAuthProviderStore.upsert({
+      provider: parsed.data.provider,
+      clientId: parsed.data.clientId,
+      clientSecret: parsed.data.clientSecret,
+      redirectUri: parsed.data.redirectUri,
+    });
+    // Audit throws propagate (security invariant).
+    await providers.audit.log({
+      action: 'oauth_provider_upserted',
+      sessionId: 'admin',
+      args: {
+        provider: parsed.data.provider,
+        hasSecret: parsed.data.clientSecret !== undefined,
+      },
+      result: 'success',
+      durationMs: 0,
+    });
+    sendJSON(res, { ok: true });
+    return;
+  }
+
+  // DELETE /admin/api/oauth/providers/:name — idempotent removal.
+  // Audit is emitted only when `removed === true` (matches the skill-dismiss pattern).
+  const oauthProviderDeleteMatch = pathname.match(/^\/admin\/api\/oauth\/providers\/([^/]+)$/);
+  if (oauthProviderDeleteMatch && method === 'DELETE') {
+    if (!deps.adminOAuthProviderStore) {
+      sendError(res, 503, 'OAuth providers not configured');
+      return;
+    }
+    const name = decodeURIComponent(oauthProviderDeleteMatch[1]);
+    const removed = await deps.adminOAuthProviderStore.delete(name);
+    if (removed) {
+      // Audit throws propagate (security invariant).
+      await providers.audit.log({
+        action: 'oauth_provider_deleted',
+        sessionId: 'admin',
+        args: { provider: name },
+        result: 'success',
+        durationMs: 0,
+      });
+    }
+    sendJSON(res, { ok: true, removed });
     return;
   }
 
