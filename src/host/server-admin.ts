@@ -21,6 +21,7 @@ import type { SetupRequest } from './skills/types.js';
 import type { CredentialRequestQueue } from './credential-request-queue.js';
 import { ApproveBodySchema, approveSkillSetup } from './server-admin-skills-helpers.js';
 import { parseAgentSkill } from '../utils/skill-format-parser.js';
+import { z } from 'zod';
 import { getLogger } from '../logger.js';
 import { configPath as getConfigPath } from '../paths.js';
 
@@ -161,7 +162,20 @@ export interface AdminDeps {
    *  from the `request_credential` agent tool. When absent, the GET
    *  endpoint soft-degrades to an empty array. */
   credentialRequestQueue?: CredentialRequestQueue;
+  /** Phase 6: admin-registered OAuth providers. When absent, /admin/api/oauth/* returns 503. */
+  adminOAuthProviderStore?: import('./admin-oauth-providers.js').AdminOAuthProviderStore;
 }
+
+// ── OAuth provider upsert body schema (Phase 6 Task 2) ──
+
+const AdminOAuthProviderUpsertSchema = z
+  .object({
+    provider: z.string().min(1).max(100),
+    clientId: z.string().min(1).max(500),
+    clientSecret: z.string().min(1).max(500).optional(),
+    redirectUri: z.string().url().max(500),
+  })
+  .strict();
 
 // ── Factory ──
 
@@ -719,6 +733,88 @@ async function handleAdminAPI(
       durationMs: 0,
     });
     sendJSON(res, { ok: true, removed: true });
+    return;
+  }
+
+  // ── Admin-Registered OAuth Providers (Phase 6 Task 2) ──
+
+  // GET /admin/api/oauth/providers — list admin-registered OAuth provider configs.
+  // Never includes clientSecret — the store's list() already excludes it, and the
+  // response shape below preserves that exclusion all the way to the wire.
+  if (pathname === '/admin/api/oauth/providers' && method === 'GET') {
+    if (!deps.adminOAuthProviderStore) {
+      sendError(res, 503, 'OAuth providers not configured');
+      return;
+    }
+    const providers = await deps.adminOAuthProviderStore.list();
+    sendJSON(res, { providers });
+    return;
+  }
+
+  // POST /admin/api/oauth/providers — upsert an admin-registered OAuth provider.
+  // clientSecret is optional (public-client admin-registered is valid). Audit is
+  // emitted with `hasSecret: boolean` only — the clientSecret value itself MUST
+  // NEVER enter the audit args.
+  if (pathname === '/admin/api/oauth/providers' && method === 'POST') {
+    if (!deps.adminOAuthProviderStore) {
+      sendError(res, 503, 'OAuth providers not configured');
+      return;
+    }
+    // Narrow the catch to JSON parsing only — matches the Phase 5 approve
+    // pattern. Store writes + audit throws should propagate to the outer
+    // 500 handler, not masquerade as client-side 400s.
+    let body: unknown;
+    try {
+      body = JSON.parse(await readBody(req));
+    } catch (err) {
+      sendError(res, 400, `Invalid request: ${(err as Error).message}`);
+      return;
+    }
+    const parsed = AdminOAuthProviderUpsertSchema.safeParse(body);
+    if (!parsed.success) { sendError(res, 400, parsed.error.message); return; }
+
+    await deps.adminOAuthProviderStore.upsert({
+      provider: parsed.data.provider,
+      clientId: parsed.data.clientId,
+      clientSecret: parsed.data.clientSecret,
+      redirectUri: parsed.data.redirectUri,
+    });
+    // Audit throws propagate (security invariant).
+    await providers.audit.log({
+      action: 'oauth_provider_upserted',
+      sessionId: 'admin',
+      args: {
+        provider: parsed.data.provider,
+        hasSecret: parsed.data.clientSecret !== undefined,
+      },
+      result: 'success',
+      durationMs: 0,
+    });
+    sendJSON(res, { ok: true });
+    return;
+  }
+
+  // DELETE /admin/api/oauth/providers/:name — idempotent removal.
+  // Audit is emitted only when `removed === true` (matches the skill-dismiss pattern).
+  const oauthProviderDeleteMatch = pathname.match(/^\/admin\/api\/oauth\/providers\/([^/]+)$/);
+  if (oauthProviderDeleteMatch && method === 'DELETE') {
+    if (!deps.adminOAuthProviderStore) {
+      sendError(res, 503, 'OAuth providers not configured');
+      return;
+    }
+    const name = decodeURIComponent(oauthProviderDeleteMatch[1]);
+    const removed = await deps.adminOAuthProviderStore.delete(name);
+    if (removed) {
+      // Audit throws propagate (security invariant).
+      await providers.audit.log({
+        action: 'oauth_provider_deleted',
+        sessionId: 'admin',
+        args: { provider: name },
+        result: 'success',
+        durationMs: 0,
+      });
+    }
+    sendJSON(res, { ok: true, removed });
     return;
   }
 

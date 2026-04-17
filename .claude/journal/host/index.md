@@ -4,6 +4,7 @@ Host process work: server, router, IPC handlers, event console, event bus, deleg
 
 ## Entries
 
+- 2026-04-17 13:40 — Phase 6 Task 2: admin OAuth provider CRUD endpoints (`/admin/api/oauth/providers*`) — Zod-strict upsert, 503 when store missing, `hasSecret:boolean` audit shape [skills.md](skills.md)
 - 2026-04-17 12:32 — Phase 6 Task 1 follow-up: `deriveOAuthKey` refuses empty / <16-char admin tokens (no more `sha256('')` at-rest key); server-init soft-degrades [skills.md](skills.md)
 - 2026-04-17 12:12 — Phase 6 Task 1: admin OAuth providers table + AES-256-GCM crypto helpers + Kysely store + server-init wiring [skills.md](skills.md)
 - 2026-04-17 10:17 — Phase 5 complete: docs wrap-up (ax-host skill, design doc rollout status, journal entry) [skills.md](skills.md)

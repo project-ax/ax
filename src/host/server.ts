@@ -344,6 +344,7 @@ export async function createServer(
     reconcileAgent: adminReconcileAgent,
     defaultUserId,
     credentialRequestQueue: core.credentialRequestQueue,
+    adminOAuthProviderStore: core.adminOAuthProviderStore,
   });
 
   let httpServer: HttpServer | null = null;

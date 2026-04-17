@@ -4,6 +4,14 @@ Git-native skills rollout: snapshot builder, state store, reconcile orchestrator
 
 ## Entries
 
+## [2026-04-17 13:40] — Phase 6 Task 2: admin OAuth provider CRUD endpoints
+
+**Task:** Expose `GET/POST/DELETE /admin/api/oauth/providers*` so operators can configure admin-registered OAuth providers that override a skill's frontmatter `client_id`/`client_secret` (for providers like Google that don't support PKCE-only public-client flows).
+**What I did:** Added a Zod strict schema (`provider`/`clientId`/`clientSecret?`/`redirectUri:url`, all with max-length caps) and three routes in `server-admin.ts`. GET returns `{ providers }` from the store's secret-free `list()`. POST upserts and emits `oauth_provider_upserted` audit with `{ provider, hasSecret: boolean }` — clientSecret value never touches the audit args. DELETE is idempotent and emits `oauth_provider_deleted` ONLY when a row was removed. Narrowed the POST try/catch to `JSON.parse` only so store/audit throws fall through to the outer 500 handler (phase-5 pattern). Added `adminOAuthProviderStore` to `AdminDeps` and mirrored in `AdminSetupOpts`; passed through from `core.adminOAuthProviderStore` at the single `setupAdminHandler` call site.
+**Files touched:** `src/host/server-admin.ts`, `src/host/server-webhook-admin.ts`, `src/host/server.ts`, `tests/host/server-admin-oauth-providers.test.ts` (new, 10 cases).
+**Outcome:** Success. 91/91 tests pass across the four target files; `tsc --noEmit` clean.
+**Notes:** Test file uses a REAL store over in-memory SQLite (runs `adminOAuthMigrations` per test) so the HTTP round-trip exercises encryption-at-rest. `JSON.stringify(auditCall)` substring-guarded against the literal secret value `'shh'` to catch any future audit-arg leak. The `.url()` zod validator accepts `http/https/ftp/...` — no `.startsWith('https://')` tightening here since self-hosted setups run on `http://localhost`; the OAuth start/callback handlers (Task 3/4) will enforce scheme policy where it matters.
+
 ## [2026-04-17 12:32] — Phase 6 Task 1 follow-up: refuse sha256('') as at-rest key
 
 **Task:** PR review finding — `deriveOAuthKey` fell back to `sha256(adminToken)` without a length floor, so installs with neither `AX_OAUTH_SECRET_KEY` nor `admin.token` configured would derive from `sha256('')` (a world-known constant), letting any DB-read attacker decrypt stored client secrets offline.
