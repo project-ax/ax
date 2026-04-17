@@ -14,6 +14,10 @@ import type {
   McpServer,
   InstalledPlugin,
   McpTestResult,
+  SkillSetupResponse,
+  SkillApproveBody,
+  SkillApproveResponse,
+  CredentialRequestsResponse,
 } from './types';
 
 const BASE = '/admin/api';
@@ -256,6 +260,46 @@ export const api = {
   uninstallPlugin(id: string, name: string): Promise<{ ok: boolean }> {
     return apiFetch<{ ok: boolean }>(`/agents/${encodeURIComponent(id)}/plugins/${encodeURIComponent(name)}`, {
       method: 'DELETE',
+    });
+  },
+
+  // ── Skills (Phase 5) ──
+
+  /** List pending skill setup cards grouped by agent. */
+  skillsSetup(): Promise<SkillSetupResponse> {
+    return apiFetch<SkillSetupResponse>('/skills/setup');
+  },
+
+  /** Approve a pending skill setup card atomically (credentials + domains + reconcile). */
+  approveSkill(body: SkillApproveBody): Promise<SkillApproveResponse> {
+    return apiFetch<SkillApproveResponse>('/skills/setup/approve', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Dismiss (remove from dashboard queue) a pending skill setup card. */
+  dismissSkill(agentId: string, skillName: string): Promise<{ ok: boolean; removed: boolean }> {
+    return apiFetch<{ ok: boolean; removed: boolean }>(
+      `/skills/setup/${encodeURIComponent(agentId)}/${encodeURIComponent(skillName)}`,
+      { method: 'DELETE' }
+    );
+  },
+
+  /** List pending ad-hoc credential requests from the request_credential agent tool. */
+  credentialRequests(): Promise<CredentialRequestsResponse> {
+    return apiFetch<CredentialRequestsResponse>('/credentials/requests');
+  },
+
+  /** Provide a credential value for a pending request (drains the queue on success). */
+  provideCredential(
+    envName: string,
+    value: string,
+    sessionId?: string
+  ): Promise<{ ok: boolean }> {
+    return apiFetch<{ ok: boolean }>('/credentials/provide', {
+      method: 'POST',
+      body: JSON.stringify({ envName, value, sessionId }),
     });
   },
 };

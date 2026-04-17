@@ -20,8 +20,36 @@ import SecurityPage from './components/pages/security-page';
 import LogsPage from './components/pages/logs-page';
 import SettingsPage from './components/pages/settings-page';
 import ConnectorsPage from './components/pages/connectors-page';
+import SkillsPage from './components/pages/skills-page';
 
-type Page = 'overview' | 'agents' | 'connectors' | 'security' | 'logs' | 'settings';
+type Page = 'overview' | 'agents' | 'connectors' | 'skills' | 'security' | 'logs' | 'settings';
+const VALID_PAGES: Page[] = [
+  'overview',
+  'agents',
+  'connectors',
+  'skills',
+  'security',
+  'logs',
+  'settings',
+];
+
+/**
+ * If the URL has ?page=<name>, return it as the initial page.
+ * Strips the param afterwards so reloads don't pin the page forever.
+ * Lets Playwright (and anyone else) drive to a page without a sidebar entry.
+ */
+function readInitialPage(): Page {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get('page');
+    if (raw && (VALID_PAGES as string[]).includes(raw)) {
+      return raw as Page;
+    }
+  } catch {
+    // Ignore — fall through to default.
+  }
+  return 'overview';
+}
 type AuthState = 'loading' | 'authenticated' | 'login' | 'access-denied' | 'setup';
 
 const NAV_ITEMS: { id: Page; label: string; icon: typeof Shield }[] = [
@@ -55,7 +83,7 @@ function AccessDenied() {
 export default function App() {
   const [authState, setAuthState] = useState<AuthState>('loading');
   const [sessionAuth, setSessionAuth] = useState(false);
-  const [activePage, setActivePage] = useState<Page>('overview');
+  const [activePage, setActivePage] = useState<Page>(readInitialPage);
 
   // Check authentication on mount
   useEffect(() => {
@@ -273,6 +301,7 @@ export default function App() {
             {activePage === 'overview' && <OverviewPage />}
             {activePage === 'agents' && <AgentsPage />}
             {activePage === 'connectors' && <ConnectorsPage />}
+            {activePage === 'skills' && <SkillsPage />}
             {activePage === 'security' && <SecurityPage />}
             {activePage === 'logs' && <LogsPage />}
             {activePage === 'settings' && <SettingsPage />}
