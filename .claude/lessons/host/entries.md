@@ -1,5 +1,11 @@
 # Host
 
+### Admin auth is bypassed on loopback when BIND_HOST defaults to 127.0.0.1
+**Date:** 2026-04-17
+**Context:** Phase 5 Task 8 end-to-end verification. I was curling `/admin/api/*` endpoints with and without `Authorization: Bearer <token>` to confirm auth worked. Both succeeded. My first instinct was "the token check is broken" — it wasn't. `server.ts:332` sets `localDevMode = bindHost === '127.0.0.1' || bindHost === '::1'`, and `server-admin.ts:197` does `skipAuth = authDisabled || externalAuth || (localDevMode && isLoopback(clientIp))`. When the process binds to 127.0.0.1 AND the request comes from a loopback address, the token check is skipped — by design, for local dev.
+**Lesson:** When testing admin endpoints locally, don't rely on "curl succeeded without a token → auth is broken" as a signal. To exercise the real auth path, either (a) set `BIND_HOST=0.0.0.0` and curl from a non-loopback address (not trivial on a dev laptop), (b) set `admin.disable_auth: false` and force a non-loopback connection, or (c) add a unit test that constructs AdminDeps with `localDevMode: false` and asserts the 401 — which is how `tests/host/server-admin.test.ts` already does it. If you're writing a task spec that says "curl with Authorization: Bearer $TOKEN", call this out explicitly so the reader knows the token is decorative on loopback.
+**Tags:** admin-api, auth, localDevMode, BIND_HOST, loopback, testing
+
 ### EventBus has a single catch-all subscribe — filter by type in-handler
 **Date:** 2026-04-17
 **Context:** Phase 5 Task 5 needed a subscriber for `credential.required` events. My first reach was `eventBus.on('credential.required', listener)` because that's the EventEmitter-style API. But `src/host/event-bus.ts` only exposes `subscribe(listener)` (all events) and `subscribeRequest(requestId, listener)` (per-request) — no per-type subscription. The correct pattern is `eventBus.subscribe((event) => { if (event.type !== 'credential.required') return; ... })`.
