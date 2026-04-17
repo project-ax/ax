@@ -2,6 +2,14 @@
 
 Skills import pipeline, screener, manifest generator, ClawHub client, architecture comparison, install orchestration.
 
+## [2026-04-16 22:36] — Git-native skills Phase 1 Task 4: computeSkillStates
+
+**Task:** Phase 1 Task 4 of git-native skills effort — add `computeSkillStates(snapshot, current)` to a new `reconciler.ts`. Pure function that classifies each snapshot entry as `enabled` / `pending` / `invalid` based on stored credentials (`${envName}@${scope}`) and approved domains. TDD order: failing test, implementation, passing test.
+**What I did:** Created `src/host/skills/reconciler.ts` with a single named export `computeSkillStates`. Invalid entries (ok: false) pass through as `kind: 'invalid'` with the error string. Otherwise, walks credentials and domains, collecting human-readable reasons; no reasons means `enabled` with description, any reason means `pending` with `pendingReasons` + description. Signature takes `Pick<ReconcilerCurrentState, 'approvedDomains' | 'storedCredentials'>` so later tasks can share state without coupling.
+**Files touched:** `src/host/skills/reconciler.ts` (new), `tests/host/skills/reconciler-states.test.ts` (new)
+**Outcome:** Success — 6 new tests pass, all 22 tests in `tests/host/skills/` pass (schema + parser + reconciler-states).
+**Notes:** Reason formats are stable substrings the tests check: `missing credential <ENV> (<scope>)` and `domain not approved: <host>`. File is deliberately structured as named exports so Tasks 5–9 can append more functions (`computeMcpDesired`, `computeProxyAllowlist`, `computeSetupQueue`, `computeEvents`, `reconcile`).
+
 ## [2026-04-16 22:35] — Git-native skills Phase 1 Task 3: Reconciler types
 
 **Task:** Phase 1 Task 3 of git-native skills effort — declare the type surface used by the reconciler: `SkillSnapshotEntry`, `ReconcilerCurrentState`, `SkillStateKind`, `SkillState`, `SetupRequest`, `ReconcilerOutput`, `ReconcilerInput`. No test file — pure type declarations consumed by Tasks 4-9.
