@@ -2,6 +2,27 @@
 
 Prompt builder, identity module, bootstrap prompt fixes, delegation module, prompt optimizations.
 
+## [2026-04-17 06:26] — Phase 3 Task 7: runner fetches skills_index before prompt build
+
+**Task:** Git-native skills phase 3 Task 7 — wire the runner to fetch `skills_index` via IPC before building the system prompt, so the host-authoritative skill list (with `kind`, `pendingReasons`) wins over the workspace filesystem scan.
+**What I did:**
+1. Added `skills?: SkillSummary[]` to `AgentConfig` in `src/agent/runner.ts` (inline `import('./prompt/types.js')` type to avoid circular).
+2. Rewrote the skill load in `src/agent/agent-setup.ts` `buildSystemPrompt` to `config.skills ?? (() => loadSkillsMultiDir(...))()` — still sync, still falls back to the filesystem scan when absent.
+3. Added `fetchSkillsIndex(client)` helper in `agent-setup.ts`: calls `client.call({action:'skills_index'})`, returns `res.skills` on success, returns `undefined` on any throw/malformed shape (with a `logger.warn` on transport failure).
+4. Wired both runners (`pi-session.ts`, `claude-code.ts`) to call `fetchSkillsIndex` right after `await client.connect()` (and guarded on `config.skills === undefined` so injected skills from tests win).
+5. Added 7 new tests to `tests/agent/agent-setup.test.ts`: `buildSystemPrompt` short-circuits scan with `config.skills`, falls back to filesystem when undefined, empty-array skills short-circuits the scan, and 4 `fetchSkillsIndex` tests (success, throw, malformed, non-array).
+
+**Files touched:**
+- src/agent/runner.ts
+- src/agent/agent-setup.ts
+- src/agent/runners/pi-session.ts
+- src/agent/runners/claude-code.ts
+- tests/agent/agent-setup.test.ts
+
+**Outcome:** Success. `npx vitest run tests/agent/agent-setup.test.ts` → 9/9 pass. `npx vitest run tests/agent/runners/` → 29/29 pass. `npx vitest run tests/agent/ tests/host/` → 1458 pass / 29 fail — identical to base (the 29 failing are pre-existing socket-path-too-long EINVAL failures in `tests/host/server.test.ts`, unchanged by this patch). `npm run build` clean.
+
+**Notes:** The pi-session mock IPC server returns `{ok:true}` for unknown actions — that lands as a malformed response for `skills_index` and the helper correctly returns `undefined`, so the fallback filesystem scan runs. No mock updates needed. The listen-mode race I was asked to investigate is a non-issue: `applyPayload` runs `setContext` on the IPC client BEFORE dispatching into `run(config)`, so when the runner calls `fetchSkillsIndex` the session context is already applied.
+
 ## [2026-04-17 06:20] — Phase 3 Tasks 5+6: SkillSummary extension + SkillsModule bullet format
 
 **Task:** Git-native skills phase 3 Tasks 5 (extend `SkillSummary`) + 6 (rewrite `SkillsModule.render` to design-doc bullet format).
