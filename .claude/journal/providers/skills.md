@@ -2,6 +2,94 @@
 
 Skills import pipeline, screener, manifest generator, ClawHub client, architecture comparison, install orchestration.
 
+## [2026-04-17 05:15] — PR #176 review-comment fixes: hostname validation, MCP self-conflict dedup, clean event payload
+
+**Task:** Address actionable CodeRabbit comments on phase-1 PR #176 (`design/git-native-skills`) that apply to phase-1 files only (phase-2 file comments deferred to PR #177 branch). Three concrete issues: (1) `domains` accepted arbitrary strings via `z.string().min(1).max(253)` — anything flowing into `approvedDomains.has` / proxy allowlist needed real hostname validation; (2) `McpServerSchema` didn't enforce `mcpServers[].name` uniqueness, so a single skill declaring two entries with the same name hit `computeMcpDesired`'s `existing` branch and emitted a self-conflict event with `skillName` on both sides; (3) transition events for enabled skills carried `{reasons: undefined, error: undefined}` that structured consumers would treat as meaningful-but-empty.
+**What I did:** Added a `Hostname` refined Zod type in `frontmatter-schema.ts` — lowercase+trim transform followed by RFC 1035-style regex (labels 1-63, total ≤253, no scheme/path). Added a per-entry `seen` set in `computeMcpDesired` to dedup duplicate names within one skill before the cross-skill merge loop. Rewrote the transition event data object to build conditionally — `{name}` always, `reasons` only when `pendingReasons !== undefined`, `error` only when `error !== undefined`. Also extracted `enabledNameSet(states)` to share the "enabled" predicate between `computeMcpDesired` and `computeProxyAllowlist` (they drifted trivially before), and added a comment clarifying `declaredUrl` (loser) vs `conflictingUrl` (winner) in the `McpConflict` interface.
+**Files touched:** `src/host/skills/frontmatter-schema.ts`, `src/host/skills/reconciler.ts`, `tests/host/skills/frontmatter-schema.test.ts` (+3 tests), `tests/host/skills/reconciler-mcp.test.ts` (+1), `tests/host/skills/reconciler-events.test.ts` (+3)
+**Outcome:** Success — all 49/49 tests in `tests/host/skills/` pass, `tsc --noEmit` clean, no pre-existing tests broken.
+**Notes:** Skipped the larger refactors CodeRabbit flagged (`z.url()` vs `z.string().url()` deprecation, `computeSetupQueue` predicate sharing with `computeSkillStates`) — they're legitimate but touch more surface than warranted for review polish. `computeSetupQueue` refactor in particular would change the phase-1/phase-2 interface and is better done alongside phase-4 MCP wiring. ENV_NAME minimum-2-char was also punted — SCREAMING_SNAKE names are ≥2 by convention.
+
+## [2026-04-16 22:55] — Phase 1 final review fixes: drop unsafe cast, test mcp_conflict event
+
+**Task:** Address two issues from phase-1 final code review on `design/git-native-skills`: (1) unnecessary double-cast `c as unknown as Record<string, unknown>` in `reconcile()` when pushing `skill.mcp_conflict` events — `McpConflict` has only string fields and is trivially assignable; (2) missing integration test that `reconcile()` actually surfaces MCP name conflicts as `skill.mcp_conflict` events (the per-unit `reconciler-mcp.test.ts` only tested `computeMcpDesired`'s `conflicts` array).
+**What I did:** Replaced the double-cast with `data: { ...c }` spread — same runtime shape, type-safe without escape hatches. Added a third `it()` to `tests/host/skills/reconcile.test.ts` that builds a two-skill snapshot with the same `mcpName: 'shared'` pointing at different URLs, asserts exactly one `skill.mcp_conflict` event is emitted with the expected `{skillName, mcpName, declaredUrl, conflictingUrl}` payload.
+**Files touched:** `src/host/skills/reconciler.ts`, `tests/host/skills/reconcile.test.ts`
+**Outcome:** Success — `npx tsc --noEmit` clean, `npx vitest run tests/host/skills/reconcile.test.ts` 3/3 pass, `npx vitest run tests/host/skills/` 42/42 across 8 files.
+**Notes:** The spread pattern is the right idiom for object-to-`Record<string, unknown>` coercion when all fields are already primitive — no cast needed, structural typing handles it. The missing event-level test was a real gap: a refactor that forgot to push conflicts onto `events` would have slipped past the per-unit tests.
+
+## [2026-04-16 22:52] — Git-native skills Phase 1 COMPLETE: reconcile() orchestration
+
+**Task:** Phase 1 Task 9 (final) of git-native skills effort — append top-level `reconcile(input: ReconcilerInput): ReconcilerOutput` to `src/host/skills/reconciler.ts`. Composes the 5 named sub-exports (`computeSkillStates`, `computeMcpDesired`, `computeProxyAllowlist`, `computeSetupQueue`, `computeEvents`) and surfaces MCP name-conflicts as `skill.mcp_conflict` events on the event list. Pure function — all effects (actually registering MCP servers, updating the proxy allowlist, posting setup cards, emitting events on the bus) remain with the caller. TDD order: failing integration test, implementation, passing tests.
+**What I did:** Merged `ReconcilerInput`/`ReconcilerOutput` into the existing `import type` block and appended `reconcile`. Sequentially invokes `computeSkillStates` → `computeMcpDesired` → `computeProxyAllowlist` → `computeSetupQueue` → `computeEvents`, then pushes `{type: 'skill.mcp_conflict', data: conflict}` for each conflict returned by `computeMcpDesired`. Returns `{skills, desired: {mcpServers, proxyAllowlist}, setupQueue, events}`.
+**Files touched:** `src/host/skills/reconciler.ts` (appended `reconcile`), `tests/host/skills/reconcile.test.ts` (new — 2 integration tests)
+**Outcome:** Success — 2 new integration tests pass, all 41 tests in `tests/host/skills/` pass across 8 files. Full `npm test` shows 33 pre-existing failures in `tests/host/server*.test.ts` and `tests/integration/*.test.ts` (Unix socket `EINVAL` due to long temp-dir paths + docker image pull failures in CI-adjacent integration tests) — unchanged by this commit.
+**Notes:** Phase 1 complete — foundation ready for phase 2 git hook wiring. Phase 2+ callers will: (1) snapshot SKILL.md files under `skills/**/SKILL.md` in the workspace git repo after a push, (2) read current approvals/credentials/MCP state from host stores, (3) call `reconcile`, (4) diff `desired.mcpServers` against `current.registeredMcpServers` to drive registration/deregistration, (5) update the proxy allowlist, (6) surface setup cards for `setupQueue`, (7) emit `events` on the event bus. The reconciler itself has no I/O, no imports beyond types, no global state — fully deterministic and fully testable.
+
+## [2026-04-16 22:47] — Git-native skills Phase 1 Task 8: computeEvents
+
+**Task:** Phase 1 Task 8 of git-native skills effort — append `computeEvents(states, priorStates): Array<{type, data}>` to `src/host/skills/reconciler.ts`. Pure function that diffs freshly-computed skill states against the prior cycle's kind-map and emits dot-namespaced lifecycle events. `skill.installed` fires once on first appearance; `skill.enabled`/`skill.pending`/`skill.invalid` fire on transitions into that kind; `skill.removed` fires when a previously-known skill disappears. TDD order: failing test, implementation, passing test.
+**What I did:** Merged `SkillStateKind` into the existing `import type` block and appended `computeEvents`. Walks `states[]` with a `seen` set — for each state, emits `skill.installed` when the name is absent from `priorStates`, and emits the kind-specific event (`skill.enabled`/`skill.pending`/`skill.invalid`) when the prior kind differs from the current kind. Each non-installed event carries `{name, reasons, error}` (reasons/error undefined when not applicable — caller is phase 2+ event bus). Second pass over `priorStates` emits `skill.removed` for any name not in `seen`. Unchanged states emit nothing.
+**Files touched:** `src/host/skills/reconciler.ts` (appended), `tests/host/skills/reconciler-events.test.ts` (new)
+**Outcome:** Success — 6 new tests pass, all 39 tests in `tests/host/skills/` pass (schema + parser + reconciler-states + reconciler-mcp + reconciler-allowlist + reconciler-setup + reconciler-events).
+**Notes:** `skill.installed` is one-shot on first appearance, emitted alongside the kind event on the same cycle (two events: installed + enabled/pending/invalid). Transition detection uses `prior !== s.kind` which correctly fires on first-appearance too (prior is `undefined`). Caller (phase 2+ reconcile orchestration) feeds `priorStates` from last cycle and wires events to the event bus.
+
+## [2026-04-16 22:44] — Git-native skills Phase 1 Task 7: computeSetupQueue
+
+**Task:** Phase 1 Task 7 of git-native skills effort — append `computeSetupQueue(snapshot, current): SetupRequest[]` to `src/host/skills/reconciler.ts`. Pure function that emits one dashboard setup card per skill with missing credentials and/or unapproved domains. Independent notion of "pending" — works directly against the snapshot + current state, not `computeSkillStates` output. TDD order: failing test, implementation, passing test.
+**What I did:** Merged `SetupRequest` into the existing `import type` block and appended `computeSetupQueue`. Walks the snapshot, skips invalid entries, filters credentials against `storedCredentials` (`${envName}@${scope}` key) and domains against `approvedDomains`. If both arrays are empty, the skill doesn't contribute an entry — matches the spec: "if nothing is missing, the skill simply doesn't appear on a setup card." OAuth block passes through verbatim on each missing credential. `mcpServers` carried for user visibility only (name + url).
+**Files touched:** `src/host/skills/reconciler.ts` (appended), `tests/host/skills/reconciler-setup.test.ts` (new)
+**Outcome:** Success — 4 new tests pass, all 33 tests in `tests/host/skills/` pass (schema + parser + reconciler-states + reconciler-mcp + reconciler-allowlist + reconciler-setup).
+**Notes:** Setup queue is independent of enablement state — a user might see a card for a skill even if other skills are already enabled, and a fully-satisfied skill produces no card at all. Drives the dashboard setup cards in phase 5.
+
+## [2026-04-16 22:41] — Git-native skills Phase 1 Task 6: computeProxyAllowlist
+
+**Task:** Phase 1 Task 6 of git-native skills effort — append `computeProxyAllowlist(snapshot, states): Set<string>` to `src/host/skills/reconciler.ts`. Pure union of domains declared by enabled skills. Pending/invalid skills contribute nothing — that's the "defense in depth" gate from the design doc. TDD order: failing test, implementation, passing test.
+**What I did:** Appended `computeProxyAllowlist` to `reconciler.ts`. Builds `enabledNames` from `states[]` (only `kind === 'enabled'`), walks the snapshot skipping non-ok or non-enabled entries, and inserts each declared domain into an output `Set<string>`. Set handles deduplication naturally when two enabled skills share a domain.
+**Files touched:** `src/host/skills/reconciler.ts` (appended), `tests/host/skills/reconciler-allowlist.test.ts` (new)
+**Outcome:** Success — 3 new tests pass, all 29 tests in `tests/host/skills/` pass (schema + parser + reconciler-states + reconciler-mcp + reconciler-allowlist).
+**Notes:** No filtering against `approvedDomains` needed here — approval was already gated at `computeSkillStates` (unapproved domains keep a skill `pending`, which excludes it from the allowlist by definition). Keeps the function a trivial union and pushes policy into one place.
+
+## [2026-04-16 22:38] — Git-native skills Phase 1 Task 5: computeMcpDesired
+
+**Task:** Phase 1 Task 5 of git-native skills effort — append `computeMcpDesired(snapshot, states)` to `src/host/skills/reconciler.ts`. Pure function that folds enabled-skill MCP server declarations into a keyed `Map<string, { url, bearerCredential? }>` with "first occurrence wins" semantics and a conflict list when the same MCP name has different URLs across skills. TDD order: failing test, implementation, passing test.
+**What I did:** Appended `McpConflict` interface and `computeMcpDesired` function to `reconciler.ts`. Builds `enabledNames` from the incoming `states[]` (only `kind === 'enabled'` counts), then walks the snapshot skipping invalid or non-enabled entries. Same-name-same-URL is a silent ref-count (no-op); same-name-different-URL appends to the conflicts array keyed by the later skill. `bearerCredential` passes through from `mcp.credential` verbatim.
+**Files touched:** `src/host/skills/reconciler.ts` (appended), `tests/host/skills/reconciler-mcp.test.ts` (new)
+**Outcome:** Success — 4 new tests pass, all 26 tests in `tests/host/skills/` pass (schema + parser + reconciler-states + reconciler-mcp).
+**Notes:** Deterministic given snapshot iteration order; phase 4 is where pending skills get blocked at the enforcement gate. Conflict record captures `skillName` (the losing one), `mcpName`, `declaredUrl` (rejected), and `conflictingUrl` (kept).
+
+## [2026-04-16 22:36] — Git-native skills Phase 1 Task 4: computeSkillStates
+
+**Task:** Phase 1 Task 4 of git-native skills effort — add `computeSkillStates(snapshot, current)` to a new `reconciler.ts`. Pure function that classifies each snapshot entry as `enabled` / `pending` / `invalid` based on stored credentials (`${envName}@${scope}`) and approved domains. TDD order: failing test, implementation, passing test.
+**What I did:** Created `src/host/skills/reconciler.ts` with a single named export `computeSkillStates`. Invalid entries (ok: false) pass through as `kind: 'invalid'` with the error string. Otherwise, walks credentials and domains, collecting human-readable reasons; no reasons means `enabled` with description, any reason means `pending` with `pendingReasons` + description. Signature takes `Pick<ReconcilerCurrentState, 'approvedDomains' | 'storedCredentials'>` so later tasks can share state without coupling.
+**Files touched:** `src/host/skills/reconciler.ts` (new), `tests/host/skills/reconciler-states.test.ts` (new)
+**Outcome:** Success — 6 new tests pass, all 22 tests in `tests/host/skills/` pass (schema + parser + reconciler-states).
+**Notes:** Reason formats are stable substrings the tests check: `missing credential <ENV> (<scope>)` and `domain not approved: <host>`. File is deliberately structured as named exports so Tasks 5–9 can append more functions (`computeMcpDesired`, `computeProxyAllowlist`, `computeSetupQueue`, `computeEvents`, `reconcile`).
+
+## [2026-04-16 22:35] — Git-native skills Phase 1 Task 3: Reconciler types
+
+**Task:** Phase 1 Task 3 of git-native skills effort — declare the type surface used by the reconciler: `SkillSnapshotEntry`, `ReconcilerCurrentState`, `SkillStateKind`, `SkillState`, `SetupRequest`, `ReconcilerOutput`, `ReconcilerInput`. No test file — pure type declarations consumed by Tasks 4-9.
+**What I did:** Created `src/host/skills/types.ts` with exactly the types specified in the plan. Imports `SkillFrontmatter` from `./frontmatter-schema.js` (Task 1 output). Used `ReadonlySet`/`ReadonlyMap` for current-state shapes to signal they are inputs, plain `Map`/`Set` for the desired output since callers will consume them.
+**Files touched:** `src/host/skills/types.ts` (new)
+**Outcome:** Success — `npx tsc --noEmit` clean, no new warnings.
+**Notes:** Snapshot entry is a discriminated union on `ok` — same pattern as the parser's return. Storage credential key convention is `${envName}@${scope}`.
+
+## [2026-04-16 22:29] — Git-native skills Phase 1 Task 2: SKILL.md parser
+
+**Task:** Phase 1 Task 2 of git-native skills effort — create `parseSkillFile(content)` that splits YAML frontmatter from body, validates through Task 1's Zod schema, and returns a discriminated union `{ ok, frontmatter, body } | { ok: false, error }`. TDD order: failing test, implementation, passing test.
+**What I did:** Created `src/host/skills/parser.ts` with `FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/` and `tests/host/skills/parser.test.ts` (6 cases: valid parse, missing frontmatter, unterminated, invalid YAML, schema violation, CRLF line endings). Parser wraps Zod issues as `path: message; path: message` strings. Pure logic — no filesystem.
+**Files touched:** `src/host/skills/parser.ts` (new), `tests/host/skills/parser.test.ts` (new)
+**Outcome:** Success — all 6 parser tests pass, all 16 tests in `tests/host/skills/` pass (parser + frontmatter-schema).
+**Notes:** Regex uses non-greedy `[\s\S]*?` for the frontmatter section so a body containing `---` doesn't confuse the split. The `yaml` package was already a dependency (no install needed).
+
+## [2026-04-16 22:26] — Git-native skills Phase 1 Task 1: Zod frontmatter schema
+
+**Task:** Phase 1 Task 1 of git-native skills effort — create the `SkillFrontmatterSchema` Zod module that will be used by later tasks (parser, reconciler). TDD order: failing test, implementation, passing test.
+**What I did:** Created `src/host/skills/frontmatter-schema.ts` and `tests/host/skills/frontmatter-schema.test.ts`. Schema uses Zod v4 with `.strict()` at every object level, SCREAMING_SNAKE_CASE env name regex (`/^[A-Z][A-Z0-9_]{1,63}$/`), https-only URLs for OAuth and MCP, and a `.refine()` that requires the `oauth` block when `authType === 'oauth'`. Credentials/mcpServers/domains default to `[]`; authType defaults to `api_key`; scope defaults to `user`.
+**Files touched:** `src/host/skills/frontmatter-schema.ts` (new), `tests/host/skills/frontmatter-schema.test.ts` (new)
+**Outcome:** Success — all 10 tests pass, tsc clean.
+**Notes:** First module of the new `src/host/skills/` directory. Pure logic — no filesystem, no IPC. Zod v4.3.6 handles `z.string().url().startsWith('https://')` fine (verified before writing).
+
 ## [2026-03-22 16:30] — Fix GCS domain loading at startup — wrong user ID
 
 **Task:** Debug why proxy blocks api.linear.app with 403 even though Linear skill is installed and persisted in GCS

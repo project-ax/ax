@@ -4,6 +4,14 @@ Provider implementations: image, channel, skills, sandbox, memory, LLM.
 
 ## Entries
 
+- 2026-04-17 05:15 — PR #176 review-comment fixes: hostname validation, MCP self-conflict dedup, clean event payload [skills.md](skills.md)
+- 2026-04-16 22:44 — Git-native skills Phase 1 Task 7: computeSetupQueue [skills.md](skills.md)
+- 2026-04-16 22:41 — Git-native skills Phase 1 Task 6: computeProxyAllowlist [skills.md](skills.md)
+- 2026-04-16 22:38 — Git-native skills Phase 1 Task 5: computeMcpDesired [skills.md](skills.md)
+- 2026-04-16 22:36 — Git-native skills Phase 1 Task 4: computeSkillStates [skills.md](skills.md)
+- 2026-04-16 22:35 — Git-native skills Phase 1 Task 3: Reconciler types [skills.md](skills.md)
+- 2026-04-16 22:29 — Git-native skills Phase 1 Task 2: SKILL.md parser [skills.md](skills.md)
+- 2026-04-16 22:26 — Git-native skills Phase 1 Task 1: Zod frontmatter schema [skills.md](skills.md)
 - 2026-04-05 10:00 — Add AuthProvider contract types [auth.md](auth.md)
 - 2026-03-29 14:00 — Add global MCP server CRUD + admin API endpoints (Tasks 1 & 2) [plugins.md](plugins.md)
 - 2026-03-29 11:56 — Implement plugin startup module: reload MCP servers + auto-install from config [plugins.md](plugins.md)
