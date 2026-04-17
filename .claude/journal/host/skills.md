@@ -4,6 +4,14 @@ Git-native skills rollout: snapshot builder, state store, reconcile orchestrator
 
 ## Entries
 
+## [2026-04-17 08:50] — Phase 5 Task 3: POST /admin/api/skills/setup/approve (atomic)
+
+**Task:** Phase 5 Task 3. Wire the dashboard's "Approve & enable" button. Validate-all (body schema + card cross-check + OAuth guard) then apply-all (creds + domains + re-reconcile) — if anything fails, zero side effects. Phase 5 is API-key only; OAuth rejects with a clear 400.
+**What I did:** Created `src/host/server-admin-skills-helpers.ts` with `ApproveBodySchema` (Zod `.strict()`) + `approveSkillSetup(deps, body)` returning a tagged-union `ApproveResult`. Helper uses a narrower `ApproveDeps` interface (structurally compatible with `AdminDeps`) to avoid a circular import. Scope key: `agent:<name>` for `scope: 'agent'`, `user:<name>:<userId>` with fallback chain `body.userId ?? deps.defaultUserId ?? 'admin'`. Reconcile failure is swallow-and-log (DB is consistent; startup-rehydrate catches up). Audit calls `action: 'skill_approved'` with `domains` + `envNames` — never values. Added the route in `server-admin.ts` right after the GET `/admin/api/skills/setup` route; uses `sendJSON` directly for the `details` field (since `sendError` wraps in `{error: {message,type,code}}`). Extended `tests/host/server-admin-skills.test.ts`: extended `mockDeps` with `withReconcile/withDomainList/withCredentials/defaultUserId/reconcileImpl/getStatesImpl` knobs, added real `ProxyDomainList` + credentials vi.fn stub; wrote 13 new cases covering the full spec (happy paths × 4 scopes, rejections × 3, 404 / 503 × 2 / invalid body, load-bearing atomicity test, reconcile-failure still-200).
+**Files touched:** `src/host/server-admin-skills-helpers.ts` (new), `src/host/server-admin.ts`, `tests/host/server-admin-skills.test.ts`.
+**Outcome:** Success — `npx vitest run tests/host/server-admin-skills.test.ts` = 18/18 pass (5 existing + 13 new); `tests/host/server-admin.test.ts` = 37/37 pass; `tests/host/skills/` = 118/118 pass; `npx tsc --noEmit` clean.
+**Notes:** Circular import on `AdminDeps` dodged cleanly by defining a local `ApproveDeps` in the helper — `Pick<AdminDeps, ...>` would have worked too but the explicit interface makes it clearer what the helper needs. Audit failure is also caught (non-fatal) so a transient DB issue doesn't 500 an approve that already applied creds + domains. Atomicity test asserts that even ONE valid credential stays unapplied when any domain is invalid — that's the whole reason validate-all-then-apply-all exists.
+
 ## [2026-04-17 08:40] — Phase 5 Task 2: GET /admin/api/skills/setup endpoint
 
 **Task:** Phase 5 (skills dashboard) Task 2. Surface the per-agent `skill_setup_queue` through an admin endpoint so the dashboard can render setup cards grouped by agent. Return 503 when the state store isn't wired (back-compat for deployments without DB).

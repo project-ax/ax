@@ -18,6 +18,7 @@ import type { EventBus, StreamEvent } from './event-bus.js';
 import type { AgentRegistry } from './agent-registry.js';
 import type { ProxyDomainList } from './proxy-domain-list.js';
 import type { SetupRequest } from './skills/types.js';
+import { ApproveBodySchema, approveSkillSetup } from './server-admin-skills-helpers.js';
 import { parseAgentSkill } from '../utils/skill-format-parser.js';
 import { getLogger } from '../logger.js';
 import { configPath as getConfigPath } from '../paths.js';
@@ -640,6 +641,29 @@ async function handleAdminAPI(
       if (cards.length > 0) out.push({ agentId: a.id, agentName: a.name, cards });
     }
     sendJSON(res, { agents: out });
+    return;
+  }
+
+  // POST /admin/api/skills/setup/approve — atomic approve (creds + domains + re-reconcile).
+  // Validates the request body against the pending setup card BEFORE applying anything.
+  // If any validation step fails, no credentials are written, no domains approved, no reconcile runs.
+  if (pathname === '/admin/api/skills/setup/approve' && method === 'POST') {
+    try {
+      const body = JSON.parse(await readBody(req));
+      const parsed = ApproveBodySchema.safeParse(body);
+      if (!parsed.success) { sendError(res, 400, parsed.error.message); return; }
+      const result = await approveSkillSetup(deps, parsed.data);
+      if (result.ok) {
+        sendJSON(res, { ok: true, state: result.state });
+      } else if (result.details) {
+        // sendError wraps as { error: { message, type, code } } — bypass to preserve `details`.
+        sendJSON(res, { error: result.error, details: result.details }, result.status);
+      } else {
+        sendError(res, result.status, result.error);
+      }
+    } catch (err) {
+      sendError(res, 400, `Invalid request: ${(err as Error).message}`);
+    }
     return;
   }
 

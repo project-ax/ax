@@ -1,5 +1,17 @@
 # Host
 
+### Multi-step admin endpoints must validate-all before they apply-anything
+**Date:** 2026-04-17
+**Context:** Phase 5 `POST /admin/api/skills/setup/approve` performs three applies (credentials → domains → reconcile). Early drafts interleaved validation with application ("parse cred, write cred, parse domain, approve domain, ..."), which would have left the system in a half-approved state on any downstream validation error — e.g. a bogus domain in the body after the first credential was already persisted. The spec's load-bearing invariant is: if *any* validation step fails, zero credentials written, zero domains approved, no reconcile.
+**Lesson:** For multi-step endpoints that persist state, structure the handler as two distinct phases with no interleaving: (1) run every validation check against the request body and the pending card/state, collecting any first failure into an error return; (2) only if all checks pass, begin applying side effects. Also enforce the contract in a dedicated test: mix one valid item with one invalid item in the same body and assert that the valid item is NOT persisted. Without that test the atomicity can regress silently.
+**Tags:** admin-api, atomicity, validation, approve, skills
+
+### When a helper imports from a route handler, use a narrower deps interface to dodge cycles
+**Date:** 2026-04-17
+**Context:** Phase 5 Task 3 helper `approveSkillSetup` needed several fields from `AdminDeps` (defined in `server-admin.ts`). Importing `AdminDeps` back into the helper would have created a circular type import, since the route handler in `server-admin.ts` needs to import the helper too. `Pick<AdminDeps, ...>` would import the whole type transitively.
+**Lesson:** When a helper module is consumed by the same module that owns a big "deps" type, declare a local narrower interface in the helper listing only the fields it actually uses, with the specific provider-typed sub-fields (e.g. `providers: ProviderRegistry`). The caller passes its full deps through — TypeScript's structural subtyping handles the compatibility for free. No shared type, no cycle.
+**Tags:** typescript, circular-imports, admin-helpers, deps-interface
+
 ### Applier no-op checks must compare *all* runtime-observable fields, not just the identity key
 **Date:** 2026-04-17
 **Context:** PR #179 review: `mcp-applier` used `if (currentUrl === entry.url) continue;` as its idempotence check. That meant rotating a bearer credential while keeping the URL unchanged was silently skipped — the live server kept running with the stale `Authorization: Bearer ${OLD_TOKEN}` placeholder, and credential rotations never reached the runtime. The URL is the natural identity key (agents route on it), but it's not the only field the runtime consumes.
