@@ -53,8 +53,11 @@ export function createReconcileHookHandler(
     req: IncomingMessage,
     res: ServerResponse,
   ): Promise<void> {
-    // 1. Read raw body with 64 KiB cap.
-    let raw: string;
+    // 1. Read raw body with 64 KiB cap. Keep as Buffer so the HMAC covers
+    //    exact bytes — a utf-8 round-trip would replace any invalid byte
+    //    sequences with U+FFFD, which the shell client's openssl sign doesn't
+    //    do, producing spurious 401s.
+    let raw: Buffer;
     try {
       raw = await readRawBody(req, MAX_BODY_BYTES);
     } catch (err) {
@@ -79,7 +82,7 @@ export function createReconcileHookHandler(
     //    attackers can't probe for Zod error differences.
     let parsed: unknown;
     try {
-      parsed = JSON.parse(raw);
+      parsed = JSON.parse(raw.toString('utf-8'));
     } catch {
       sendErrorWithDetails(res, 400, 'Invalid request', 'Body is not valid JSON');
       return;
@@ -112,15 +115,18 @@ export function createReconcileHookHandler(
 
 // ── helpers ─────────────────────────────────────────────────────────────
 
-/** Read the raw request body as a string, capped at `maxBytes`. Throws an
- *  Error with message `TOO_LARGE` if the cap is exceeded. */
-async function readRawBody(req: IncomingMessage, maxBytes: number): Promise<string> {
-  return new Promise<string>((resolve, reject) => {
+/** Read the raw request body as a Buffer, capped at `maxBytes`. Throws an
+ *  Error with message `TOO_LARGE` if the cap is exceeded. Returning Buffer
+ *  (not string) is deliberate: the HMAC must be computed over the exact
+ *  bytes the shell client signed, with no utf-8 replacement-character
+ *  round-trip. */
+async function readRawBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  return new Promise<Buffer>((resolve, reject) => {
     const chunks: Buffer[] = [];
     let total = 0;
     let settled = false;
 
-    const done = (err: Error | null, value?: string): void => {
+    const done = (err: Error | null, value?: Buffer): void => {
       if (settled) return;
       settled = true;
       if (err) reject(err);
@@ -142,15 +148,17 @@ async function readRawBody(req: IncomingMessage, maxBytes: number): Promise<stri
       }
       chunks.push(chunk);
     });
-    req.on('end', () => done(null, Buffer.concat(chunks).toString('utf-8')));
+    req.on('end', () => done(null, Buffer.concat(chunks)));
     req.on('error', (err) => done(err));
   });
 }
 
 /** Constant-time signature verification. Returns false for missing headers,
- *  wrong prefix, wrong hex length, non-hex characters, or wrong HMAC. */
+ *  wrong prefix, wrong hex length, non-hex characters, or wrong HMAC.
+ *  Takes the raw body as a Buffer so the HMAC is computed over the exact
+ *  bytes the hook client signed. */
 function verifySignature(
-  raw: string,
+  raw: Buffer,
   header: string | undefined,
   secret: string,
 ): boolean {
