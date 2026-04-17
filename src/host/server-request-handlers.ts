@@ -28,6 +28,19 @@ const logger = getLogger();
 /** SSE keepalive interval. */
 const SSE_KEEPALIVE_MS = 15_000;
 
+/** Minimal HTML entity escape. Used by the OAuth callback response page to
+ *  interpolate a known-finite set of reason codes without opening an HTML
+ *  injection vector. Not a substitute for a full escaper — we use it only
+ *  on values whose shape we control. */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // ── Auth middleware ──
 
 export async function authenticateRequest(
@@ -491,6 +504,13 @@ export interface RequestHandlerOpts {
   // Admin
   adminHandler: AdminHandler | null;
 
+  // Admin-initiated OAuth flow (phase 6) — used by /v1/oauth/callback/* to
+  // resolve admin-provenance states (set.skillStateStore dashboard) before
+  // falling through to the agent-initiated path (oauth-skills.ts).
+  adminOAuthFlow?: import('./admin-oauth-flow.js').AdminOAuthFlow;
+  /** Paired with adminOAuthFlow — fire-and-forget after tokens are written. */
+  reconcileAgent?: (agentId: string, ref: string) => Promise<{ skills: number; events: number }>;
+
   // Drain state — caller manages the boolean; handler reads it
   isDraining: () => boolean;
 
@@ -510,6 +530,7 @@ export function createRequestHandler(opts: RequestHandlerOpts): (req: IncomingMe
   const {
     modelId, eventBus, providers, fileStore, gcsFileStorage,
     completionOpts, webhookPrefix, webhookHandler, adminHandler,
+    adminOAuthFlow, reconcileAgent,
     isDraining, trackRequestStart, trackRequestEnd, extraRoutes,
     authProviders,
   } = opts;
@@ -680,7 +701,9 @@ export function createRequestHandler(opts: RequestHandlerOpts): (req: IncomingMe
       return;
     }
 
-    // OAuth callback
+    // OAuth callback — admin-initiated flow tries first (claims the state on
+    // match, success or failure), then falls through to the agent-initiated
+    // path in oauth-skills.ts when no admin flow is pending for this state.
     if (url.startsWith('/v1/oauth/callback/') && req.method === 'GET') {
       const provider = url.split('/v1/oauth/callback/')[1]?.split('?')[0];
       const params = new URL(req.url!, `http://${req.headers.host}`).searchParams;
@@ -695,6 +718,34 @@ export function createRequestHandler(opts: RequestHandlerOpts): (req: IncomingMe
       }
 
       try {
+        // Try admin-initiated flow first. If matched (regardless of ok),
+        // we do NOT fall through — matched:true means the state was
+        // consumed, and leaking it back to the agent module would defeat
+        // the single-use replay defense.
+        if (adminOAuthFlow) {
+          const adminResult = await adminOAuthFlow.resolveCallback({
+            provider,
+            code,
+            state,
+            credentials: providers.credentials,
+            reconcileAgent,
+            audit: providers.audit,
+          });
+          if (adminResult.matched) {
+            const html = adminResult.ok
+              ? '<html><body><h2>Authentication successful</h2><p>You can close this tab and return to the dashboard.</p></body></html>'
+              : `<html><body><h2>Authentication failed</h2><p>${escapeHtml(adminResult.reason)}</p></body></html>`;
+            const status = adminResult.ok ? 200 : 400;
+            res.writeHead(status, {
+              'Content-Type': 'text/html',
+              'Content-Length': String(Buffer.byteLength(html)),
+            });
+            res.end(html);
+            return;
+          }
+        }
+
+        // Fall through to agent-initiated flow.
         const { resolveOAuthCallback } = await import('./oauth-skills.js');
         const found = await resolveOAuthCallback(provider, code, state, providers.credentials, eventBus);
 

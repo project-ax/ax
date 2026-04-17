@@ -1,5 +1,17 @@
 # Host
 
+### "matched" is state consumption, not exchange success — callback fall-through must gate on matched, not ok
+**Date:** 2026-04-17
+**Context:** Phase 6 Task 4. The `/v1/oauth/callback/:provider` handler tries the admin-initiated flow first and, on no match, falls through to the agent-initiated `oauth-skills.ts` path. First instinct was `if (adminResult.ok)` to decide when to return; fall-through happened on any failure. That would leak already-claimed admin states to the agent module, and also let a URL-path-mismatch attack carry a valid state into the other handler.
+**Lesson:** Design dispatcher return types as `{ matched: false } | { matched: true; ok: true } | { matched: true; ok: false; reason: ... }`. `matched: true` means the dispatcher *consumed* the routing token (the OAuth state, here), regardless of whether the exchange succeeded. Any fall-through logic MUST gate on `matched: false`, never on `ok`. Apply the same rule when another subsystem also claims states (oauth-skills stores its own pending-flow map — we must NEVER release a state from admin-flow to agent-flow). Provider-path mismatch on the admin flow: consume the state, audit the mismatch, return `matched: true, ok: false` — never `matched: false`.
+**Tags:** oauth, callback, state-machine, fall-through, dispatch, security
+
+### Never log upstream response bodies on OAuth failures — they can echo back secrets
+**Date:** 2026-04-17
+**Context:** Phase 6 Task 4 token-exchange failure path. The existing `oauth-skills.ts` logged the raw response body on non-2xx (`body: text`). Some OAuth providers include the submitted `client_secret` or authorization `code` in their error responses (verbose error echoing), so that log line could persist secrets to pino files or centralized log aggregators.
+**Lesson:** When an external identity provider returns an error, log `{ status, bodyLength }` only — never the body itself. If a particular provider routinely sends structured error codes you want visibility into, parse the body and whitelist specific known-safe fields (`error: 'invalid_grant'` etc.) before logging. Default is: status + length, no body. Same rule applies to token-exchange audit args.
+**Tags:** oauth, logging, secrets, upstream-errors, audit
+
 ### Derive redirect_uri scheme from x-forwarded-proto first, req.socket.encrypted second
 **Date:** 2026-04-17
 **Context:** Phase 6 Task 3 — computing the OAuth `redirect_uri` server-side for the admin-initiated flow. In production, the host runs behind a TLS-terminating proxy (nginx, Cloudflare), so `req.socket.encrypted` is `false` even though the user's browser spoke `https` to the proxy. Building `http://<host>/v1/oauth/callback/linear` in that case means the authorization server will refuse (the OAuth app is registered with the `https` URI) or — worse — issue tokens to an `http` endpoint that the browser will downgrade-reject.

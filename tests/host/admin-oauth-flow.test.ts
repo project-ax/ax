@@ -1,8 +1,11 @@
 // tests/host/admin-oauth-flow.test.ts — unit tests for the in-memory
-// admin-initiated OAuth pending-flow map (Phase 6 Task 3).
+// admin-initiated OAuth pending-flow map (Phase 6 Task 3) + resolveCallback
+// (Phase 6 Task 4).
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createAdminOAuthFlow, type StartFlowInput } from '../../src/host/admin-oauth-flow.js';
+import type { CredentialProvider } from '../../src/providers/credentials/types.js';
+import type { AuditProvider } from '../../src/providers/audit/types.js';
 import { initLogger } from '../../src/logger.js';
 
 initLogger({ file: false, level: 'silent' });
@@ -149,5 +152,395 @@ describe('createAdminOAuthFlow', () => {
     const url = new URL(authUrl);
     // URLSearchParams renders scope= when the value is the empty string.
     expect(url.searchParams.get('scope')).toBe('');
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// Phase 6 Task 4: resolveCallback — token exchange + credential write +
+// reconcile.  Every test below stubs global.fetch (restored in afterEach)
+// and asserts the credential-store + audit call shape.  The audit/call
+// transcripts are substring-guarded against literal token values, which is
+// the cheapest practical check that tokens never leak into logs or args.
+// ──────────────────────────────────────────────────────────────────────
+
+interface CredSetCall {
+  envName: string;
+  value: string;
+  scope?: string;
+}
+
+function makeCredentials(): CredentialProvider & { setCalls: CredSetCall[] } {
+  const setCalls: CredSetCall[] = [];
+  return {
+    setCalls,
+    async get() { return null; },
+    async set(envName, value, scope) {
+      setCalls.push({ envName, value, scope });
+    },
+    async delete() { /* noop */ },
+    async list() { return []; },
+    async listScopePrefix() { return []; },
+  };
+}
+
+function makeAudit(): AuditProvider & { calls: Array<Partial<import('../../src/providers/audit/types.js').AuditEntry>> } {
+  const calls: Array<Partial<import('../../src/providers/audit/types.js').AuditEntry>> = [];
+  return {
+    calls,
+    async log(entry) { calls.push(entry); },
+    async query() { return []; },
+  };
+}
+
+function mockFetchResponse(status: number, body: unknown): Response {
+  const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    async text() { return bodyStr; },
+    async json() {
+      if (typeof body === 'string') throw new Error('invalid json');
+      return body;
+    },
+  } as unknown as Response;
+}
+
+describe('resolveCallback', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn());
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('happy path — PKCE public client writes access_token + refresh blob + audit + reconcile', async () => {
+    const flow = createAdminOAuthFlow();
+    const { state } = flow.start(baseInput());
+
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockFetchResponse(200, { access_token: 'at-123', refresh_token: 'rt-456', expires_in: 3600 }),
+    );
+
+    const credentials = makeCredentials();
+    const audit = makeAudit();
+    const reconcile = vi.fn(async () => ({ skills: 1, events: 0 }));
+
+    const result = await flow.resolveCallback({
+      provider: 'linear',
+      code: 'code-x',
+      state,
+      credentials,
+      audit,
+      reconcileAgent: reconcile,
+    });
+
+    expect(result).toEqual({ matched: true, ok: true });
+
+    // access_token written at user scope.
+    const tokenCall = credentials.setCalls.find(c => c.envName === 'LINEAR_TOKEN');
+    expect(tokenCall).toBeDefined();
+    expect(tokenCall!.value).toBe('at-123');
+    expect(tokenCall!.scope).toBe('user:main:alice');
+
+    // refresh blob written at same scope.
+    const blobCall = credentials.setCalls.find(c => c.envName === 'LINEAR_TOKEN__oauth_blob');
+    expect(blobCall).toBeDefined();
+    expect(blobCall!.scope).toBe('user:main:alice');
+    const blob = JSON.parse(blobCall!.value);
+    expect(blob.access_token).toBe('at-123');
+    expect(blob.refresh_token).toBe('rt-456');
+    expect(blob.token_url).toBe('https://api.linear.app/oauth/token');
+    expect(blob.client_id).toBe('frontmatter-cid');
+    expect(blob.scopes).toEqual(['read', 'write']);
+
+    // Audit success, hasRefreshToken:true, no token values.
+    const success = audit.calls.find(c => c.action === 'oauth_callback_success');
+    expect(success).toBeDefined();
+    expect(success!.sessionId).toBe('main');
+    expect(success!.args).toMatchObject({
+      agentId: 'main',
+      skillName: 'linear-tracker',
+      envName: 'LINEAR_TOKEN',
+      provider: 'linear',
+      hasRefreshToken: true,
+    });
+    const auditText = JSON.stringify(audit.calls);
+    expect(auditText).not.toContain('at-123');
+    expect(auditText).not.toContain('rt-456');
+
+    // Reconcile called with (agentId, main ref).
+    expect(reconcile).toHaveBeenCalledWith('main', 'refs/heads/main');
+
+    // Token request body — no client_secret (PKCE public client).
+    const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const body = fetchCall[1].body as string;
+    expect(body).toContain('grant_type=authorization_code');
+    expect(body).toContain('code=code-x');
+    expect(body).toContain('code_verifier=');
+    expect(body).toContain('client_id=frontmatter-cid');
+    expect(body).not.toContain('client_secret');
+  });
+
+  it('admin-registered (confidential) flow — client_secret IS in token body, never in audit', async () => {
+    const flow = createAdminOAuthFlow();
+    const { state } = flow.start(baseInput({
+      adminOverride: { clientId: 'cid', clientSecret: 'shh' },
+    }));
+
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockFetchResponse(200, { access_token: 'at-z', refresh_token: 'rt-y', expires_in: 1800 }),
+    );
+
+    const credentials = makeCredentials();
+    const audit = makeAudit();
+
+    const result = await flow.resolveCallback({
+      provider: 'linear',
+      code: 'code-conf',
+      state,
+      credentials,
+      audit,
+    });
+
+    expect(result).toEqual({ matched: true, ok: true });
+
+    // client_secret in the form body.
+    const fetchCall = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    const body = fetchCall[1].body as string;
+    expect(body).toContain('client_secret=shh');
+    expect(body).toContain('client_id=cid');
+
+    // Secret must not appear in audit.
+    expect(JSON.stringify(audit.calls)).not.toContain('shh');
+
+    // blob stores clientId but NOT the secret.
+    const blobCall = credentials.setCalls.find(c => c.envName === 'LINEAR_TOKEN__oauth_blob');
+    expect(blobCall).toBeDefined();
+    const blob = JSON.parse(blobCall!.value);
+    expect(blob.client_id).toBe('cid');
+    expect(JSON.stringify(blob)).not.toContain('shh');
+  });
+
+  it('unknown state → {matched:false}, no fetch call', async () => {
+    const flow = createAdminOAuthFlow();
+    const credentials = makeCredentials();
+    const audit = makeAudit();
+
+    const result = await flow.resolveCallback({
+      provider: 'linear',
+      code: 'code',
+      state: 'not-a-real-state',
+      credentials,
+      audit,
+    });
+
+    expect(result).toEqual({ matched: false });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(credentials.setCalls).toEqual([]);
+    expect(audit.calls).toEqual([]);
+  });
+
+  it('provider mismatch → matched:true, ok:false, invalid_response, no fetch, no cred write', async () => {
+    const flow = createAdminOAuthFlow();
+    const { state } = flow.start(baseInput()); // provider = 'linear'
+    const credentials = makeCredentials();
+    const audit = makeAudit();
+
+    const result = await flow.resolveCallback({
+      provider: 'evil',
+      code: 'code',
+      state,
+      credentials,
+      audit,
+    });
+
+    expect(result).toEqual({
+      matched: true,
+      ok: false,
+      reason: 'invalid_response',
+      details: 'provider mismatch',
+    });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    expect(credentials.setCalls).toEqual([]);
+
+    // Audit failure emitted so mismatches are visible.
+    const fail = audit.calls.find(c => c.action === 'oauth_callback_failed');
+    expect(fail).toBeDefined();
+    expect((fail!.args as { reason?: string }).reason).toBe('provider_mismatch');
+  });
+
+  it('token exchange 400 → {matched:true, ok:false, reason:token_exchange_failed}, no cred write', async () => {
+    const flow = createAdminOAuthFlow();
+    const { state } = flow.start(baseInput());
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockFetchResponse(400, 'invalid_grant'),
+    );
+
+    const credentials = makeCredentials();
+    const audit = makeAudit();
+
+    const result = await flow.resolveCallback({
+      provider: 'linear',
+      code: 'code',
+      state,
+      credentials,
+      audit,
+    });
+
+    expect(result).toEqual({ matched: true, ok: false, reason: 'token_exchange_failed' });
+    expect(credentials.setCalls).toEqual([]);
+
+    const fail = audit.calls.find(c => c.action === 'oauth_callback_failed');
+    expect(fail).toBeDefined();
+    expect((fail!.args as { status?: number }).status).toBe(400);
+  });
+
+  it('response missing access_token → {matched:true, ok:false, reason:invalid_response}, no cred write', async () => {
+    const flow = createAdminOAuthFlow();
+    const { state } = flow.start(baseInput());
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockFetchResponse(200, { error: 'wat' }),
+    );
+
+    const credentials = makeCredentials();
+    const audit = makeAudit();
+
+    const result = await flow.resolveCallback({
+      provider: 'linear',
+      code: 'code',
+      state,
+      credentials,
+      audit,
+    });
+
+    expect(result.matched).toBe(true);
+    expect(result).toMatchObject({ ok: false, reason: 'invalid_response' });
+    expect(credentials.setCalls).toEqual([]);
+
+    const fail = audit.calls.find(c => c.action === 'oauth_callback_failed');
+    expect(fail).toBeDefined();
+  });
+
+  it('no refresh_token → access_token still written, no blob, hasRefreshToken:false', async () => {
+    const flow = createAdminOAuthFlow();
+    const { state } = flow.start(baseInput());
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockFetchResponse(200, { access_token: 'at-only' }),
+    );
+
+    const credentials = makeCredentials();
+    const audit = makeAudit();
+
+    const result = await flow.resolveCallback({
+      provider: 'linear',
+      code: 'code',
+      state,
+      credentials,
+      audit,
+    });
+
+    expect(result).toEqual({ matched: true, ok: true });
+    expect(credentials.setCalls).toHaveLength(1);
+    expect(credentials.setCalls[0].envName).toBe('LINEAR_TOKEN');
+    expect(credentials.setCalls[0].value).toBe('at-only');
+    expect(credentials.setCalls.find(c => c.envName === 'LINEAR_TOKEN__oauth_blob')).toBeUndefined();
+
+    const success = audit.calls.find(c => c.action === 'oauth_callback_success');
+    expect(success).toBeDefined();
+    expect((success!.args as { hasRefreshToken?: boolean }).hasRefreshToken).toBe(false);
+  });
+
+  it('reconcile throws → still returns ok, credentials already written', async () => {
+    const flow = createAdminOAuthFlow();
+    const { state } = flow.start(baseInput());
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockFetchResponse(200, { access_token: 'at', refresh_token: 'rt' }),
+    );
+
+    const credentials = makeCredentials();
+    const audit = makeAudit();
+    const reconcile = vi.fn(async () => { throw new Error('kaboom'); });
+
+    const result = await flow.resolveCallback({
+      provider: 'linear',
+      code: 'code',
+      state,
+      credentials,
+      audit,
+      reconcileAgent: reconcile,
+    });
+
+    expect(result).toEqual({ matched: true, ok: true });
+    expect(reconcile).toHaveBeenCalled();
+    expect(credentials.setCalls.find(c => c.envName === 'LINEAR_TOKEN')).toBeDefined();
+  });
+
+  it('no reconcileAgent dep → succeeds without calling it', async () => {
+    const flow = createAdminOAuthFlow();
+    const { state } = flow.start(baseInput());
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockFetchResponse(200, { access_token: 'at' }),
+    );
+
+    const credentials = makeCredentials();
+    const audit = makeAudit();
+
+    const result = await flow.resolveCallback({
+      provider: 'linear',
+      code: 'code',
+      state,
+      credentials,
+      audit,
+    });
+
+    expect(result).toEqual({ matched: true, ok: true });
+    expect(credentials.setCalls.find(c => c.envName === 'LINEAR_TOKEN')).toBeDefined();
+  });
+
+  it('agent-scoped credential → written at agent scope, not user scope', async () => {
+    const flow = createAdminOAuthFlow();
+    const { state } = flow.start(baseInput({ scope: 'agent', userId: undefined }));
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockFetchResponse(200, { access_token: 'at', refresh_token: 'rt' }),
+    );
+
+    const credentials = makeCredentials();
+    const audit = makeAudit();
+
+    const result = await flow.resolveCallback({
+      provider: 'linear',
+      code: 'code',
+      state,
+      credentials,
+      audit,
+    });
+
+    expect(result).toEqual({ matched: true, ok: true });
+    const tokenCall = credentials.setCalls.find(c => c.envName === 'LINEAR_TOKEN');
+    expect(tokenCall).toBeDefined();
+    expect(tokenCall!.scope).toBe('agent:main');
+  });
+
+  it('claim is single-use for callback: second resolveCallback with same state → matched:false', async () => {
+    const flow = createAdminOAuthFlow();
+    const { state } = flow.start(baseInput());
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      mockFetchResponse(200, { access_token: 'at' }),
+    );
+
+    const credentials = makeCredentials();
+    const audit = makeAudit();
+
+    const first = await flow.resolveCallback({
+      provider: 'linear', code: 'c1', state, credentials, audit,
+    });
+    expect(first).toEqual({ matched: true, ok: true });
+
+    const second = await flow.resolveCallback({
+      provider: 'linear', code: 'c2', state, credentials, audit,
+    });
+    expect(second).toEqual({ matched: false });
+    // Only one fetch — the second call short-circuited.
+    expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(1);
   });
 });

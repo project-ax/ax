@@ -583,6 +583,8 @@ export async function createServer(
     webhookPrefix,
     webhookHandler,
     adminHandler,
+    adminOAuthFlow: core.adminOAuthFlow,
+    reconcileAgent: adminReconcileAgent,
     authProviders: providers.auth,
     isDraining: () => draining,
     trackRequestStart,

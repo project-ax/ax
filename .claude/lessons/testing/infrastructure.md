@@ -2,6 +2,12 @@
 
 ## Lessons
 
+### vi.stubGlobal('fetch', ...) also intercepts the test's own requests to a local server
+**Date:** 2026-04-17
+**Context:** Phase 6 Task 4 HTTP tests for `/v1/oauth/callback/:provider` needed to mock the OAuth token-exchange fetch while still letting the test issue a real `fetch()` against a locally-bound `http.createServer`. A naive `vi.stubGlobal('fetch', vi.fn())` made the test's `fetch(harness.url + '/v1/oauth/callback/...')` return the mocked token response (`.status === undefined`) instead of actually reaching the server.
+**Lesson:** When a test needs BOTH a real fetch (to its own local server) AND a mocked fetch (for outbound calls the handler makes), split them by hostname. Bind `realFetch = globalThis.fetch.bind(globalThis)` BEFORE stubbing, then install a stub that proxies `127.0.0.1`/`localhost` URLs through `realFetch` and forwards everything else to a `tokenFetch = vi.fn()`. The binding-before-stubbing matters — if the stub reads `globalThis.fetch` at call time it loops into itself.
+**Tags:** vitest, fetch, stubGlobal, http-test, oauth, local-server
+
 ### CommonJS container code in a type:module project needs a nested package.json override
 **Date:** 2026-04-17
 **Context:** Wrote a container-side module `container/git-server/install-hook.js` using `require()`/`module.exports` to match `http-server.js`. Vitest (repo is `type:module`) refused to load it via `createRequire` with "require is not defined in ES module scope."
