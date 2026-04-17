@@ -60,8 +60,11 @@ export function createIPCTools(client: IIPCClient, opts?: IPCToolsOptions): Agen
 
       // execute_script always runs locally — it only needs Node.js and the filesystem
       if (action === 'execute_script') {
+        if (typeof callParams.code !== 'string') {
+          return text(`Error: execute_script requires a "code" string parameter`);
+        }
         const result = executeScript(
-          { code: callParams.code as string, timeoutMs: callParams.timeoutMs as number | undefined },
+          { code: callParams.code, timeoutMs: typeof callParams.timeoutMs === 'number' ? callParams.timeoutMs : undefined },
           opts?.localSandbox?.workspace ?? process.cwd(),
         );
         return text(JSON.stringify(result));

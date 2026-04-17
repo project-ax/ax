@@ -145,14 +145,19 @@ describe('tool-catalog <-> system prompt sync', () => {
 // ── tool-catalog <-> IPC schemas sync ──────────────────────────────────
 
 describe('tool-catalog <-> IPC schemas sync', () => {
+  // Actions that run agent-local (no IPC round-trip) and therefore have no IPC schema
+  const agentLocalActions = new Set(['execute_script']);
+
   test('every tool action in catalog has a corresponding IPC schema', () => {
     for (const tool of TOOL_CATALOG) {
       if (tool.actionMap) {
         // Multi-op tool: every action in the actionMap must have an IPC schema
         for (const [typeValue, ipcAction] of Object.entries(tool.actionMap)) {
+          if (agentLocalActions.has(ipcAction)) continue;
           expect(IPC_SCHEMAS, `IPC schema missing for action "${ipcAction}" (tool "${tool.name}", type "${typeValue}")`).toHaveProperty(ipcAction);
         }
       } else if (tool.singletonAction) {
+        if (agentLocalActions.has(tool.singletonAction)) continue;
         // Singleton tool: the singletonAction must have an IPC schema
         expect(IPC_SCHEMAS, `IPC schema missing for singleton action "${tool.singletonAction}" (tool "${tool.name}")`).toHaveProperty(tool.singletonAction);
       }
@@ -174,8 +179,9 @@ describe('tool-catalog <-> IPC schemas sync', () => {
 
     const schemaActions = new Set(Object.keys(IPC_SCHEMAS));
 
-    // Every catalog action MUST have a schema
+    // Every catalog action MUST have a schema (except agent-local ones)
     for (const action of catalogActions) {
+      if (agentLocalActions.has(action)) continue;
       expect(schemaActions.has(action), `Catalog action "${action}" missing from IPC_SCHEMAS`).toBe(true);
     }
 

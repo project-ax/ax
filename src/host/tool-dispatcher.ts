@@ -101,7 +101,7 @@ export class ToolDispatcher {
       return {
         content,
         isError: result.isError,
-        taint: { source: `mcp:${serverUrl}`, trust: 'external' as const, timestamp: new Date() },
+        taint: { source: `external:${serverUrl}`, trust: 'external' as const, timestamp: new Date() },
       };
     } catch (err) {
       logger.warn('dispatch_error', { tool: call.tool, error: (err as Error).message });
@@ -119,13 +119,17 @@ export class ToolDispatcher {
   ): Promise<unknown[]> {
     const results: unknown[] = [];
     for (const call of calls) {
-      const resolved = this.resolveRefs(call.args, results);
-      const result = await this.dispatch({ tool: call.tool, args: resolved }, ctx);
-      if (result.isError) {
-        results.push({ ok: false, error: result.content });
-      } else {
-        try { results.push(JSON.parse(result.content)); }
-        catch { results.push(result.content); }
+      try {
+        const resolved = this.resolveRefs(call.args, results);
+        const result = await this.dispatch({ tool: call.tool, args: resolved }, ctx);
+        if (result.isError) {
+          results.push({ ok: false, error: result.content });
+        } else {
+          try { results.push(JSON.parse(result.content)); }
+          catch { results.push(result.content); }
+        }
+      } catch (err) {
+        results.push({ ok: false, error: (err as Error).message });
       }
     }
     return results;
@@ -139,6 +143,9 @@ export class ToolDispatcher {
   private deepResolve(value: unknown, results: unknown[]): unknown {
     if (value && typeof value === 'object' && '__batchRef' in (value as Record<string, unknown>)) {
       const ref = value as { __batchRef: number; path?: string };
+      if (ref.__batchRef < 0 || ref.__batchRef >= results.length) {
+        throw new Error(`Batch ref index ${ref.__batchRef} out of range (${results.length} results available)`);
+      }
       const resolved = results[ref.__batchRef];
       if (resolved && typeof resolved === 'object' && 'ok' in (resolved as Record<string, unknown>) && !(resolved as Record<string, unknown>).ok) {
         throw new Error(`Batch ref index ${ref.__batchRef} references a failed call`);
@@ -160,13 +167,13 @@ export class ToolDispatcher {
     if (!path) return value;
     const segments = path.match(/\.([^.[]+)|\[(\d+)\]/g);
     if (!segments) return value;
-    let current: unknown = value;
+    let current: any = value;
     for (const seg of segments) {
       if (current == null) return undefined;
       if (seg.startsWith('[')) {
-        (current as unknown) = (current as unknown[])[parseInt(seg.slice(1, -1))];
+        current = (current as unknown[])[parseInt(seg.slice(1, -1))];
       } else {
-        (current as unknown) = (current as Record<string, unknown>)[seg.slice(1)];
+        current = (current as Record<string, unknown>)[seg.slice(1)];
       }
     }
     return current;

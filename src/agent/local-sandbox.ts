@@ -107,10 +107,14 @@ export function createLocalSandbox(opts: LocalSandboxOptions) {
   function safeWorkspacePath(relativePath: string): string {
     // "." means workspace root — return it directly
     if (relativePath === '.' || relativePath === './') return workspace;
+    // Normalize workspace to strip trailing separators for consistent comparison
+    const normalizedWs = workspace.replace(/[/\\]+$/, '');
     // Strip workspace prefix if the LLM sent an absolute path rooted in workspace
     let path = relativePath;
-    if (path.startsWith(workspace + '/')) {
-      path = path.slice(workspace.length + 1);
+    if (path === normalizedWs) {
+      return workspace;
+    } else if (path.startsWith(normalizedWs + '/') || path.startsWith(normalizedWs + '\\')) {
+      path = path.slice(normalizedWs.length + 1);
     }
     const segments = path.split(/[/\\]/).filter(Boolean);
     if (segments.length === 0) return workspace;

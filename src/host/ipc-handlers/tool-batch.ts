@@ -134,24 +134,23 @@ export function createToolBatchHandlers(
       const results: unknown[] = [];
 
       for (const call of req.calls) {
-        const resolvedArgs = resolveRefs(call.args, results) as Record<string, unknown>;
-
-        // ── ToolDispatcher preferred path ──
-        if (opts.dispatcher) {
-          const result = await opts.dispatcher.dispatch(
-            { tool: call.tool, args: resolvedArgs },
-            { agentId: ctx.agentId, sessionId: ctx.sessionId, userId: ctx.userId ?? '' },
-          );
-          if (result.isError) {
-            results.push({ ok: false, error: result.content });
-          } else {
-            try { results.push(JSON.parse(result.content)); }
-            catch { results.push(result.content); }
-          }
-          continue;
-        }
-
         try {
+          const resolvedArgs = resolveRefs(call.args, results) as Record<string, unknown>;
+
+          // ── ToolDispatcher preferred path ──
+          if (opts.dispatcher) {
+            const result = await opts.dispatcher.dispatch(
+              { tool: call.tool, args: resolvedArgs },
+              { agentId: ctx.agentId, sessionId: ctx.sessionId, userId: ctx.userId ?? '' },
+            );
+            if (result.isError) {
+              results.push({ ok: false, error: result.content });
+            } else {
+              try { results.push(JSON.parse(result.content)); }
+              catch { results.push(result.content); }
+            }
+            continue;
+          }
           // ── Unified path: resolveServer covers ALL MCP tools ──
           const unifiedUrl = opts.resolveServer?.(ctx.agentId, call.tool);
           if (unifiedUrl && opts.mcpCallTool) {

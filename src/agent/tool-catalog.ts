@@ -400,8 +400,8 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
       '```\n\n' +
       'IMPORTANT: Use console.log() for output. Only stdout is captured.',
     parameters: Type.Object({
-      code: Type.String({ description: 'JavaScript code to execute. Can import from /workspace/tools/.' }),
-      timeoutMs: Type.Optional(Type.Number({ description: 'Execution timeout in ms (default: 30000, max: 120000)' })),
+      code: Type.String({ maxLength: 500_000, description: 'JavaScript code to execute. Can import from /workspace/tools/.' }),
+      timeoutMs: Type.Optional(Type.Integer({ minimum: 1000, maximum: 120_000, description: 'Execution timeout in ms (default: 30000, max: 120000)' })),
     }),
     category: 'sandbox',
     timeoutMs: 120_000,

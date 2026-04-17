@@ -39,9 +39,11 @@ export function executeScript(args: ExecuteScriptArgs, cwd: string): ExecuteScri
       // Spill full output to disk so the script can read it back if needed
       const spillId = `script-${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const spillPath = join(RESULTS_DIR, `${spillId}.txt`);
+      let spilled = false;
       try {
         mkdirSync(RESULTS_DIR, { recursive: true });
         writeFileSync(spillPath, stdout);
+        spilled = true;
       } catch { /* best-effort */ }
 
       const headSize = Math.floor(MAX_STDOUT * 0.6);
@@ -50,7 +52,7 @@ export function executeScript(args: ExecuteScriptArgs, cwd: string): ExecuteScri
       const tail = stdout.slice(-tailSize);
       return {
         stdout:
-          `[Output truncated: ${stdout.length} chars total. Full output saved to ${spillPath}]\n\n` +
+          `[Output truncated: ${stdout.length} chars total.${spilled ? ` Full output saved to ${spillPath}` : ' Spill to disk failed.'}]\n\n` +
           head +
           `\n\n... [${stdout.length - MAX_STDOUT} chars truncated] ...\n\n` +
           tail,

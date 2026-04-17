@@ -527,31 +527,29 @@ function applyPayload(config: AgentConfig, payload: StdinPayload): void {
   if (Array.isArray(payload.mcpCLIs) && config.workspace) {
     // Tool modules are .js files included alongside CLIs in the mcpCLIs payload
     const moduleFiles = payload.mcpCLIs.filter(f => f.path.endsWith('.js'));
-    if (moduleFiles.length > 0) {
-      const toolsDir = resolve(config.workspace, 'tools');
-      mkdirSync(toolsDir, { recursive: true });
-      // Remove stale modules not in the current payload
-      const incomingModulePaths = new Set(moduleFiles.map(f => f.path));
-      try {
-        for (const existing of readdirSync(toolsDir)) {
-          if (!incomingModulePaths.has(existing)) {
-            const fullPath = resolve(toolsDir, existing);
-            if (fullPath.startsWith(toolsDir + sep) && statSync(fullPath).isFile()) {
-              unlinkSync(fullPath);
-            }
+    const toolsDir = resolve(config.workspace, 'tools');
+    mkdirSync(toolsDir, { recursive: true });
+    // Always prune stale modules, even when no new modules exist
+    const incomingModulePaths = new Set(moduleFiles.map(f => f.path));
+    try {
+      for (const existing of readdirSync(toolsDir)) {
+        if (!incomingModulePaths.has(existing)) {
+          const fullPath = resolve(toolsDir, existing);
+          if (fullPath.startsWith(toolsDir + sep) && statSync(fullPath).isFile()) {
+            unlinkSync(fullPath);
           }
         }
-      } catch { /* toolsDir may not exist yet */ }
-      for (const file of moduleFiles) {
-        const filePath = resolve(toolsDir, file.path);
-        if (!filePath.startsWith(toolsDir + sep) && filePath !== toolsDir) {
-          logger.warn('tool_module_path_traversal_blocked', { path: file.path });
-          continue;
-        }
-        writeFileSync(filePath, file.content, { mode: 0o644 });
       }
-      logger.info('tool_modules_written', { count: moduleFiles.length, dir: toolsDir });
+    } catch { /* toolsDir may not exist yet */ }
+    for (const file of moduleFiles) {
+      const filePath = resolve(toolsDir, file.path);
+      if (!filePath.startsWith(toolsDir + sep) && filePath !== toolsDir) {
+        logger.warn('tool_module_path_traversal_blocked', { path: file.path });
+        continue;
+      }
+      writeFileSync(filePath, file.content, { mode: 0o644 });
     }
+    logger.info('tool_modules_written', { count: moduleFiles.length, dir: toolsDir });
   }
 
   // Store toolModuleIndex on config for prompt building

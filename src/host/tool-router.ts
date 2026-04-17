@@ -124,7 +124,15 @@ async function handleMcpToolCall(
       { tool: call.name, args: call.args },
       { agentId: ctx.agentId, sessionId: ctx.sessionId, userId: ctx.userId },
     );
-    ctx.totalBytes += Buffer.byteLength(result.content);
+    const resultBytes = Buffer.byteLength(result.content);
+    if (resultBytes > FAST_PATH_LIMITS.maxToolResultSizeBytes) {
+      return {
+        toolUseId: call.id,
+        content: `Tool result size limit exceeded (>${FAST_PATH_LIMITS.maxToolResultSizeBytes} bytes).`,
+        isError: true,
+      };
+    }
+    ctx.totalBytes += resultBytes;
     if (ctx.totalBytes > FAST_PATH_LIMITS.maxTotalContextBytes) {
       return {
         toolUseId: call.id,

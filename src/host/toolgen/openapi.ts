@@ -53,7 +53,7 @@ function inferOperationId(method: string, path: string): string {
 export function openApiToToolSchemas(spec: OpenApiSpec, serverName: string): McpToolSchema[] {
   const tools: McpToolSchema[] = [];
 
-  for (const [path, methods] of Object.entries(spec.paths)) {
+  for (const [path, methods] of Object.entries(spec.paths ?? {})) {
     for (const method of HTTP_METHODS) {
       const op = methods[method] as OpenApiOperation | undefined;
       if (!op) continue;

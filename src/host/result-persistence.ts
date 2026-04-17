@@ -9,7 +9,7 @@
  */
 
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { getLogger } from '../logger.js';
 
 const logger = getLogger().child({ component: 'result-persistence' });
@@ -69,10 +69,16 @@ export class ResultPersistence {
   private spill(id: string, content: string): string {
     try {
       mkdirSync(this.dir, { recursive: true });
-      const filePath = join(this.dir, `${id}.json`);
+      const safeId = id.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const filePath = join(this.dir, `${safeId}.json`);
+      // Defense in depth: ensure the resolved path stays inside this.dir
+      const resolvedDir = resolve(this.dir);
+      if (!resolve(filePath).startsWith(resolvedDir + sep)) {
+        throw new Error('invalid spill path');
+      }
       writeFileSync(filePath, content, 'utf-8');
       logger.debug('result_spilled', { id, bytes: Buffer.byteLength(content), path: filePath });
-      return this.buildPreview(content, filePath);
+      return this.buildPreview(content, filePath, id);
     } catch (err) {
       logger.warn('spill_failed', { id, error: (err as Error).message });
       // If spill fails, truncate inline rather than losing data
@@ -80,18 +86,18 @@ export class ResultPersistence {
     }
   }
 
-  private buildPreview(content: string, filePath: string): string {
+  private buildPreview(content: string, filePath: string, id: string): string {
     const headSize = Math.floor(this.previewChars * 0.6);
     const tailSize = this.previewChars - headSize;
     const head = content.slice(0, headSize);
     const tail = content.slice(-tailSize);
-    const omitted = content.length - headSize - tailSize;
+    const omitted = Math.max(0, content.length - headSize - tailSize);
 
     return (
       head +
-      `\n\n... [${omitted.toLocaleString()} chars omitted] ...\n\n` +
+      (omitted > 0 ? `\n\n... [${omitted.toLocaleString()} chars omitted] ...\n\n` : '') +
       tail +
-      `\n\n[Full output persisted to ${filePath} — use read_file to access. ID: ${filePath.split('/').pop()}]`
+      `\n\n[Full output persisted to ${filePath} — use read_file to access. ID: ${id}]`
     );
   }
 }

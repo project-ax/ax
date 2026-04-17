@@ -263,7 +263,11 @@ ${functions.join('\n\n')}
  * Generate a barrel index.js that re-exports all server modules.
  */
 export function generateIndex(servers: string[]): string {
-  const exports = servers.map(s => `export * as ${s} from './${s}.js';`);
+  const toIdentifier = (s: string) => {
+    const safe = s.replace(/[^a-zA-Z0-9_$]/g, '_');
+    return /^[0-9]/.test(safe) ? `_${safe}` : safe;
+  };
+  const exports = servers.map(s => `export * as ${toIdentifier(s)} from './${s}.js';`);
   return `// Auto-generated tool index. Do not edit.\n${exports.join('\n')}\n`;
 }
 
