@@ -2,6 +2,14 @@
 
 General refactoring, stale reference cleanup, path realignment, dependency updates.
 
+## [2026-04-17 18:22] — Phase 7 Task 5: Clean up skills prompt module + tool-catalog filter
+
+**Task:** Remove residual install-intent prompt artifacts — `detectSkillInstallIntent`, the four regex constants (`INSTALL_ACTIONS`, `SKILL_NOUNS`, `INQUIRY_PATTERNS`, `REGISTRY_REF`), the "Installing New Skills" prompt block, and `skillInstallEnabled` across `PromptContext`, `ToolFilterContext`, and all callers.
+**What I did:** Rewrote `src/agent/prompt/modules/skills.ts` to the clean version from the plan (drops the four regex constants, `detectSkillInstallIntent`, and the install-instructions block; keeps available-skills + no-skills + Creating Skills + renderMinimal paths). Removed `skillInstallEnabled?: boolean` from `src/agent/prompt/types.ts` (`PromptContext`). Removed the flag from `src/agent/tool-catalog.ts` (`ToolFilterContext`). In `src/agent/agent-setup.ts` dropped the `detectSkillInstallIntent` import, the intent-detection block, and both write sites (`skillInstallEnabled` in PromptBuilder.build args + in the `toolFilter` return). Updated tests: replaced the entire `detectSkillInstallIntent` describe + three `skillInstallEnabled`-gated cases in `tests/agent/prompt/modules/skills.test.ts` with a slim SkillsModule suite; stripped the flag from filter objects in `tests/agent/mcp-server.test.ts` (2), `tests/agent/ipc-tools.test.ts` (2), and the `ALL_FLAGS`/`NO_FLAGS`/variant-filter test in `tests/agent/tool-catalog.test.ts`. Also trimmed a stale `detectSkillInstallIntent` bullet in `.claude/skills/ax-provider-skills/SKILL.md` to reflect the current prompt shape.
+**Files touched:** Modified: `src/agent/prompt/modules/skills.ts`, `src/agent/prompt/types.ts`, `src/agent/tool-catalog.ts`, `src/agent/agent-setup.ts`, `tests/agent/prompt/modules/skills.test.ts`, `tests/agent/mcp-server.test.ts`, `tests/agent/ipc-tools.test.ts`, `tests/agent/tool-catalog.test.ts`, `.claude/skills/ax-provider-skills/SKILL.md`.
+**Outcome:** Success — `npm run build` clean; targeted tests green (19 files / 160 tests across `tests/agent/prompt`, `tool-catalog`, `mcp-server`, `ipc-tools`, `agent-setup`). Exit grep for the six terms is zero across `src/` and `tests/`.
+**Notes:** `hasWorkspace`-gated Creating Skills block stays (correct for the git-native flow). Remaining hits for these symbols live only in append-only journal/lessons entries and the task plan doc, which is expected.
+
 ## [2026-04-17 18:05] — Phase 7 Task 4: Drop CLI plugin+mcp + admin plugin endpoints
 
 **Task:** Delete `ax plugin` and `ax mcp` CLI commands plus the 410-stubbed admin plugin routes from Task 3. Drop the admin UI Plugins tab + API surface.

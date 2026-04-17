@@ -402,8 +402,6 @@ export function getToolParamKeys(name: string): string[] {
 export interface ToolFilterContext {
   /** identityFiles.heartbeat is non-empty (used by prompt modules, not tool filtering) */
   hasHeartbeat: boolean;
-  /** User message indicates skill install intent — show install tool */
-  skillInstallEnabled?: boolean;
 }
 
 /**

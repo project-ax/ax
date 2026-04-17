@@ -175,7 +175,7 @@ describe('IPC MCP Server', () => {
   test('scheduler is always present regardless of hasHeartbeat', () => {
     const client = createMockClient();
     const server = createIPCMcpServer(client, {
-      filter: { hasHeartbeat: false, skillInstallEnabled: false },
+      filter: { hasHeartbeat: false },
     });
     const tools = getTools(server);
     const names = Object.keys(tools);
@@ -190,7 +190,7 @@ describe('IPC MCP Server', () => {
   test('filter with all flags false returns all tools (no governance to exclude)', () => {
     const client = createMockClient();
     const server = createIPCMcpServer(client, {
-      filter: { hasHeartbeat: false, skillInstallEnabled: false },
+      filter: { hasHeartbeat: false },
     });
     const tools = getTools(server);
     const names = Object.keys(tools);

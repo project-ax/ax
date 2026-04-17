@@ -104,7 +104,7 @@ describe('ipc-tools', () => {
   test('scheduler tool is always present regardless of hasHeartbeat', () => {
     const client = createMockClient();
     const tools = createIPCTools(client as any, {
-      filter: { hasHeartbeat: false, skillInstallEnabled: true },
+      filter: { hasHeartbeat: false },
     });
     const names = tools.map((t) => t.name);
     expect(names).toContain('scheduler');
@@ -126,7 +126,7 @@ describe('ipc-tools', () => {
   test('filter with all flags false returns only core tools', () => {
     const client = createMockClient();
     const tools = createIPCTools(client as any, {
-      filter: { hasHeartbeat: false, skillInstallEnabled: false },
+      filter: { hasHeartbeat: false },
     });
     const names = tools.map((t) => t.name);
     expect(names).toContain('memory');

@@ -171,8 +171,7 @@ Skills are loaded by `buildSystemPrompt()` in `src/agent/agent-setup.ts`:
 - Reads from `{agentWorkspace}/skills/` (agent scope, shared) and `{userWorkspace}/skills/` (user scope, per-user)
 - User skills shadow agent skills (same name)
 - `loadSkillsMultiDir()` walks directories, finds SKILL.md files, returns summaries
-- Skills appear in the prompt's "Available Skills (Already Installed)" table
-- Skill install intent detection (`detectSkillInstallIntent()`) enables the install instructions section only when the user message mentions installing/adding/finding skills
+- Skills appear in the prompt's "Available skills" list
 
 ## Common Tasks
 

@@ -113,12 +113,10 @@ describe('tool-catalog', () => {
 describe('filterTools', () => {
   const ALL_FLAGS: ToolFilterContext = {
     hasHeartbeat: true,
-    skillInstallEnabled: true,
   };
 
   const NO_FLAGS: ToolFilterContext = {
     hasHeartbeat: false,
-    skillInstallEnabled: false,
   };
 
   test('all flags true returns full catalog', () => {
@@ -139,7 +137,7 @@ describe('filterTools', () => {
   });
 
   test('skill tool is not in catalog', () => {
-    const result = filterTools({ ...NO_FLAGS, skillInstallEnabled: true });
+    const result = filterTools(NO_FLAGS);
     expect(result.find(s => s.name === 'skill')).toBeUndefined();
   });
 
