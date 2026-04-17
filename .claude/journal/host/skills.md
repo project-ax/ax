@@ -4,6 +4,14 @@ Git-native skills rollout: snapshot builder, state store, reconcile orchestrator
 
 ## Entries
 
+## [2026-04-17 08:40] — Phase 5 Task 2: GET /admin/api/skills/setup endpoint
+
+**Task:** Phase 5 (skills dashboard) Task 2. Surface the per-agent `skill_setup_queue` through an admin endpoint so the dashboard can render setup cards grouped by agent. Return 503 when the state store isn't wired (back-compat for deployments without DB).
+**What I did:** TDD. Wrote `tests/host/server-admin-skills.test.ts` (5 cases: happy path / empty queue / 503 missing store / excludes archived / preserves card order+fields). Added a top-level `import type { SetupRequest }` from `./skills/types.js` in `src/host/server-admin.ts`. Added the route inside `handleAdminAPI` under a new "Skills (Phase 5)" section (right after the global MCP server block): 503 short-circuit when `deps.skillStateStore` is undefined, then `agentRegistry.list('active')` + per-agent `getSetupQueue` → only emit agents whose queue is non-empty.
+**Files touched:** `src/host/server-admin.ts`, `tests/host/server-admin-skills.test.ts`.
+**Outcome:** Success — `npx vitest run tests/host/server-admin-skills.test.ts` = 5/5 pass; regression `npx vitest run tests/host/server-admin.test.ts` = 37/37 pass; `npx tsc --noEmit` clean.
+**Notes:** `sendError()` wraps the message in `{ error: { message, type: 'invalid_request_error', code: null } }` — test asserts `body.error.message === 'Skills not configured'` rather than a bare `{ error: '...' }` shape. Spec said "use `sendError`" so we don't re-roll the envelope. Next tasks (approve/dismiss) will hang off this same section.
+
 ## [2026-04-17 08:30] — Phase 5 Task 1: extend AdminDeps with skill state store + reconcile bridge
 
 **Task:** Phase 5 (skills dashboard) preparation. Add optional `skillStateStore`, `reconcileAgent`, and `defaultUserId` to `AdminDeps` + `AdminSetupOpts` so upcoming `/admin/api/skills/*` endpoints can persist + re-reconcile without a separate wiring pass. Strict back-compat: all three fields optional.

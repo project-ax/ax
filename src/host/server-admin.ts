@@ -17,6 +17,7 @@ import type { Config, ProviderRegistry } from '../types.js';
 import type { EventBus, StreamEvent } from './event-bus.js';
 import type { AgentRegistry } from './agent-registry.js';
 import type { ProxyDomainList } from './proxy-domain-list.js';
+import type { SetupRequest } from './skills/types.js';
 import { parseAgentSkill } from '../utils/skill-format-parser.js';
 import { getLogger } from '../logger.js';
 import { configPath as getConfigPath } from '../paths.js';
@@ -622,6 +623,23 @@ async function handleAdminAPI(
     const { testGlobalMcpServer } = await import('../providers/mcp/database.js');
     const result = await testGlobalMcpServer(providers.database.db, name, providers.credentials);
     sendJSON(res, result);
+    return;
+  }
+
+  // ── Skills (Phase 5) ──
+
+  // GET /admin/api/skills/setup — list pending setup cards grouped by agent.
+  // Skips agents with empty queues so the dashboard doesn't render noise.
+  // Returns 503 when the state store isn't wired (back-compat for deployments without one).
+  if (pathname === '/admin/api/skills/setup' && method === 'GET') {
+    if (!deps.skillStateStore) { sendError(res, 503, 'Skills not configured'); return; }
+    const activeAgents = await agentRegistry.list('active');
+    const out: Array<{ agentId: string; agentName: string; cards: SetupRequest[] }> = [];
+    for (const a of activeAgents) {
+      const cards = await deps.skillStateStore.getSetupQueue(a.id);
+      if (cards.length > 0) out.push({ agentId: a.id, agentName: a.name, cards });
+    }
+    sendJSON(res, { agents: out });
     return;
   }
 
