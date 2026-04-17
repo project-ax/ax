@@ -2,6 +2,14 @@
 
 Skills import pipeline, screener, manifest generator, ClawHub client, architecture comparison, install orchestration.
 
+## [2026-04-16 22:26] — Git-native skills Phase 1 Task 1: Zod frontmatter schema
+
+**Task:** Phase 1 Task 1 of git-native skills effort — create the `SkillFrontmatterSchema` Zod module that will be used by later tasks (parser, reconciler). TDD order: failing test, implementation, passing test.
+**What I did:** Created `src/host/skills/frontmatter-schema.ts` and `tests/host/skills/frontmatter-schema.test.ts`. Schema uses Zod v4 with `.strict()` at every object level, SCREAMING_SNAKE_CASE env name regex (`/^[A-Z][A-Z0-9_]{1,63}$/`), https-only URLs for OAuth and MCP, and a `.refine()` that requires the `oauth` block when `authType === 'oauth'`. Credentials/mcpServers/domains default to `[]`; authType defaults to `api_key`; scope defaults to `user`.
+**Files touched:** `src/host/skills/frontmatter-schema.ts` (new), `tests/host/skills/frontmatter-schema.test.ts` (new)
+**Outcome:** Success — all 10 tests pass, tsc clean.
+**Notes:** First module of the new `src/host/skills/` directory. Pure logic — no filesystem, no IPC. Zod v4.3.6 handles `z.string().url().startsWith('https://')` fine (verified before writing).
+
 ## [2026-03-22 16:30] — Fix GCS domain loading at startup — wrong user ID
 
 **Task:** Debug why proxy blocks api.linear.app with 403 even though Linear skill is installed and persisted in GCS
