@@ -1,5 +1,11 @@
 # Architecture
 
+## Deletion tasks need a dependency audit, not just a grep of "what imports the target"
+**Date:** 2026-04-17
+**Context:** Phase 7 Task 2 (delete `src/clawhub/registry-client.ts` + `src/providers/storage/skills.ts`) assumed the previous task's cleanup was sufficient to leave zero live importers. It wasn't — `server-admin.ts` (admin CRUD routes), `server-init.ts` (a dead DB-allowlist block), and `plugins/install.ts` (skill upserts) still pulled from the target modules. The plan scoped each of those to future tasks, but the build broke immediately without touching them.
+**Lesson:** Before running a pure-deletion task, `rg "<module>" src tests` and confirm every hit is either (a) another file being deleted in the same task or (b) tolerable for a minimal local patch. If a file imports the target and is scoped to a later task, decide upfront: patch it now (smallest incursion), or reorder tasks. Don't discover mid-build that Task N requires part of Task N+1. Cross-task dependencies in deletion plans are the rule, not the exception.
+**Tags:** refactoring, deletion, planning, cross-task-dependency, phase-7
+
 ## IPC-sourced config with filesystem fallback: use `config.X ?? scan()` in sync builders
 **Date:** 2026-04-17
 **Context:** Phase 3 Task 7 wired `skills_index` IPC into the runner so the host-authoritative skill list wins over a filesystem scan, while keeping `buildSystemPrompt` synchronous. The natural pattern: a sync prompt builder that reads `config.skills ?? loadSkillsMultiDir(skillDirs)`, plus a separate async `fetchSkillsIndex()` the runner awaits right after `client.connect()` and before calling the builder. If the fetch throws or returns malformed data, the helper returns `undefined` and the builder falls through to the filesystem scan.

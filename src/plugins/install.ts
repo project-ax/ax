@@ -7,8 +7,6 @@ import { parsePluginSource, fetchPluginFiles } from './fetcher.js';
 import { parsePluginBundle } from './parser.js';
 import { upsertPlugin, deletePlugin, getPlugin } from './store.js';
 import { upsertCommand, deleteCommandsByPlugin } from './store.js';
-import { upsertSkill } from '../providers/storage/skills.js';
-import { inferMcpApps } from '../providers/storage/skills.js';
 import { getLogger } from '../logger.js';
 
 const logger = getLogger().child({ component: 'plugin-install' });
@@ -70,14 +68,6 @@ export async function installPlugin(input: InstallPluginInput): Promise<InstallP
   const existing = await getPlugin(documents, agentId, pluginName);
   if (existing) {
     logger.info('plugin_reinstall_replacing_old', { pluginName, agentId });
-    // Remove old skills
-    const allSkillKeys = await documents.list('skills');
-    const skillPrefix = `${agentId}/plugin:${pluginName}:`;
-    for (const key of allSkillKeys) {
-      if (key.startsWith(skillPrefix)) {
-        await documents.delete('skills', key);
-      }
-    }
     // Remove old commands
     await deleteCommandsByPlugin(documents, agentId, pluginName);
     // Remove old MCP servers
@@ -86,18 +76,9 @@ export async function installPlugin(input: InstallPluginInput): Promise<InstallP
     await deletePlugin(documents, agentId, pluginName);
   }
 
-  // 3. Store skills (reuse existing skill storage with plugin: prefix)
-  for (const skill of bundle.skills) {
-    const skillId = `plugin:${pluginName}:${skill.name}`;
-    const mcpApps = inferMcpApps(skill.content);
-    await upsertSkill(documents, {
-      id: skillId,
-      agentId,
-      version: bundle.manifest.version,
-      instructions: skill.content,
-      mcpApps,
-    });
-  }
+  // 3. Skill persistence was moved to the git-native .ax/skills/ flow — plugin
+  //    bundles no longer populate the DocumentStore skill table. Bundles still
+  //    carry skill files for backwards compat, but they're ignored here.
 
   // 4. Store commands
   for (const cmd of bundle.commands) {
@@ -196,14 +177,9 @@ export async function uninstallPlugin(input: {
     return { ok: false, reason: `Plugin "${pluginName}" is not installed for agent "${agentId}".` };
   }
 
-  // Remove skills with plugin prefix
-  const allSkillKeys = await documents.list('skills');
-  const skillPrefix = `${agentId}/plugin:${pluginName}:`;
-  for (const key of allSkillKeys) {
-    if (key.startsWith(skillPrefix)) {
-      await documents.delete('skills', key);
-    }
-  }
+  // Skills were never persisted by this path after phase 7 — nothing to
+  // remove from the DocumentStore. Git-native skills live in .ax/skills/
+  // and are managed separately.
 
   // Remove commands
   await deleteCommandsByPlugin(documents, agentId, pluginName);

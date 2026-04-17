@@ -1,8 +1,7 @@
 /**
  * Plugin & command CRUD operations for database-stored plugins.
  *
- * Uses DocumentStore with JSON serialization, following the same pattern
- * as src/providers/storage/skills.ts.
+ * Uses DocumentStore with JSON serialization.
  *
  * Two collections:
  *  - 'plugins'  — key: '{agentId}/{pluginName}'

@@ -1,42 +1,15 @@
 /**
  * Tests for post-agent credential detection logic.
- * Verifies that the host detects new skill directories and falls back
- * to ClawHub to discover credential requirements.
+ *
+ * Verifies that `parseAgentSkill` correctly surfaces `requires.env` entries
+ * from SKILL.md frontmatter. The host uses this to prompt for credentials
+ * after a skill is added to `.ax/skills/`.
  */
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-
-// Test the extractAllFromZip and fetchSkillPackage functions
-describe('ClawHub skill package download', () => {
-  test('extractAllFromZip extracts all text files', async () => {
-    const { extractAllFromZip } = await import('../../src/clawhub/registry-client.js');
-
-    // Create a minimal ZIP with two files using node:zlib + manual ZIP construction
-    // For simplicity, we test the function exists and has the right signature
-    expect(typeof extractAllFromZip).toBe('function');
-  });
-
-  test('fetchSkillPackage returns files and requiresEnv', async () => {
-    const { fetchSkillPackage } = await import('../../src/clawhub/registry-client.js');
-    expect(typeof fetchSkillPackage).toBe('function');
-
-    // Test with a real ClawHub slug (linear-skill)
-    try {
-      const pkg = await fetchSkillPackage('linear-skill');
-      expect(pkg.slug).toBe('linear-skill');
-      expect(pkg.files.length).toBeGreaterThan(0);
-      expect(pkg.files.some(f => f.path === 'SKILL.md' || f.path.endsWith('/SKILL.md'))).toBe(true);
-      // The linear skill requires LINEAR_API_KEY
-      expect(pkg.requiresEnv).toContain('LINEAR_API_KEY');
-    } catch (err) {
-      // Network may not be available in CI — skip gracefully
-      console.log('Skipping fetchSkillPackage network test:', (err as Error).message);
-    }
-  });
-});
 
 describe('collectSkillCredentialRequirements detects requires.env', () => {
   let testDir: string;

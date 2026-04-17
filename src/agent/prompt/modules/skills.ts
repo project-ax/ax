@@ -8,7 +8,7 @@ const SKILL_NOUNS = /\b(skills?|plugins?|extensions?|add-?ons?|modules?|packages
 
 const INQUIRY_PATTERNS = /\b(is there|are there|do you have|any|know of|recommend|suggest)\b/i;
 
-const REGISTRY_REF = /clawhub|skills\.sh|github\.com/i;
+const REGISTRY_REF = /skills\.sh|github\.com/i;
 
 /** Detect if user message indicates skill install intent. */
 export function detectSkillInstallIntent(message: string): boolean {
@@ -64,7 +64,7 @@ export class SkillsModule extends BasePromptModule {
       lines.push(
         '## Skills',
         '',
-        'No skills are currently installed. You can search for and install skills from skills.sh or ClawHub.',
+        'No skills are currently installed. You can search for and install skills from skills.sh.',
       );
     }
 
@@ -89,9 +89,8 @@ export class SkillsModule extends BasePromptModule {
         'By 3-part path (owner/repo/skill): `skill({ slug: "vercel-labs/agent-skills/react-best-practices" })`',
         'By skills.sh URL: `skill({ slug: "https://skills.sh/owner/repo/skill" })`',
         'By GitHub URL: `skill({ slug: "https://github.com/owner/repo/tree/main/skill" })`',
-        'By ClawHub slug: `skill({ slug: "author/skill-name" })`',
         '',
-        'When the user provides a URL (skills.sh, GitHub, or ClawHub), pass it directly',
+        'When the user provides a URL (skills.sh or GitHub), pass it directly',
         'as the `slug` — the host extracts the correct slug from the URL.',
         'Do NOT use `query` with a URL — that triggers a search which may find the wrong skill.',
         '',

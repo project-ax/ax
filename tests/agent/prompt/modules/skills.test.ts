@@ -33,8 +33,8 @@ describe('detectSkillInstallIntent', () => {
     expect(detectSkillInstallIntent('find a plugin for slack')).toBe(true);
   });
 
-  test('returns true for clawhub URL reference', () => {
-    expect(detectSkillInstallIntent('check out clawhub.ai/Author/skill')).toBe(true);
+  test('returns true for skills.sh URL reference', () => {
+    expect(detectSkillInstallIntent('check out skills.sh/Author/skill')).toBe(true);
   });
 
   test('returns true for "add the jira integration"', () => {
