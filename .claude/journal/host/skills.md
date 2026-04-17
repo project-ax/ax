@@ -4,6 +4,14 @@ Git-native skills rollout: snapshot builder, state store, reconcile orchestrator
 
 ## Entries
 
+## [2026-04-17 15:30] — Phase 6 follow-up: 5 CodeRabbit review fixes on PR #181
+
+**Task:** Address all 5 CodeRabbit findings on PR #181 (phase 6 OAuth): provider-name case sensitivity, init-order bug for admin.token + OAuth key derivation, x-forwarded-proto scheme validation, fire-and-forget reconcile docstring/impl mismatch, and un-tracked 30s setTimeout after unmount.
+**What I did:** (1) Normalized provider names to lowercase in `AdminOAuthProviderStore.{get,upsert,delete}` so `'Linear'` and `'linear'` can't produce duplicate rows. (2) Hoisted `admin.token = randomBytes(32).toString('hex')` into `initHostCore` BEFORE `deriveOAuthKey` — the previous order left OAuth provider store disabled on fresh installs with no `AX_OAUTH_SECRET_KEY`. (3) Whitelisted `X-Forwarded-Proto` to `http`/`https`, case-normalized, fall back to socket.encrypted otherwise. (4) Replaced `await input.reconcileAgent(...)` with `void input.reconcileAgent(...).catch(logger.warn)` so the OAuth success HTML returns to the browser immediately (UI polls for state). (5) Tracked per-envName 30s connect timers in a ref Map; unmount effect clears all pending timers.
+**Files touched:** `src/host/admin-oauth-providers.ts`, `src/host/server-init.ts`, `src/host/server-admin.ts`, `src/host/admin-oauth-flow.ts`, `ui/admin/src/components/pages/skills-page.tsx`, plus test additions in `tests/host/admin-oauth-providers.test.ts`, `tests/host/server-admin-oauth-start.test.ts`, `tests/host/admin-oauth-flow.test.ts`.
+**Outcome:** Success. All 258 backend tests pass (26 files, including 3 new test cases for case normalization, 2 for x-forwarded-proto, and an unhandled-rejection guard on the fire-and-forget reconcile). tsc clean at root and ui/admin. 13/13 Playwright skills.spec.ts pass.
+**Notes:** Pre-existing `admin_token_generated` log-leak in `createAdminHandler` was left alone per scope guidance. The `createAdminHandler` defensive auto-gen is now a no-op on the normal path but still protects tests that construct AdminDeps directly.
+
 ## [2026-04-17 14:17] — Phase 6 complete: OAuth PKCE + admin-registered providers
 
 **Task:** Implement phase 6 of git-native skills: OAuth PKCE flow for skill credentials, with admin-registered provider fallback for confidential-flow providers (Google etc).

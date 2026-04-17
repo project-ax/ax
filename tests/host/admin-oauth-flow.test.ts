@@ -450,7 +450,13 @@ describe('resolveCallback', () => {
     expect((success!.args as { hasRefreshToken?: boolean }).hasRefreshToken).toBe(false);
   });
 
-  it('reconcile throws → still returns ok, credentials already written', async () => {
+  it('reconcile throws → still returns ok (fire-and-forget swallows rejection)', async () => {
+    // The reconcile is fire-and-forget: resolveCallback returns BEFORE the
+    // reconcile promise settles, so credentials + audit + the HTML response
+    // aren't held up by a slow/broken reconcile. A rejection from reconcile
+    // must not escape as an unhandled promise — the `.catch` inside
+    // admin-oauth-flow.ts swallows + logs. We flush the microtask queue
+    // (setImmediate) to let the rejection run, then assert no leaked error.
     const flow = createAdminOAuthFlow();
     const { state } = flow.start(baseInput());
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
@@ -461,18 +467,33 @@ describe('resolveCallback', () => {
     const audit = makeAudit();
     const reconcile = vi.fn(async () => { throw new Error('kaboom'); });
 
-    const result = await flow.resolveCallback({
-      provider: 'linear',
-      code: 'code',
-      state,
-      credentials,
-      audit,
-      reconcileAgent: reconcile,
-    });
+    // Surface any unhandled rejection — if the .catch inside the module is
+    // missing or misplaced, this listener fires and we fail the test.
+    const unhandled: unknown[] = [];
+    const handler = (reason: unknown) => unhandled.push(reason);
+    process.on('unhandledRejection', handler);
 
-    expect(result).toEqual({ matched: true, ok: true });
-    expect(reconcile).toHaveBeenCalled();
-    expect(credentials.setCalls.find(c => c.envName === 'LINEAR_TOKEN')).toBeDefined();
+    try {
+      const result = await flow.resolveCallback({
+        provider: 'linear',
+        code: 'code',
+        state,
+        credentials,
+        audit,
+        reconcileAgent: reconcile,
+      });
+
+      expect(result).toEqual({ matched: true, ok: true });
+      expect(reconcile).toHaveBeenCalled();
+      expect(credentials.setCalls.find(c => c.envName === 'LINEAR_TOKEN')).toBeDefined();
+
+      // Flush the microtask queue so the void-reconcile .catch runs before
+      // we check for unhandled rejections.
+      await new Promise(r => setImmediate(r));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', handler);
+    }
   });
 
   it('no reconcileAgent dep → succeeds without calling it', async () => {

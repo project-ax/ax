@@ -240,10 +240,11 @@ function startTestServer(
 async function fetchAdmin(
   port: number,
   path: string,
-  opts: { token?: string; method?: string; body?: unknown } = {},
+  opts: { token?: string; method?: string; body?: unknown; headers?: Record<string, string> } = {},
 ): Promise<{ status: number; body: unknown }> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (opts.token) headers['Authorization'] = `Bearer ${opts.token}`;
+  if (opts.headers) Object.assign(headers, opts.headers);
   const res = await fetch(`http://127.0.0.1:${port}${path}`, {
     method: opts.method ?? 'GET',
     headers,
@@ -601,5 +602,62 @@ describe('POST /admin/api/skills/oauth/start', () => {
     const flow = adminOAuthFlow!.claim(body.state);
     expect(flow).toBeDefined();
     expect(flow!.userId).toBe('admin');
+  });
+
+  it('ignores hostile x-forwarded-proto values (javascript) and falls back to http', async () => {
+    // Hardening: the redirect_uri scheme is whitelisted to http/https.
+    // A caller setting X-Forwarded-Proto: javascript would otherwise produce
+    // a malformed `javascript://host/v1/oauth/callback/...` redirect_uri.
+    // Admin token is required on this endpoint, so the blast radius was
+    // already small — but defense-in-depth is cheap here.
+    const { deps, stateStore, cleanup } = await mockDeps();
+    cleanupStore = cleanup;
+    await stateStore!.putSetupQueue('main', [oauthCard()]);
+
+    const handler = createAdminHandler(deps);
+    ({ server, port } = await startTestServer(handler));
+
+    const res = await fetchAdmin(port, '/admin/api/skills/oauth/start', {
+      token: 'test-secret-token',
+      method: 'POST',
+      body: {
+        agentId: 'main',
+        skillName: 'linear-tracker',
+        envName: 'LINEAR_TOKEN',
+      },
+      headers: { 'X-Forwarded-Proto': 'javascript' },
+    });
+    expect(res.status).toBe(200);
+    const body = res.body as { authUrl: string };
+    const url = new URL(body.authUrl);
+    const redirectUri = url.searchParams.get('redirect_uri')!;
+    expect(redirectUri.startsWith('javascript:')).toBe(false);
+    // Test server is plain HTTP on loopback → fallback is 'http'.
+    expect(redirectUri.startsWith('http://')).toBe(true);
+  });
+
+  it('normalizes x-forwarded-proto case (HTTPS -> https)', async () => {
+    const { deps, stateStore, cleanup } = await mockDeps();
+    cleanupStore = cleanup;
+    await stateStore!.putSetupQueue('main', [oauthCard()]);
+
+    const handler = createAdminHandler(deps);
+    ({ server, port } = await startTestServer(handler));
+
+    const res = await fetchAdmin(port, '/admin/api/skills/oauth/start', {
+      token: 'test-secret-token',
+      method: 'POST',
+      body: {
+        agentId: 'main',
+        skillName: 'linear-tracker',
+        envName: 'LINEAR_TOKEN',
+      },
+      headers: { 'X-Forwarded-Proto': 'HTTPS' },
+    });
+    expect(res.status).toBe(200);
+    const body = res.body as { authUrl: string };
+    const url = new URL(body.authUrl);
+    const redirectUri = url.searchParams.get('redirect_uri')!;
+    expect(redirectUri.startsWith('https://')).toBe(true);
   });
 });

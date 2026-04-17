@@ -4,6 +4,7 @@ Host process work: server, router, IPC handlers, event console, event bus, deleg
 
 ## Entries
 
+- 2026-04-17 15:30 — Phase 6 follow-up: 5 CodeRabbit review fixes on PR #181 (provider-name lowercase, init-order admin.token, x-forwarded-proto whitelist, fire-and-forget reconcile, 30s timer cleanup on unmount); 258 backend + 13 Playwright tests pass [skills.md](skills.md)
 - 2026-04-17 14:17 — Phase 6 complete: OAuth PKCE + admin-registered providers — 9 commits (Tasks 1-6) + docs (Task 7); 135 backend + 23 Playwright tests pass; tsc clean at root and ui/admin; commits 1a229e8d..1500a6b8 [skills.md](skills.md)
 - 2026-04-17 18:15 — Phase 6 Task 6: end-to-end OAuth verification against local host with mock token endpoint — POST /oauth/start → GET /v1/oauth/callback/linear → credential_store (access_token + __oauth_blob at user:verify-agent:vpulim) + audit (oauth_start, oauth_callback_success, no token leakage) + replay defense [skills.md](skills.md)
 - 2026-04-17 13:51 — Phase 6 Task 4: OAuth callback extension — `resolveCallback` on AdminOAuthFlow (code exchange + scoped credential write + refresh blob + reconcile trigger); matched-but-failed semantics block fall-through to agent flow on consumed state [skills.md](skills.md)

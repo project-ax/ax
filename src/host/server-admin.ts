@@ -822,14 +822,24 @@ async function handleAdminAPI(
 
     // Compute redirectUri: admin-registered value wins (so admins can pin an
     // exact URI matching their OAuth app registration). Otherwise derive
-    // from the request. Behind a proxy, trust `x-forwarded-proto` for scheme.
+    // from the request. Behind a proxy, trust `x-forwarded-proto` for scheme
+    // — but only when it's one of the two schemes we're willing to emit.
+    // A caller setting `X-Forwarded-Proto: javascript` would otherwise get a
+    // malformed redirect_uri baked into the authorize URL; we whitelist to
+    // http/https and fall back to `req.socket.encrypted` on anything else.
+    // (An upstream OAuth provider would reject the mismatched URI and the
+    // admin token is required on this endpoint, so the blast radius was
+    // small — but cheap belt-and-braces.)
     let redirectUri: string;
     if (adminRedirectUri) {
       redirectUri = adminRedirectUri;
     } else {
       const forwardedProto = req.headers['x-forwarded-proto'];
-      const proto = typeof forwardedProto === 'string' && forwardedProto
-        ? forwardedProto.split(',')[0].trim()
+      const xfp = typeof forwardedProto === 'string' && forwardedProto
+        ? forwardedProto.split(',')[0].trim().toLowerCase()
+        : '';
+      const proto = (xfp === 'http' || xfp === 'https')
+        ? xfp
         : ((req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http');
       const host = req.headers.host ?? 'localhost';
       redirectUri = `${proto}://${host}/v1/oauth/callback/${cred.oauth.provider}`;

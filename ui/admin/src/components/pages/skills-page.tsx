@@ -51,11 +51,19 @@ function SetupCardView({ agentId, card, onChange }: SetupCardViewProps) {
   const [connectError, setConnectError] = useState<Record<string, string>>({});
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const successTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Per-envName 30s re-enable timers (see handleConnect's finally). Tracked
+  // in a ref Map so the unmount effect can clear any still-pending timers —
+  // otherwise a user navigating away within 30s triggers setConnecting on
+  // an unmounted component. React 18 no-ops it silently, but leaks are
+  // leaks.
+  const connectTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   useEffect(() => {
     return () => {
       if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
       if (successTimerRef.current) clearTimeout(successTimerRef.current);
+      for (const t of connectTimersRef.current.values()) clearTimeout(t);
+      connectTimersRef.current.clear();
     };
   }, []);
 
@@ -151,14 +159,21 @@ function SetupCardView({ agentId, card, onChange }: SetupCardViewProps) {
       } finally {
         // Keep the button disabled until the card updates (polling will refresh
         // the card away). If the user closes the popup without authorizing,
-        // they can retry after 30s when the button auto-re-enables.
-        setTimeout(() => {
+        // they can retry after 30s when the button auto-re-enables. Track
+        // the timer per-envName so a rapid second click for the same envName
+        // replaces the old timer, and so the unmount effect can cancel any
+        // pending timers and avoid setState-on-unmounted warnings.
+        const prevTimer = connectTimersRef.current.get(envName);
+        if (prevTimer) clearTimeout(prevTimer);
+        const t = setTimeout(() => {
           setConnecting((prev) => {
             const next = new Set(prev);
             next.delete(envName);
             return next;
           });
+          connectTimersRef.current.delete(envName);
         }, 30_000);
+        connectTimersRef.current.set(envName, t);
       }
     },
     [agentId, card.skillName]

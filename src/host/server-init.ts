@@ -7,7 +7,7 @@
 import { existsSync, readFileSync, readdirSync, mkdirSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { getLogger } from '../logger.js';
 import type { Config, ProviderRegistry } from '../types.js';
 import { dataDir } from '../paths.js';
@@ -281,6 +281,23 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
   // DB deps — construct unconditionally so the endpoint is available
   // whenever `skillStateStore` is.
   const adminOAuthFlow = createAdminOAuthFlow();
+
+  // Auto-generate admin.token if not configured — MUST happen before
+  // `deriveOAuthKey` below. Otherwise, on a fresh install without
+  // `AX_OAUTH_SECRET_KEY` set, `deriveOAuthKey('', ...)` would throw
+  // (refusing sha256('') as an at-rest key), we'd log the misleading
+  // "admin_oauth_provider_store_disabled" warning, and then
+  // `createAdminHandler` would generate a token moments later — leaving
+  // the OAuth provider store disabled even though a usable token DID get
+  // generated. `createAdminHandler` still has the same guard as a
+  // defensive no-op for callers that don't run through `initHostCore`
+  // (e.g. unit tests that construct AdminDeps directly).
+  const authDisabled = config.admin?.disable_auth === true;
+  if (config.admin && !authDisabled && !config.admin.token) {
+    config.admin.token = randomBytes(32).toString('hex');
+    logger.info('admin_token_generated', { source: 'server-init' });
+  }
+
   if (providers.database) {
     const { runMigrations } = await import('../utils/migrator.js');
     const { skillsMigrations } = await import('../migrations/skills.js');

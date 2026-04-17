@@ -119,12 +119,22 @@ export function createAdminOAuthProviderStore(
   db: Kysely<any>,
   key: Buffer,
 ): AdminOAuthProviderStore {
+  // Provider names are normalized to lowercase on read + write so that
+  // callers can't accidentally create duplicate rows for the same logical
+  // provider (e.g. 'Linear' vs 'linear') and `get('linear')` succeeds
+  // regardless of the casing used at upsert time. The `provider` column is
+  // a text PK and SQLite's default collation is case-sensitive, so without
+  // this normalization 'Linear' and 'linear' would coexist as distinct
+  // rows — which would silently fall back to the public-client path when
+  // the start endpoint looked them up with a casing mismatch. `list()`
+  // doesn't normalize because rows are already canonical-cased on write.
   return {
     async get(provider) {
+      const normalized = provider.toLowerCase();
       const row = (await db
         .selectFrom('admin_oauth_providers')
         .select(['provider', 'client_id', 'client_secret_enc', 'redirect_uri', 'updated_at'])
-        .where('provider', '=', provider)
+        .where('provider', '=', normalized)
         .executeTakeFirst()) as AdminOAuthRow | undefined;
       if (!row) return null;
       const out: AdminOAuthProvider = {
@@ -154,6 +164,7 @@ export function createAdminOAuthProviderStore(
     },
 
     async upsert(input) {
+      const normalized = input.provider.toLowerCase();
       const enc = input.clientSecret ? encryptSecret(input.clientSecret, key) : null;
       // SQLite + Postgres both support `INSERT ... ON CONFLICT ... DO UPDATE`
       // via Kysely. Explicit `updated_at` bump on conflict matches the
@@ -161,7 +172,7 @@ export function createAdminOAuthProviderStore(
       await db
         .insertInto('admin_oauth_providers')
         .values({
-          provider: input.provider,
+          provider: normalized,
           client_id: input.clientId,
           client_secret_enc: enc,
           redirect_uri: input.redirectUri,
@@ -178,9 +189,10 @@ export function createAdminOAuthProviderStore(
     },
 
     async delete(provider) {
+      const normalized = provider.toLowerCase();
       const res = await db
         .deleteFrom('admin_oauth_providers')
-        .where('provider', '=', provider)
+        .where('provider', '=', normalized)
         .execute();
       // Kysely returns DeleteResult[] (one per executed statement); sum
       // numDeletedRows across the batch so callers can distinguish "a row

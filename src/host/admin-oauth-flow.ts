@@ -389,18 +389,20 @@ export function createAdminOAuthFlow(opts: CreateAdminOAuthFlowOpts = {}): Admin
         },
       });
 
-      // Fire-and-forget reconcile. Credentials are in place; reconcile throws
-      // are swallowed + logged (phase-5 approve pattern).
+      // Fire-and-forget reconcile. Credentials are already written; the OAuth
+      // success HTML has to render in the user's browser without blocking on
+      // a potentially-slow reconcile (the UI polls /skills/setup every 2s
+      // and will notice the card drop off when reconcile finishes). Throws
+      // are swallowed + logged (phase-5 approve pattern). `void` to signal
+      // intent and avoid lint warnings on the unhandled promise.
       if (input.reconcileAgent) {
-        try {
-          await input.reconcileAgent(flow.agentId, 'refs/heads/main');
-        } catch (err) {
+        void input.reconcileAgent(flow.agentId, 'refs/heads/main').catch((err) => {
           logger.warn('admin_oauth_reconcile_failed', {
             agentId: flow.agentId,
             skillName: flow.skillName,
             error: err instanceof Error ? err.message : String(err),
           });
-        }
+        });
       }
 
       return { matched: true, ok: true };

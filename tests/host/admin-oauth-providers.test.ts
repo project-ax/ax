@@ -231,4 +231,62 @@ describe('AdminOAuthProviderStore', () => {
   it('get returns null when provider is not registered', async () => {
     expect(await store.get('never-registered')).toBeNull();
   });
+
+  it('provider names are normalized to lowercase — upsert("Linear") is gettable as "linear"', async () => {
+    // Case-sensitivity matters: SQLite's default text collation is binary,
+    // so without normalization 'Linear' and 'linear' would live as distinct
+    // rows. The start endpoint looks up by frontmatter's `oauth.provider`
+    // verbatim — any casing mismatch there silently falls back to the
+    // public-client path, so the store pins both reads and writes to
+    // lowercase.
+    await store.upsert({
+      provider: 'Linear',
+      clientId: 'cid-x',
+      clientSecret: 'shh',
+      redirectUri: 'https://x/cb',
+    });
+
+    const got = await store.get('linear');
+    expect(got).not.toBeNull();
+    expect(got!.provider).toBe('linear'); // canonical form
+    expect(got!.clientId).toBe('cid-x');
+    expect(got!.clientSecret).toBe('shh');
+
+    // And vice-versa: stored lower, queried upper.
+    expect(await store.get('LINEAR')).not.toBeNull();
+    expect(await store.get('LiNeAr')).not.toBeNull();
+  });
+
+  it('upsert("Linear") then upsert("LINEAR") produces ONE row', async () => {
+    // Duplicate-avoidance test: without normalization, these would hit
+    // different PKs and leave two rows that the dashboard couldn't
+    // distinguish. One canonical row is the contract.
+    await store.upsert({
+      provider: 'Linear',
+      clientId: 'first',
+      redirectUri: 'https://x/cb',
+    });
+    await store.upsert({
+      provider: 'LINEAR',
+      clientId: 'second',
+      redirectUri: 'https://x/cb',
+    });
+
+    const rows = await store.list();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].provider).toBe('linear');
+    // Second upsert wins (ON CONFLICT doUpdateSet).
+    expect(rows[0].clientId).toBe('second');
+  });
+
+  it('delete("Linear") removes the "linear" row', async () => {
+    await store.upsert({
+      provider: 'linear',
+      clientId: 'cid-x',
+      redirectUri: 'https://x/cb',
+    });
+    const removed = await store.delete('Linear'); // different case
+    expect(removed).toBe(true);
+    expect(await store.get('linear')).toBeNull();
+  });
 });
