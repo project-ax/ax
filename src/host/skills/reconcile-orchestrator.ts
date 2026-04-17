@@ -33,8 +33,11 @@ export async function reconcileAgent(
     const current = await loadCurrentState(agentId, deps);
     const output = reconcile({ snapshot, current });
 
-    await deps.stateStore.putStates(agentId, output.skills);
-    await deps.stateStore.putSetupQueue(agentId, output.setupQueue);
+    // Atomic: both tables change together or neither does. If the second
+    // insert failed previously, the DB could end up with fresh skill_states
+    // and stale skill_setup_queue, giving the user an inconsistent view
+    // until the next reconcile.
+    await deps.stateStore.putStatesAndQueue(agentId, output.skills, output.setupQueue);
 
     for (const ev of output.events) {
       deps.eventBus.emit({

@@ -36,6 +36,11 @@ function stubStateStore(
     },
     async putStates(_agentId: string, _states: SkillState[]) {},
     async putSetupQueue(_agentId: string, _queue: SetupRequest[]) {},
+    async putStatesAndQueue(
+      _agentId: string,
+      _states: SkillState[],
+      _queue: SetupRequest[],
+    ) {},
     async getSetupQueue(_agentId: string) { return []; },
   };
 }

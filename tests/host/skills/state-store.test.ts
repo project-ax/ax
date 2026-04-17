@@ -265,4 +265,116 @@ describe('SkillStateStore', () => {
       expect(got[0].description).toBe('new');
     });
   });
+
+  describe('putStatesAndQueue — atomic', () => {
+    it('replaces both tables in a single round-trip', async () => {
+      const { store } = await freshStore();
+
+      const states: SkillState[] = [
+        { name: 'alpha', kind: 'enabled', description: 'Alpha' },
+        {
+          name: 'beta',
+          kind: 'pending',
+          description: 'Beta',
+          pendingReasons: ['reason-a'],
+        },
+      ];
+      const queue: SetupRequest[] = [
+        {
+          skillName: 'beta',
+          description: 'Beta',
+          missingCredentials: [],
+          unapprovedDomains: ['api.example.com'],
+          mcpServers: [],
+        },
+      ];
+
+      await store.putStatesAndQueue('agent-1', states, queue);
+
+      const prior = await store.getPriorStates('agent-1');
+      expect(prior.size).toBe(2);
+      expect(prior.get('alpha')).toBe('enabled');
+      expect(prior.get('beta')).toBe('pending');
+
+      const q = await store.getSetupQueue('agent-1');
+      expect(q.length).toBe(1);
+      expect(q[0].skillName).toBe('beta');
+      expect(q[0].unapprovedDomains).toEqual(['api.example.com']);
+    });
+
+    it('rolls back both tables when queue insert fails (atomicity)', async () => {
+      // Simulate a mid-transaction failure by passing a queue row whose
+      // payload serialization still succeeds but whose insert violates the
+      // primary key by duplicating skill_name within the same batch.
+      // Kysely surfaces SQLite's UNIQUE violation as a thrown error.
+      const { store } = await freshStore();
+
+      // Seed a prior state so we can verify rollback doesn't wipe it.
+      await store.putStatesAndQueue(
+        'agent-1',
+        [{ name: 'alpha', kind: 'enabled', description: 'Alpha' }],
+        [],
+      );
+
+      const newStates: SkillState[] = [
+        { name: 'beta', kind: 'enabled', description: 'New Beta' },
+      ];
+      const badQueue: SetupRequest[] = [
+        {
+          skillName: 'dup',
+          description: 'first',
+          missingCredentials: [],
+          unapprovedDomains: [],
+          mcpServers: [],
+        },
+        {
+          // Duplicate skillName — pk_skill_setup_queue is (agent_id, skill_name)
+          skillName: 'dup',
+          description: 'second',
+          missingCredentials: [],
+          unapprovedDomains: [],
+          mcpServers: [],
+        },
+      ];
+
+      await expect(
+        store.putStatesAndQueue('agent-1', newStates, badQueue),
+      ).rejects.toThrow();
+
+      // Prior state must still be the original — the failed queue insert
+      // should have rolled back the states delete+insert.
+      const prior = await store.getPriorStates('agent-1');
+      expect(prior.size).toBe(1);
+      expect(prior.get('alpha')).toBe('enabled');
+      expect(prior.has('beta')).toBe(false);
+
+      // Queue must remain empty — the partial batch was rolled back.
+      const q = await store.getSetupQueue('agent-1');
+      expect(q).toEqual([]);
+    });
+
+    it('empty inputs clear both tables for the agent', async () => {
+      const { store } = await freshStore();
+      await store.putStatesAndQueue(
+        'agent-1',
+        [{ name: 'alpha', kind: 'enabled', description: 'Alpha' }],
+        [
+          {
+            skillName: 'alpha',
+            description: 'A',
+            missingCredentials: [],
+            unapprovedDomains: [],
+            mcpServers: [],
+          },
+        ],
+      );
+
+      await store.putStatesAndQueue('agent-1', [], []);
+
+      const prior = await store.getPriorStates('agent-1');
+      expect(prior.size).toBe(0);
+      const q = await store.getSetupQueue('agent-1');
+      expect(q).toEqual([]);
+    });
+  });
 });
