@@ -4,6 +4,14 @@ Git-native skills rollout: snapshot builder, state store, reconcile orchestrator
 
 ## Entries
 
+## [2026-04-17 07:22] — Phase 4 Task 4: Startup rehydration
+
+**Task:** After a host restart, the DB has the last-reconciled `SkillState` rows, but the `McpConnectionManager` and `ProxyDomainList` (minus BUILTIN) start empty. Re-run `reconcileAgent` for every known agent on boot so the live surfaces match the DB.
+**What I did:** (1) Extended `HostCore` in `server-init.ts` with `mcpApplier?`/`proxyApplier?` — constructed inside the `if (stateStore)` branch using the same dynamic-import pattern as the state store. (2) TDD'd a new `rehydrateSkillsForAgents(agentIds, deps, opts)` with a `runReconcile` injection seam (defaults to `reconcileAgent(id, 'refs/heads/main', deps)`). 3 tests: iterates in order, continues past per-agent failures, no-op on empty list. Failing-module run first, then implemented — 3/3 pass. (3) In `server.ts`, consolidated the reconcile-hook's `orchestratorDeps` to include the new appliers and reused that same object for the startup loop. Fetches `await agentRegistry.list()` (no status filter) and calls `rehydrateSkillsForAgents` — wrapped in an outer try/catch so a registry failure can't block server startup.
+**Files touched:** `src/host/server-init.ts`, `src/host/server.ts`, `src/host/skills/startup-rehydrate.ts` (new), `tests/host/skills/startup-rehydrate.test.ts` (new), `.claude/journal/host/skills.md`.
+**Outcome:** Success — `npx vitest run tests/host/skills/startup-rehydrate.test.ts tests/host/skills/reconcile-orchestrator.test.ts` = 10/10 pass. Full `tests/host/skills/` suite = 111/111. `npm run build` clean. Pre-existing EINVAL socket-path-length failures in `tests/host/server*.test.ts` exist on HEAD b09ea990 unchanged (not caused by this task).
+**Notes:** The `runReconcile` seam keeps tests free of git + sqlite setup. The real code path has two layers of safety: the orchestrator's `try/catch` (skills.reconcile_failed event) AND the loop's per-agent `try/catch` (startup_rehydrate_failed log). Redundant, but cheap — startup is the worst time for one bad agent to cascade.
+
 ## [2026-04-17 07:14] — Phase 4 Task 3: Wire appliers into reconcileAgent
 
 **Task:** Call the new `mcpApplier` and `proxyApplier` from `reconcileAgent` after DB write, feeding them `output.desired.{mcpServers,proxyAllowlist}`; emit a single `skills.live_state_applied` summary event. Keep deps OPTIONAL for back-compat with phase-2 tests.

@@ -147,6 +147,10 @@ export async function createServer(
   // git-local). The resolver here mirrors git-local's path layout — for
   // git-http/k8s deployments the git-http container will need its own
   // reconcile path (phase-2 task 9), so this default only works for git-local.
+  //
+  // Phase 4 shares one `orchestratorDeps` across the hook handler (per-push
+  // reconcile) and the startup rehydration pass (boot-time reconcile) so both
+  // paths drive the same live-state appliers.
   let reconcileHookHandler: ((req: IncomingMessage, res: ServerResponse) => Promise<void>) | undefined;
   if (stateStore) {
     // AX_HOOK_SECRET: shared HMAC secret for post-receive → host handshake.
@@ -172,16 +176,42 @@ export async function createServer(
       agentName,
       proxyDomainList: domainList,
       credentials: providers.credentials,
-      // mcpManager: left undefined in phase 2 (real wiring lands in phase 4)
       stateStore,
       eventBus,
       getBareRepoPath,
+      // Phase 4: live MCP + proxy appliers — constructed by initHostCore so
+      // the hook + rehydrate both push through them. When the state store
+      // exists but appliers don't (shouldn't happen with current
+      // server-init.ts wiring), reconcileAgent's optional-applier branches
+      // silently no-op.
+      mcpApplier: core.mcpApplier,
+      proxyApplier: core.proxyApplier,
     };
 
     reconcileHookHandler = createReconcileHookHandler({
       secret: hookSecret,
       reconcileAgent: (agentId, ref) => reconcileAgent(agentId, ref, orchestratorDeps),
     });
+
+    // Phase 4: startup rehydration — re-run reconcile for every known agent
+    // so the McpConnectionManager + ProxyDomainList catch up with the
+    // DB-persisted desired state after a host restart. Per-agent failures are
+    // logged and swallowed inside rehydrateSkillsForAgents — best-effort; the
+    // next push-time hook will also reconcile.
+    if (core.mcpApplier && core.proxyApplier) {
+      try {
+        const agents = await agentRegistry.list();
+        const { rehydrateSkillsForAgents } = await import('./skills/startup-rehydrate.js');
+        await rehydrateSkillsForAgents(
+          agents.map(a => a.id),
+          orchestratorDeps,
+        );
+      } catch (err) {
+        logger.warn('skills_startup_rehydrate_failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
   } else {
     logger.debug('skills_reconcile_hook_disabled_no_database');
   }
