@@ -181,7 +181,7 @@ export function reconcile(input: ReconcilerInput): ReconcilerOutput {
   for (const c of conflicts) {
     events.push({
       type: 'skill.mcp_conflict',
-      data: c as unknown as Record<string, unknown>,
+      data: { ...c },
     });
   }
   return {

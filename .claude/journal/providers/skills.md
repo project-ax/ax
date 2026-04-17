@@ -2,6 +2,14 @@
 
 Skills import pipeline, screener, manifest generator, ClawHub client, architecture comparison, install orchestration.
 
+## [2026-04-16 22:55] — Phase 1 final review fixes: drop unsafe cast, test mcp_conflict event
+
+**Task:** Address two issues from phase-1 final code review on `design/git-native-skills`: (1) unnecessary double-cast `c as unknown as Record<string, unknown>` in `reconcile()` when pushing `skill.mcp_conflict` events — `McpConflict` has only string fields and is trivially assignable; (2) missing integration test that `reconcile()` actually surfaces MCP name conflicts as `skill.mcp_conflict` events (the per-unit `reconciler-mcp.test.ts` only tested `computeMcpDesired`'s `conflicts` array).
+**What I did:** Replaced the double-cast with `data: { ...c }` spread — same runtime shape, type-safe without escape hatches. Added a third `it()` to `tests/host/skills/reconcile.test.ts` that builds a two-skill snapshot with the same `mcpName: 'shared'` pointing at different URLs, asserts exactly one `skill.mcp_conflict` event is emitted with the expected `{skillName, mcpName, declaredUrl, conflictingUrl}` payload.
+**Files touched:** `src/host/skills/reconciler.ts`, `tests/host/skills/reconcile.test.ts`
+**Outcome:** Success — `npx tsc --noEmit` clean, `npx vitest run tests/host/skills/reconcile.test.ts` 3/3 pass, `npx vitest run tests/host/skills/` 42/42 across 8 files.
+**Notes:** The spread pattern is the right idiom for object-to-`Record<string, unknown>` coercion when all fields are already primitive — no cast needed, structural typing handles it. The missing event-level test was a real gap: a refactor that forgot to push conflicts onto `events` would have slipped past the per-unit tests.
+
 ## [2026-04-16 22:52] — Git-native skills Phase 1 COMPLETE: reconcile() orchestration
 
 **Task:** Phase 1 Task 9 (final) of git-native skills effort — append top-level `reconcile(input: ReconcilerInput): ReconcilerOutput` to `src/host/skills/reconciler.ts`. Composes the 5 named sub-exports (`computeSkillStates`, `computeMcpDesired`, `computeProxyAllowlist`, `computeSetupQueue`, `computeEvents`) and surfaces MCP name-conflicts as `skill.mcp_conflict` events on the event list. Pure function — all effects (actually registering MCP servers, updating the proxy allowlist, posting setup cards, emitting events on the bus) remain with the caller. TDD order: failing integration test, implementation, passing tests.

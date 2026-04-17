@@ -95,4 +95,50 @@ describe('reconcile', () => {
     expect(out.skills.find((s) => s.name === 'broken')?.kind).toBe('invalid');
     expect(out.skills.find((s) => s.name === 'ok')?.kind).toBe('enabled');
   });
+
+  it('surfaces MCP name conflicts as skill.mcp_conflict events', () => {
+    const input: ReconcilerInput = {
+      snapshot: [
+        {
+          name: 'a',
+          ok: true,
+          body: '',
+          frontmatter: {
+            name: 'a',
+            description: 'd',
+            credentials: [],
+            mcpServers: [{ name: 'shared', url: 'https://one.example' }],
+            domains: [],
+          },
+        },
+        {
+          name: 'b',
+          ok: true,
+          body: '',
+          frontmatter: {
+            name: 'b',
+            description: 'd',
+            credentials: [],
+            mcpServers: [{ name: 'shared', url: 'https://two.example' }],
+            domains: [],
+          },
+        },
+      ],
+      current: {
+        approvedDomains: new Set(),
+        storedCredentials: new Set(),
+        registeredMcpServers: new Map(),
+        priorSkillStates: new Map(),
+      },
+    };
+    const out = reconcile(input);
+    const conflictEvents = out.events.filter((e) => e.type === 'skill.mcp_conflict');
+    expect(conflictEvents).toHaveLength(1);
+    expect(conflictEvents[0].data).toMatchObject({
+      skillName: 'b',
+      mcpName: 'shared',
+      declaredUrl: 'https://two.example',
+      conflictingUrl: 'https://one.example',
+    });
+  });
 });
