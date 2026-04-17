@@ -4,6 +4,14 @@ Git-native skills rollout: snapshot builder, state store, reconcile orchestrator
 
 ## Entries
 
+## [2026-04-17 10:17] — Phase 5 complete: dashboard setup cards
+
+**Task:** Implement phase 5 of git-native skills: dashboard setup cards + atomic approve + credential request queue + React UI.
+**What I did:** 10 commits across backend (Tasks 1-5) and UI (Tasks 6-7), plus E2E verification (Task 8) and documentation (Task 9). Tests: 190 backend + 18 Playwright pass. tsc clean.
+**Files touched:** See commits 74970c48..HEAD. Docs updated in Task 9: `.claude/skills/ax-host/SKILL.md`, `docs/plans/2026-04-16-git-native-skills-design.md`, this journal, `.claude/lessons/host/entries.md` (from earlier tasks).
+**Outcome:** Success. All 4 admin endpoints behave as specified against a live local host. SkillsPage renders cards, handles atomic approve, dismiss confirm-click, OAuth-disabled state, credential requests.
+**Notes:** Image-rebuild path against kind-ax was skipped (pinned to pre-phase-4 image); local E2E covered equivalent scope. Phase 6 (OAuth PKCE) is next per the design doc rollout.
+
 ## [2026-04-17 14:15] — Phase 5 Task 8: end-to-end verification against local host
 
 **Task:** Live-wire confidence check for the phase-5 skills dashboard endpoints. The kind-ax cluster is pinned to `ghcr.io/project-ax/ax:980686f7` (pre-phase-4), and rebuilding + loading a phase-5 image into kind on Apple Silicon is heavier than the task warrants. Unit + Playwright suites already cover behavior (190 backend + 18 UI); this task just needs to prove the code boots + routes.
