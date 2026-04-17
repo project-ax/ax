@@ -13,10 +13,8 @@ export interface CommandHandlers {
   send?: (args: string[]) => Promise<void>;
   configure?: () => Promise<void>;
   bootstrap?: (args: string[]) => Promise<void>;
-  plugin?: (args: string[]) => Promise<void>;
   provider?: (args: string[]) => Promise<void>;
   k8s?: (args: string[]) => Promise<void>;
-  mcp?: (args: string[]) => Promise<void>;
   help?: () => Promise<void>;
 }
 
@@ -39,17 +37,11 @@ export async function routeCommand(
     case 'bootstrap':
       if (handlers.bootstrap) await handlers.bootstrap(args.slice(1));
       break;
-    case 'plugin':
-      if (handlers.plugin) await handlers.plugin(args.slice(1));
-      break;
     case 'provider':
       if (handlers.provider) await handlers.provider(args.slice(1));
       break;
     case 'k8s':
       if (handlers.k8s) await handlers.k8s(args.slice(1));
-      break;
-    case 'mcp':
-      if (handlers.mcp) await handlers.mcp(args.slice(1));
       break;
     default:
       if (handlers.help) await handlers.help();
@@ -66,9 +58,7 @@ Usage:
   ax send <message>      Send a single message
   ax configure           Run configuration wizard
   ax bootstrap [agent]   Reset agent identity and re-run bootstrap
-  ax plugin <command>    Manage plugins (install/remove/list)
   ax provider <command>  Manage third-party provider plugins (add/remove/list/verify)
-  ax mcp <command>       Manage MCP server connections (add/remove/list/test)
   ax k8s init [options]  Generate Helm values and K8s secrets for deployment
 
 Server Options:
@@ -121,7 +111,7 @@ export async function main(): Promise<void> {
     return;
   }
 
-  const knownCommands = new Set(['serve', 'send', 'configure', 'bootstrap', 'plugin', 'provider', 'k8s', 'mcp', 'help']);
+  const knownCommands = new Set(['serve', 'send', 'configure', 'bootstrap', 'provider', 'k8s', 'help']);
   let command: string;
   let restArgs: string[];
 
@@ -150,17 +140,9 @@ export async function main(): Promise<void> {
       const { runBootstrap } = await import('./bootstrap.js');
       await runBootstrap(bootstrapArgs);
     },
-    plugin: async (pluginArgs) => {
-      const { runPlugin } = await import('./plugin.js');
-      await runPlugin(pluginArgs);
-    },
     provider: async (providerArgs) => {
       const { runProvider } = await import('./provider.js');
       await runProvider(providerArgs);
-    },
-    mcp: async (mcpArgs) => {
-      const { runMcp } = await import('./mcp.js');
-      await runMcp(mcpArgs);
     },
     k8s: async (k8sArgs) => {
       const subcommand = k8sArgs[0];

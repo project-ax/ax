@@ -2,6 +2,14 @@
 
 General refactoring, stale reference cleanup, path realignment, dependency updates.
 
+## [2026-04-17 18:05] — Phase 7 Task 4: Drop CLI plugin+mcp + admin plugin endpoints
+
+**Task:** Delete `ax plugin` and `ax mcp` CLI commands plus the 410-stubbed admin plugin routes from Task 3. Drop the admin UI Plugins tab + API surface.
+**What I did:** `git rm`'d `src/cli/plugin.ts` and `src/cli/mcp.ts`. Stripped `plugin`/`mcp` from `src/cli/index.ts` (handler interface, switch cases, `knownCommands` set, dynamic imports, help text). Deleted the 410-stub plugin routes from `src/host/server-admin.ts` (lines ~941-956). Kept `mcpManager` on AdminDeps + `server-webhook-admin.ts` — still used by `/admin/api/mcp-servers` POST/PUT/DELETE routes (lines 551, 572, 579, 597) to sync the in-memory MCP manager with DB changes. Admin UI: removed `PluginsSection` component, the `plugins` SectionId + nav entry, `Puzzle`/`Package` icon imports, `InstalledPlugin` type import, and the `activeSection === 'plugins'` render branch from `ui/admin/src/components/pages/agents-page.tsx`. Removed `agentPlugins`/`installPlugin`/`uninstallPlugin` methods from `ui/admin/src/lib/api.ts` and the `InstalledPlugin` interface from `ui/admin/src/lib/types.ts`.
+**Files touched:** Deleted: `src/cli/plugin.ts`, `src/cli/mcp.ts`. Modified: `src/cli/index.ts`, `src/host/server-admin.ts`, `ui/admin/src/components/pages/agents-page.tsx`, `ui/admin/src/lib/api.ts`, `ui/admin/src/lib/types.ts`.
+**Outcome:** Success — `npm run build` clean; targeted tests green (`tests/host/server-admin*` + `tests/cli/*`: 10 files/136 tests). No admin-plugin tests existed, so nothing to remove there.
+**Notes:** `mcpManager` stays on AdminDeps — it's used by the global MCP server admin routes, not the (now-deleted) plugin routes. `src/host/ipc-server.ts` still imports `createPluginHandlers` from `./ipc-handlers/plugin.js` — that's a separate IPC handler module, not the CLI file, and is outside Task 4 scope.
+
 ## [2026-04-17 17:44] — Phase 7 Task 3: Strip legacy plugin machinery (keep MCP manager)
 
 **Task:** Remove the plugin-manifest install pipeline (fetcher/install/parser/store/types) while keeping `mcp-manager`, `mcp-client`, and `loadDatabaseMcpServers` — phase-4 MCP wiring still depends on those.

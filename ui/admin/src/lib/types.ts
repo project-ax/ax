@@ -139,18 +139,6 @@ export interface McpServer {
   updated_at: string;
 }
 
-/** Installed plugin record from admin API. */
-export interface InstalledPlugin {
-  name: string;
-  version: string;
-  description: string;
-  source: string;
-  skills: number;
-  commands: number;
-  mcpServers: string[];
-  installedAt: string;
-}
-
 /** MCP server test result. */
 export interface McpTestResult {
   ok: boolean;

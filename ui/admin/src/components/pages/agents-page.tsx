@@ -13,9 +13,6 @@ import {
   Brain,
   Activity,
   User,
-  Puzzle,
-  Package,
-  Plus,
   Globe,
   Pencil,
   Trash2,
@@ -32,13 +29,12 @@ import type {
   SkillEntry,
   WorkspaceFileEntry,
   MemoryEntryView,
-  InstalledPlugin,
   McpServer,
 } from '../../lib/types';
 
 // ── Types ──
 
-type SectionId = 'overview' | 'identity' | 'skills' | 'plugins' | 'connectors' | 'workspace' | 'memory';
+type SectionId = 'overview' | 'identity' | 'skills' | 'connectors' | 'workspace' | 'memory';
 
 // ── Helpers ──
 
@@ -66,17 +62,6 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function timeAgo(dateStr: string): string {
-  const seconds = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
-  if (seconds < 60) return 'just now';
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
 }
 
 // ── Shared helpers ──
@@ -232,7 +217,6 @@ const NAV_GROUPS: {
     label: 'TOOLS',
     items: [
       { id: 'skills', label: 'Skills', icon: Sparkles },
-      { id: 'plugins', label: 'Plugins', icon: Puzzle },
       { id: 'connectors', label: 'Connectors', icon: Globe },
     ],
   },
@@ -782,210 +766,6 @@ function MemoryTab({ agentId }: { agentId: string }) {
   );
 }
 
-// ── Plugins Section (Task 6) ──
-
-function PluginsSection({ agentId }: { agentId: string }) {
-  const { data: plugins, loading, error, refresh } = useApi<InstalledPlugin[]>(
-    () => api.agentPlugins(agentId),
-    [agentId]
-  );
-
-  const [showInstallForm, setShowInstallForm] = useState(false);
-  const [installSource, setInstallSource] = useState('');
-  const [installing, setInstalling] = useState(false);
-  const [installError, setInstallError] = useState('');
-  const [unconfirming, setUnconfirming] = useState<string | null>(null);
-  const unconfirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Cleanup unconfirm timer on unmount
-  useEffect(() => {
-    return () => {
-      if (unconfirmTimerRef.current) clearTimeout(unconfirmTimerRef.current);
-    };
-  }, []);
-
-  const handleInstall = async () => {
-    if (!installSource.trim()) return;
-    setInstalling(true);
-    setInstallError('');
-    try {
-      const result = await api.installPlugin(agentId, installSource.trim());
-      if (result.error) {
-        setInstallError(result.error);
-      } else {
-        setInstallSource('');
-        setShowInstallForm(false);
-        refresh();
-      }
-    } catch (err) {
-      setInstallError(err instanceof Error ? err.message : 'Install failed');
-    } finally {
-      setInstalling(false);
-    }
-  };
-
-  const handleUninstall = async (name: string) => {
-    if (unconfirming !== name) {
-      // First click: enter confirm state
-      setUnconfirming(name);
-      if (unconfirmTimerRef.current) clearTimeout(unconfirmTimerRef.current);
-      unconfirmTimerRef.current = setTimeout(() => setUnconfirming(null), 3000);
-      return;
-    }
-    // Second click: proceed
-    if (unconfirmTimerRef.current) clearTimeout(unconfirmTimerRef.current);
-    setUnconfirming(null);
-    try {
-      await api.uninstallPlugin(agentId, name);
-      refresh();
-    } catch {
-      // Silently fail — refresh will show current state
-      refresh();
-    }
-  };
-
-  if (loading) return <TabSkeleton />;
-  if (error) return <TabError message={error.message} />;
-
-  return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h4 className="text-[14px] font-semibold text-foreground">Plugins</h4>
-        {!showInstallForm && (
-          <button
-            onClick={() => setShowInstallForm(true)}
-            className="btn-primary text-[12px] px-3 py-1 flex items-center gap-1.5"
-          >
-            <Plus size={14} strokeWidth={1.8} />
-            Install Plugin
-          </button>
-        )}
-      </div>
-
-      {/* Install form */}
-      {showInstallForm && (
-        <div className="p-3 rounded-lg border border-border/30 space-y-3">
-          <input
-            type="text"
-            value={installSource}
-            onChange={(e) => setInstallSource(e.target.value)}
-            className="input w-full text-[13px]"
-            placeholder="github:owner/repo, local path, or URL"
-            disabled={installing}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleInstall();
-            }}
-          />
-          {installError && (
-            <p className="text-[12px] text-rose">{installError}</p>
-          )}
-          <div className="flex items-center gap-2">
-            {installing ? (
-              <div className="flex items-center gap-2 text-[13px] text-muted-foreground">
-                <div className="w-3.5 h-3.5 border-2 border-amber border-t-transparent rounded-full animate-spin" />
-                Installing...
-              </div>
-            ) : (
-              <>
-                <button
-                  onClick={handleInstall}
-                  className="btn-primary text-[12px] px-3 py-1"
-                >
-                  Install
-                </button>
-                <button
-                  onClick={() => {
-                    setShowInstallForm(false);
-                    setInstallSource('');
-                    setInstallError('');
-                  }}
-                  className="btn-secondary text-[12px] px-3 py-1"
-                >
-                  Cancel
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Plugin cards */}
-      {!plugins || plugins.length === 0 ? (
-        <div className="text-center py-12">
-          <Package size={32} className="text-muted-foreground/30 mx-auto mb-3" />
-          <p className="text-[13px] text-muted-foreground mb-3">No plugins installed</p>
-          {!showInstallForm && (
-            <button
-              onClick={() => setShowInstallForm(true)}
-              className="btn-primary text-[12px] px-3 py-1 inline-flex items-center gap-1.5"
-            >
-              <Plus size={14} strokeWidth={1.8} />
-              Install Plugin
-            </button>
-          )}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          {plugins.map((plugin) => (
-            <div
-              key={plugin.name}
-              className="rounded-lg border border-border/30 p-4 space-y-2"
-            >
-              {/* Row 1: name + version */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Package size={14} className="text-amber shrink-0" strokeWidth={1.8} />
-                  <span className="font-semibold text-[14px] text-foreground truncate">
-                    {plugin.name}
-                  </span>
-                </div>
-                <span className="badge-zinc shrink-0 ml-2">{plugin.version}</span>
-              </div>
-
-              {/* Row 2: description */}
-              {plugin.description && (
-                <p className="text-[12px] text-muted-foreground">{plugin.description}</p>
-              )}
-
-              {/* Row 3: stat badges */}
-              <div className="flex flex-wrap gap-1.5">
-                <span className="badge-blue">
-                  {plugin.skills} skill{plugin.skills !== 1 ? 's' : ''}
-                </span>
-                <span className="badge-yellow">
-                  {plugin.commands} command{plugin.commands !== 1 ? 's' : ''}
-                </span>
-                {plugin.mcpServers.length > 0 && (
-                  <span className="badge-green">
-                    {plugin.mcpServers.length} MCP server{plugin.mcpServers.length !== 1 ? 's' : ''}
-                  </span>
-                )}
-              </div>
-
-              {/* Row 4: source + install date */}
-              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                <span className="font-mono truncate">{plugin.source}</span>
-                <span className="shrink-0 ml-2">{timeAgo(plugin.installedAt)}</span>
-              </div>
-
-              {/* Row 5: uninstall */}
-              <div className="flex justify-end pt-1">
-                <button
-                  onClick={() => handleUninstall(plugin.name)}
-                  className="btn-danger text-[11px] px-2.5 py-1"
-                >
-                  {unconfirming === plugin.name ? 'Confirm?' : 'Uninstall'}
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Agent Connectors Section ──
 
 function ConnectorsSection({ agentId }: { agentId: string }) {
@@ -1136,7 +916,6 @@ function ContentArea({
           )}
           {activeSection === 'identity' && <IdentityTab agentId={agent.id} />}
           {activeSection === 'skills' && <SkillsTab agentId={agent.id} />}
-          {activeSection === 'plugins' && <PluginsSection agentId={agent.id} />}
           {activeSection === 'connectors' && <ConnectorsSection agentId={agent.id} />}
           {activeSection === 'workspace' && <WorkspaceTab agentId={agent.id} />}
           {activeSection === 'memory' && <MemoryTab agentId={agent.id} />}

@@ -12,7 +12,6 @@ import type {
   WorkspaceFileEntry,
   MemoryEntryView,
   McpServer,
-  InstalledPlugin,
   McpTestResult,
   SkillSetupResponse,
   SkillApproveBody,
@@ -247,28 +246,6 @@ export const api = {
   /** Unassign a MCP server from an agent. */
   unassignMcpServer(id: string, serverName: string): Promise<{ ok: boolean }> {
     return apiFetch<{ ok: boolean }>(`/agents/${encodeURIComponent(id)}/mcp-servers/${encodeURIComponent(serverName)}`, {
-      method: 'DELETE',
-    });
-  },
-
-  // ── Agent Plugins ──
-
-  /** List installed plugins for an agent. */
-  agentPlugins(id: string): Promise<InstalledPlugin[]> {
-    return apiFetch<InstalledPlugin[]>(`/agents/${encodeURIComponent(id)}/plugins`);
-  },
-
-  /** Install a plugin for an agent. */
-  installPlugin(id: string, source: string): Promise<{ installed: boolean; pluginName?: string; error?: string }> {
-    return apiFetch(`/agents/${encodeURIComponent(id)}/plugins`, {
-      method: 'POST',
-      body: JSON.stringify({ source }),
-    });
-  },
-
-  /** Uninstall a plugin from an agent. */
-  uninstallPlugin(id: string, name: string): Promise<{ ok: boolean }> {
-    return apiFetch<{ ok: boolean }>(`/agents/${encodeURIComponent(id)}/plugins/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     });
   },

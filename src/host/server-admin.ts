@@ -938,23 +938,6 @@ async function handleAdminAPI(
     return;
   }
 
-  // ── Plugin Management ──
-
-  // TODO(phase7-task4): these plugin admin routes are retired and will be
-  // deleted wholesale in Task 4. Until then, they 410-stub so Task 3 can drop
-  // the underlying modules (fetcher/install/parser/store/types) without
-  // breaking the TS build via dangling dynamic imports.
-  const pluginListMatch = pathname.match(/^\/admin\/api\/agents\/([^/]+)\/plugins$/);
-  if (pluginListMatch && (method === 'GET' || method === 'POST')) {
-    sendError(res, 410, 'Plugin manifest install routes have been retired. Use `ax mcp` for MCP servers.');
-    return;
-  }
-  const pluginDeleteMatch = pathname.match(/^\/admin\/api\/agents\/([^/]+)\/plugins\/([^/]+)$/);
-  if (pluginDeleteMatch && method === 'DELETE') {
-    sendError(res, 410, 'Plugin manifest install routes have been retired. Use `ax mcp` for MCP servers.');
-    return;
-  }
-
   // GET /admin/api/events — SSE stream
   if (pathname.startsWith('/admin/api/events') && method === 'GET') {
     handleAdminSSE(req, res, deps);
