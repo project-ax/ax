@@ -377,7 +377,8 @@ export async function run(config: AgentConfig): Promise<void> {
 
   // VirtioFS mounts (Apple Container) may not be visible immediately at process
   // start. Wait for the workspace to have content before building the prompt.
-  if (config.workspace) {
+  // Only run inside containers (AX_WORKSPACE is set by container entrypoint).
+  if (config.workspace && process.env.AX_WORKSPACE) {
     await waitForWorkspace(config.workspace);
   }
 
