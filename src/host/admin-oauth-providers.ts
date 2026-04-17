@@ -58,10 +58,20 @@ export function deriveOAuthKey(
   return { key, derivedFrom: 'admin-token' };
 }
 
+// Both encrypt + decrypt pin the GCM auth tag length to 16 bytes via the
+// `authTagLength` option. Node will otherwise accept any tag length between
+// 4 and 16 bytes, which means a tamperer who swaps our 16-byte tag for a
+// shorter forged one could slip past the integrity check at a much lower
+// work factor. Our blob layout already forces `tag.length === 16` via
+// `buf.subarray(buf.length - 16)`, so this is defense in depth — but
+// semgrep's `gcm-no-tag-length` rule points at this exact hardening, and
+// locking it in at the cipher layer means a future refactor of the blob
+// format can't accidentally reopen the hole.
+
 /** AES-256-GCM encrypt. Returns base64(iv || ciphertext || tag). */
 export function encryptSecret(plain: string, key: Buffer): string {
   const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const cipher = createCipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
   const enc = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
   return Buffer.concat([iv, enc, tag]).toString('base64');
@@ -76,7 +86,7 @@ export function decryptSecret(blob: string, key: Buffer): string {
   const iv = buf.subarray(0, 12);
   const tag = buf.subarray(buf.length - 16);
   const ciphertext = buf.subarray(12, buf.length - 16);
-  const decipher = createDecipheriv('aes-256-gcm', key, iv);
+  const decipher = createDecipheriv('aes-256-gcm', key, iv, { authTagLength: 16 });
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
 }

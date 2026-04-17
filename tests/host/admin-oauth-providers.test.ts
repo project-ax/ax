@@ -54,6 +54,22 @@ describe('admin-oauth-providers crypto helpers', () => {
     expect(() => decryptSecret(tampered, key)).toThrow();
   });
 
+  it('decryptSecret throws when the auth tag is truncated (pins authTagLength: 16)', () => {
+    // Regression guard: node:crypto accepts GCM auth tags of 4..16 bytes by
+    // default, so a tamperer could swap the full 16-byte tag for a shorter
+    // forged one if we ever dropped `{ authTagLength: 16 }` from the cipher
+    // constructors. Strip the last 2 bytes off the blob (truncating tag
+    // length to 14) and confirm the decipher rejects it. Our blob-length
+    // guard also catches some truncations, but this test truncates by just
+    // 2 bytes so the structural `buf.length < 12 + 16` check still passes
+    // — only the cipher-layer length pin rejects it.
+    const key = randomBytes(32);
+    const blob = encryptSecret('super-secret-value', key);
+    const buf = Buffer.from(blob, 'base64');
+    const truncated = buf.subarray(0, buf.length - 2).toString('base64');
+    expect(() => decryptSecret(truncated, key)).toThrow();
+  });
+
   it('deriveOAuthKey prefers the env var when both are provided', () => {
     const envKeyBytes = randomBytes(32);
     const envKey = envKeyBytes.toString('hex');

@@ -4,6 +4,7 @@ Security patterns: import resolution, static allowlist design, and safe path han
 
 ## Entries
 
+- Always pin GCM auth tag length to 16 — Node accepts 4-16 byte tags by default [entries.md](entries.md)
 - Validate shapes at schema boundaries, not downstream consumers [entries.md](entries.md)
 - timingSafeEqual throws on unequal-length buffers — gate with a regex first [entries.md](entries.md)
 - HMAC-verify raw body bytes BEFORE JSON.parse — don't round-trip [entries.md](entries.md)

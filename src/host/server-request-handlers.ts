@@ -28,18 +28,18 @@ const logger = getLogger();
 /** SSE keepalive interval. */
 const SSE_KEEPALIVE_MS = 15_000;
 
-/** Minimal HTML entity escape. Used by the OAuth callback response page to
- *  interpolate a known-finite set of reason codes without opening an HTML
- *  injection vector. Not a substitute for a full escaper — we use it only
- *  on values whose shape we control. */
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+// Hard-coded HTML responses for OAuth callback outcomes. Each branch renders
+// a string literal so there's no variable interpolation — semgrep's
+// raw-html-format rule was flagging the dynamic template even though we
+// escaped the reason, and `adminResult.reason` is a closed 3-literal union
+// anyway. Using a lookup table also gives us room to write friendlier,
+// more helpful user-facing text than the raw enum identifier.
+const OAUTH_CALLBACK_HTML = {
+  success: '<html><body><h2>Authentication successful</h2><p>You can close this tab and return to the dashboard.</p></body></html>',
+  token_exchange_failed: '<html><body><h2>Authentication failed</h2><p>The authorization server rejected our exchange request. Try again, or check with your admin if this keeps happening.</p></body></html>',
+  invalid_response: '<html><body><h2>Authentication failed</h2><p>The authorization response didn\'t look right — something got mangled between the provider and us. Please start over.</p></body></html>',
+  error: '<html><body><h2>Authentication failed</h2><p>We hit an unexpected error finishing the OAuth flow. Check the server logs for details, or try again in a moment.</p></body></html>',
+} as const;
 
 // ── Auth middleware ──
 
@@ -732,9 +732,12 @@ export function createRequestHandler(opts: RequestHandlerOpts): (req: IncomingMe
             audit: providers.audit,
           });
           if (adminResult.matched) {
+            // Static-string lookup — no variable interpolation. TypeScript
+            // guarantees the `reason` key resolves because the union is
+            // closed over exactly the three OAUTH_CALLBACK_HTML keys.
             const html = adminResult.ok
-              ? '<html><body><h2>Authentication successful</h2><p>You can close this tab and return to the dashboard.</p></body></html>'
-              : `<html><body><h2>Authentication failed</h2><p>${escapeHtml(adminResult.reason)}</p></body></html>`;
+              ? OAUTH_CALLBACK_HTML.success
+              : OAUTH_CALLBACK_HTML[adminResult.reason];
             const status = adminResult.ok ? 200 : 400;
             res.writeHead(status, {
               'Content-Type': 'text/html',

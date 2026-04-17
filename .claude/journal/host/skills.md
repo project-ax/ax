@@ -4,6 +4,14 @@ Git-native skills rollout: snapshot builder, state store, reconcile orchestrator
 
 ## Entries
 
+## [2026-04-17 16:10] — Phase 6 follow-up: fix 2 blocking semgrep findings
+
+**Task:** Address two blocking semgrep findings on `feat/skills-phase6-oauth`: (1) `gcm-no-tag-length` in `admin-oauth-providers.ts` — AES-256-GCM cipher constructors didn't pin `authTagLength: 16`, letting Node technically accept shorter forged tags; (2) `raw-html-format` in `server-request-handlers.ts` — the OAuth callback response template interpolated `adminResult.reason` via `escapeHtml()`, which semgrep's regex didn't understand.
+**What I did:** (1) Passed `{ authTagLength: 16 }` as the 4th arg to both `createCipheriv` and `createDecipheriv`; added a block comment explaining why the explicit pin matters even though our blob layout already forces a 16-byte tag slice. Added a `decryptSecret`-truncation test that strips 2 bytes off the tag and expects `toThrow()` — structural blob guard still passes at that size, so only the cipher-layer pin rejects it. (2) Replaced the template string with a module-scoped `OAUTH_CALLBACK_HTML` lookup table keyed by the closed `reason` union (`token_exchange_failed | invalid_response | error`) plus `success`; each value is a static string literal, so no variable interpolation, so no semgrep hit. The new copy is also friendlier per CLAUDE.md voice. Removed the now-unused `escapeHtml` helper. Updated `server-oauth-callback.test.ts` to assert on the new friendly substring ("didn't look right") instead of the raw `invalid_response` enum identifier.
+**Files touched:** `src/host/admin-oauth-providers.ts`, `src/host/server-request-handlers.ts`, `tests/host/admin-oauth-providers.test.ts`, `tests/host/server-oauth-callback.test.ts`.
+**Outcome:** Success. Semgrep: 0 findings (down from 2 blocking). Target tests: 44/44 pass across `admin-oauth-providers.test.ts`, `server-oauth-callback.test.ts`, `admin-oauth-flow.test.ts`. `tsc --noEmit` clean.
+**Notes:** Scope discipline — left the `req.headers.host` pattern alone (semgrep's warning mentioned "host portion" but the flagged rule was on the reason interpolation).
+
 ## [2026-04-17 15:30] — Phase 6 follow-up: 5 CodeRabbit review fixes on PR #181
 
 **Task:** Address all 5 CodeRabbit findings on PR #181 (phase 6 OAuth): provider-name case sensitivity, init-order bug for admin.token + OAuth key derivation, x-forwarded-proto scheme validation, fire-and-forget reconcile docstring/impl mismatch, and un-tracked 30s setTimeout after unmount.

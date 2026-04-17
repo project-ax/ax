@@ -158,7 +158,7 @@ describe('/v1/oauth/callback/:provider', () => {
     }
   });
 
-  it('admin matched-but-failed (provider mismatch) → 400 with escaped reason, no fall-through', async () => {
+  it('admin matched-but-failed (provider mismatch) → 400 with friendly reason HTML, no fall-through', async () => {
     const adminOAuthFlow = createAdminOAuthFlow();
     const { state } = adminOAuthFlow.start({
       agentId: 'main',
@@ -184,7 +184,10 @@ describe('/v1/oauth/callback/:provider', () => {
       expect(res.status).toBe(400);
       const body = await res.text();
       expect(body).toContain('Authentication failed');
-      expect(body).toContain('invalid_response');
+      // The `invalid_response` reason maps to a friendly message per
+      // OAUTH_CALLBACK_HTML — no raw enum identifier in the response
+      // body, but a distinguishing substring still pins the branch.
+      expect(body).toContain("didn't look right");
       // No token exchange happened — we refused the path mismatch.
       expect(tokenFetch).not.toHaveBeenCalled();
     } finally {

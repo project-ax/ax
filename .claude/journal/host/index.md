@@ -4,6 +4,7 @@ Host process work: server, router, IPC handlers, event console, event bus, deleg
 
 ## Entries
 
+- 2026-04-17 16:10 — Phase 6 follow-up: fix 2 blocking semgrep findings — AES-256-GCM `authTagLength: 16` pin + OAuth callback HTML lookup-table replaces reason-interpolated template; 44 target tests + tsc clean; semgrep 0 findings [skills.md](skills.md)
 - 2026-04-17 15:30 — Phase 6 follow-up: 5 CodeRabbit review fixes on PR #181 (provider-name lowercase, init-order admin.token, x-forwarded-proto whitelist, fire-and-forget reconcile, 30s timer cleanup on unmount); 258 backend + 13 Playwright tests pass [skills.md](skills.md)
 - 2026-04-17 14:17 — Phase 6 complete: OAuth PKCE + admin-registered providers — 9 commits (Tasks 1-6) + docs (Task 7); 135 backend + 23 Playwright tests pass; tsc clean at root and ui/admin; commits 1a229e8d..1500a6b8 [skills.md](skills.md)
 - 2026-04-17 18:15 — Phase 6 Task 6: end-to-end OAuth verification against local host with mock token endpoint — POST /oauth/start → GET /v1/oauth/callback/linear → credential_store (access_token + __oauth_blob at user:verify-agent:vpulim) + audit (oauth_start, oauth_callback_success, no token leakage) + replay defense [skills.md](skills.md)
