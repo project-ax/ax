@@ -4,6 +4,14 @@ Git-native skills rollout: snapshot builder, state store, reconcile orchestrator
 
 ## Entries
 
+## [2026-04-17 08:30] — Phase 5 Task 1: extend AdminDeps with skill state store + reconcile bridge
+
+**Task:** Phase 5 (skills dashboard) preparation. Add optional `skillStateStore`, `reconcileAgent`, and `defaultUserId` to `AdminDeps` + `AdminSetupOpts` so upcoming `/admin/api/skills/*` endpoints can persist + re-reconcile without a separate wiring pass. Strict back-compat: all three fields optional.
+**What I did:** Added the three optional fields to `AdminDeps` (server-admin.ts) and mirrored them on `AdminSetupOpts` + pass-through in `setupAdminHandler` (server-webhook-admin.ts). In server.ts, hoisted a `adminReconcileAgent` closure out of the `if (stateStore)` block so it captures the same `orchestratorDeps` shared with the push-time hook + rehydrate; passed through to the `setupAdminHandler` call site alongside `stateStore` and `defaultUserId`. Added a back-compat test in `tests/host/server-admin.test.ts` constructing AdminDeps with all three new fields stubbed + a GET /admin/api/status assertion.
+**Files touched:** `src/host/server-admin.ts`, `src/host/server-webhook-admin.ts`, `src/host/server.ts`, `tests/host/server-admin.test.ts`.
+**Outcome:** Success — `npx vitest run tests/host/server-admin.test.ts` = 37/37 pass; `npx tsc --noEmit` clean. Other host test failures (server.test.ts etc.) are pre-existing on this branch, confirmed by stashing + re-running.
+**Notes:** No endpoint implementation yet — just the plumbing. The approve-triggered reconcile shares `orchestratorDeps` with the push hook and startup rehydrate, so all three paths drive the same live MCP + proxy appliers. Tests aren't included in tsc's rootDir, so the "failing test first" gate doesn't catch new-field-type errors — ran vitest + tsc independently.
+
 ## [2026-04-17 08:10] — Phase 4 PR #179 review feedback
 
 **Task:** Address CodeRabbit actionable + high-value nitpick comments on PR #179 (feat/skills-phase4-appliers). Two actionable: (1) mcp-applier skips bearer-credential rotation when URL is unchanged; (2) proxy-applier's closure-scoped `prior` Map leaks entries for deleted agents. Two nitpicks adopted: (3) orchestrator emits `skills.live_state_applied` even when both appliers threw; (4) startup rehydration blocks `createServer` return.

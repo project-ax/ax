@@ -148,6 +148,12 @@ export interface AdminDeps {
   externalAuth?: boolean;
   domainList?: ProxyDomainList;
   mcpManager?: import('../plugins/mcp-manager.js').McpConnectionManager;
+  /** Phase 5: persisted skill setup queue. When absent, /admin/api/skills/* returns 503. */
+  skillStateStore?: import('./skills/state-store.js').SkillStateStore;
+  /** Phase 5: re-trigger reconcile after approve. When absent, /admin/api/skills/setup/approve returns 503. */
+  reconcileAgent?: (agentId: string, ref: string) => Promise<{ skills: number; events: number }>;
+  /** Phase 5: default user ID for credentials with scope='user' when the request doesn't specify one. */
+  defaultUserId?: string;
 }
 
 // ── Factory ──
