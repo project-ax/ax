@@ -4,6 +4,14 @@ Git-native skills rollout: snapshot builder, state store, reconcile orchestrator
 
 ## Entries
 
+## [2026-04-17 07:14] — Phase 4 Task 3: Wire appliers into reconcileAgent
+
+**Task:** Call the new `mcpApplier` and `proxyApplier` from `reconcileAgent` after DB write, feeding them `output.desired.{mcpServers,proxyAllowlist}`; emit a single `skills.live_state_applied` summary event. Keep deps OPTIONAL for back-compat with phase-2 tests.
+**What I did:** TDD. Added 3 tests (w/ `vi` import): (1) stub appliers record call args — asserts agent-1 + `linear-mcp` map entry with `bearerCredential: 'LINEAR_TOKEN'` and `['api.linear.app']` domains; (2) stub appliers return specific results — asserts `skills.live_state_applied` appears in the event bus; (3) bogus `getBareRepoPath` → snapshot throws — asserts neither applier was called. Verified (1) + (2) fail. Implemented: added `McpApplier`/`McpApplyResult` + `ProxyApplier`/`ProxyApplyResult` imports and made `mcpApplier?`/`proxyApplier?` optional fields on `OrchestratorDeps`. After `putStatesAndQueue` and BEFORE the event-emit loop, run each applier inside its own try/catch (warn-log on throw, don't bubble), then emit one `skills.live_state_applied` event with `{ mcp, proxy }` summary payload IFF either applier was configured. The outer try/catch already converts a pre-DB-write throw into `skills.reconcile_failed` and skips the applier block entirely.
+**Files touched:** `src/host/skills/reconcile-orchestrator.ts`, `tests/host/skills/reconcile-orchestrator.test.ts`, `.claude/journal/host/skills.md`.
+**Outcome:** Success — `npx vitest run tests/host/skills/reconcile-orchestrator.test.ts` = 7/7 pass (4 existing + 3 new). `tsc --noEmit` clean. Phase-2 tests that build `OrchestratorDeps` without appliers continue to pass because both new fields are optional.
+**Notes:** The error-path test trivially passed even before implementation (no wiring, no call) — that's by design, not a flaw. Post-wiring it still passes because the throw happens inside `buildSnapshotFromBareRepo`, BEFORE the new applier block, so the outer catch handles it and returns zero counts without touching appliers. Inner try/catch per applier is deliberate: a failing mcp applier must NOT block the proxy applier, because DB is already consistent and next reconcile will catch live state back up.
+
 ## [2026-04-17 07:10] — Phase 4 Task 2: Proxy applier + per-agent ProxyDomainList
 
 **Task:** Bridge reconciler's `desired.proxyAllowlist: Set<string>` to the live `ProxyDomainList` using agent-keyed replace semantics. Phase 4 needs an agent-scoped contribution so a reconcile for agent A doesn't clobber agent B's skill domains.
