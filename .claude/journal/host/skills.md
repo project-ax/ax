@@ -4,6 +4,14 @@ Git-native skills rollout: snapshot builder, state store, reconcile orchestrator
 
 ## Entries
 
+## [2026-04-17 07:02] — Phase 4 Task 1: MCP applier module
+
+**Task:** Bridge reconciler's `desired.mcpServers` to live `McpConnectionManager` — diff by source tag `skill:<agentId>` and call `addServer`/`removeServer` without touching plugin/database/other-agent-owned entries.
+**What I did:** TDD'd the module with 7 cases: first-apply register, drop-unregister, idempotent no-op, URL-change re-register, cross-source untouched, global conflict emission (skip overwrite), and `bearerCredential` → `Authorization: Bearer ${TOKEN}` header placeholder. Wrote failing tests first (module-not-found), then implemented per plan skeleton verbatim. Audit entries emitted for each mutation; no-ops skip audit.
+**Files touched:** `src/host/skills/mcp-applier.ts` (new), `tests/host/skills/mcp-applier.test.ts` (new).
+**Outcome:** Success — `npx vitest run tests/host/skills/mcp-applier.test.ts` = 7/7 pass. No changes to orchestrator, server, or proxy surfaces (later tasks).
+**Notes:** Silent-skip on same-name-different-source-same-URL is intentional (avoid double-register). URL-change path emits both `registered` and `unregistered` records; callers should treat them as a single replace event when summarizing.
+
 ## [2026-04-17 05:40] — Phase 2 PR #177 CodeRabbit review fixes (8)
 
 **Task:** Apply 8 review fixes on PR #177 (git-native skills phase 2): orphan-repo cleanup, case-sensitive scope prefix, skip branch-deletion pushes, buffer-based HMAC, non-Error throw narrowing, atomic states+queue persistence, curl --data-binary, ifExists() on down migration.
