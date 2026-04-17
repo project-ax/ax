@@ -282,6 +282,17 @@ const server = http.createServer((req, res) => {
               installPostReceiveHook(repoPath, repoName);
             } catch (hookErr) {
               console.error(`[ERROR] Failed to install post-receive hook: ${hookErr.message}`);
+              // Clean up the bare repo so retries aren't permanently blocked
+              // by the 409 "Repository already exists" branch. Without this,
+              // a hook-install failure orphans the bare repo on disk and the
+              // agent can never be re-provisioned. Best-effort — same style
+              // as the tmpDir cleanup above.
+              try {
+                fs.rmSync(repoPath, { recursive: true, force: true });
+                console.error(`[INFO] Removed orphan bare repo after hook failure: ${repoPath}`);
+              } catch (cleanupErr) {
+                console.error(`[ERROR] Failed to clean up orphan bare repo ${repoPath}: ${cleanupErr.message}`);
+              }
               res.writeHead(500, { 'Content-Type': 'application/json' });
               res.end(JSON.stringify({ error: 'Failed to install hook', details: hookErr.message }));
               return;
