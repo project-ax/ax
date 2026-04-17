@@ -343,6 +343,7 @@ export async function createServer(
     skillStateStore: stateStore,
     reconcileAgent: adminReconcileAgent,
     defaultUserId,
+    credentialRequestQueue: core.credentialRequestQueue,
   });
 
   let httpServer: HttpServer | null = null;

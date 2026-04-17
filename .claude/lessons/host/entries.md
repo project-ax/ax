@@ -1,5 +1,11 @@
 # Host
 
+### EventBus has a single catch-all subscribe — filter by type in-handler
+**Date:** 2026-04-17
+**Context:** Phase 5 Task 5 needed a subscriber for `credential.required` events. My first reach was `eventBus.on('credential.required', listener)` because that's the EventEmitter-style API. But `src/host/event-bus.ts` only exposes `subscribe(listener)` (all events) and `subscribeRequest(requestId, listener)` (per-request) — no per-type subscription. The correct pattern is `eventBus.subscribe((event) => { if (event.type !== 'credential.required') return; ... })`.
+**Lesson:** When wiring new subscribers on AX's event bus, skip the `.on('eventName', ...)` reflex — `EventBus` is catch-all. Subscribe once, guard `event.type` at the top of the handler. Also: `event.data` is `Record<string, unknown>` (not typed per event), so narrow fields yourself (`typeof data.envName === 'string'`). Do NOT change the event shape to fit a subscriber — read what's there, fall back to defaults if a field's missing.
+**Tags:** event-bus, subscribe, pub-sub, host, patterns
+
 ### Audit-log failures must surface, not swallow
 **Date:** 2026-04-17
 **Context:** Phase 5 Task 3: the approve helper originally wrapped `providers.audit.log` in a try/catch that logged `skill_approve_audit_failed` and returned 200 — reasoning "audit failure shouldn't fail the approve call since creds + domains are already persisted." Spec review flagged it: CLAUDE.md lists "Everything is audited" as a security invariant. Silent audit loss on a security-relevant action (credential write + domain approval) is exactly the evidence gap the invariant exists to prevent. Unlike the reconcile path — where swallow-and-log is fine because the DB is already consistent and startup-rehydrate catches up — audit has no recovery mechanism. If the audit provider drops a record, it's gone.

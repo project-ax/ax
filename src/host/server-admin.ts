@@ -18,6 +18,7 @@ import type { EventBus, StreamEvent } from './event-bus.js';
 import type { AgentRegistry } from './agent-registry.js';
 import type { ProxyDomainList } from './proxy-domain-list.js';
 import type { SetupRequest } from './skills/types.js';
+import type { CredentialRequestQueue } from './credential-request-queue.js';
 import { ApproveBodySchema, approveSkillSetup } from './server-admin-skills-helpers.js';
 import { parseAgentSkill } from '../utils/skill-format-parser.js';
 import { getLogger } from '../logger.js';
@@ -156,6 +157,10 @@ export interface AdminDeps {
   reconcileAgent?: (agentId: string, ref: string) => Promise<{ skills: number; events: number }>;
   /** Phase 5: default user ID for credentials with scope='user' when the request doesn't specify one. */
   defaultUserId?: string;
+  /** Phase 5 Task 5: in-memory queue of pending ad-hoc credential requests
+   *  from the `request_credential` agent tool. When absent, the GET
+   *  endpoint soft-degrades to an empty array. */
+  credentialRequestQueue?: CredentialRequestQueue;
 }
 
 // ── Factory ──
@@ -517,6 +522,17 @@ async function handleAdminAPI(
     return;
   }
 
+  // GET /admin/api/credentials/requests — ad-hoc credential requests (from request_credential tool).
+  // Soft-degrades to { requests: [] } when the queue dep isn't wired — the queue is additive.
+  if (pathname === '/admin/api/credentials/requests' && method === 'GET') {
+    if (!deps.credentialRequestQueue) {
+      sendJSON(res, { requests: [] });
+      return;
+    }
+    sendJSON(res, { requests: deps.credentialRequestQueue.snapshot() });
+    return;
+  }
+
   // POST /admin/api/credentials/provide — store a credential for future requests
   if (pathname === '/admin/api/credentials/provide' && method === 'POST') {
     try {
@@ -535,6 +551,12 @@ async function handleAdminAPI(
         await deps.providers.credentials.set(envName, value, credentialScope(ctx.agentName));
       } else {
         await deps.providers.credentials.set(envName, value);
+      }
+      // Success path only: drop the matching queue entry (if any) so the dashboard
+      // stops showing this ad-hoc request. No-op if the queue dep is missing or
+      // the entry isn't present.
+      if (deps.credentialRequestQueue && credSessionId) {
+        deps.credentialRequestQueue.dequeue(credSessionId, envName);
       }
       sendJSON(res, { ok: true });
     } catch (err) {

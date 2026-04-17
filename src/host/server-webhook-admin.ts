@@ -75,11 +75,13 @@ export interface AdminSetupOpts {
   reconcileAgent?: (agentId: string, ref: string) => Promise<{ skills: number; events: number }>;
   /** Phase 5: default user ID for credentials with scope='user' when the request doesn't specify one. */
   defaultUserId?: string;
+  /** Phase 5 Task 5: in-memory queue of ad-hoc credential requests. */
+  credentialRequestQueue?: import('./credential-request-queue.js').CredentialRequestQueue;
 }
 
 export function setupAdminHandler(opts: AdminSetupOpts) {
-  const { config, providers, eventBus, agentRegistry, startTime, localDevMode, domainList, mcpManager, externalAuth, skillStateStore, reconcileAgent, defaultUserId } = opts;
+  const { config, providers, eventBus, agentRegistry, startTime, localDevMode, domainList, mcpManager, externalAuth, skillStateStore, reconcileAgent, defaultUserId, credentialRequestQueue } = opts;
   return config.admin?.enabled
-    ? createAdminHandler({ config, providers, eventBus, agentRegistry, startTime, localDevMode, domainList, mcpManager, externalAuth, skillStateStore, reconcileAgent, defaultUserId })
+    ? createAdminHandler({ config, providers, eventBus, agentRegistry, startTime, localDevMode, domainList, mcpManager, externalAuth, skillStateStore, reconcileAgent, defaultUserId, credentialRequestQueue })
     : null;
 }

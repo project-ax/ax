@@ -12,6 +12,11 @@ import { createEventBus } from '../../src/host/event-bus.js';
 import type { SetupRequest, SkillState } from '../../src/host/skills/types.js';
 import type { SkillStateStore } from '../../src/host/skills/state-store.js';
 import { ProxyDomainList } from '../../src/host/proxy-domain-list.js';
+import {
+  createCredentialRequestQueue,
+  type CredentialRequest,
+  type CredentialRequestQueue,
+} from '../../src/host/credential-request-queue.js';
 import { mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -73,6 +78,7 @@ interface MockDepsOpts {
   withReconcile?: boolean;
   withDomainList?: boolean;
   withCredentials?: boolean;
+  withCredentialRequestQueue?: boolean;
   defaultUserId?: string;
   reconcileImpl?: (agentId: string, ref: string) => Promise<{ skills: number; events: number }>;
   getSetupQueueImpl?: (agentId: string) => Promise<SetupRequest[]>;
@@ -152,6 +158,10 @@ async function mockDeps(opts: MockDepsOpts = {}): Promise<AdminDeps> {
 
   if (opts.defaultUserId !== undefined) {
     deps.defaultUserId = opts.defaultUserId;
+  }
+
+  if (opts.withCredentialRequestQueue) {
+    deps.credentialRequestQueue = createCredentialRequestQueue();
   }
 
   return deps;
@@ -922,5 +932,113 @@ describe('DELETE /admin/api/skills/setup/:agentId/:skillName', () => {
     const agentIdsWritten = putSetupQueue.mock.calls.map(c => c[0]);
     expect(agentIdsWritten).toEqual(['main']);
     expect(agentIdsWritten).not.toContain('other');
+  });
+});
+
+// ── GET /admin/api/credentials/requests (Phase 5 Task 5) ───────────────────
+
+function mkCredReq(overrides: Partial<CredentialRequest> = {}): CredentialRequest {
+  return {
+    sessionId: 'sess-1',
+    envName: 'LINEAR_TOKEN',
+    agentName: 'main',
+    userId: 'alice',
+    createdAt: 1_700_000_000_000,
+    ...overrides,
+  };
+}
+
+describe('GET /admin/api/credentials/requests', () => {
+  let server: Server;
+  let port: number;
+
+  beforeEach(() => {
+    _rateLimits.clear();
+  });
+
+  afterEach(() => {
+    server?.close();
+  });
+
+  it('returns empty when the queue has nothing', async () => {
+    const deps = await mockDeps({ withCredentialRequestQueue: true });
+    const handler = createAdminHandler(deps);
+    ({ server, port } = await startTestServer(handler));
+
+    const res = await fetchAdmin(port, '/admin/api/credentials/requests', { token: 'test-secret-token' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ requests: [] });
+  });
+
+  it('returns what is in the queue', async () => {
+    const deps = await mockDeps({ withCredentialRequestQueue: true });
+    const q = deps.credentialRequestQueue as CredentialRequestQueue;
+    const req1 = mkCredReq({ envName: 'A_TOKEN' });
+    const req2 = mkCredReq({ sessionId: 'sess-2', envName: 'B_TOKEN', userId: undefined });
+    q.enqueue(req1);
+    q.enqueue(req2);
+
+    const handler = createAdminHandler(deps);
+    ({ server, port } = await startTestServer(handler));
+
+    const res = await fetchAdmin(port, '/admin/api/credentials/requests', { token: 'test-secret-token' });
+    expect(res.status).toBe(200);
+    const body = res.body as { requests: CredentialRequest[] };
+    expect(body.requests).toHaveLength(2);
+    const envs = body.requests.map((r) => r.envName).sort();
+    expect(envs).toEqual(['A_TOKEN', 'B_TOKEN']);
+  });
+
+  it('soft-degrades to 200 { requests: [] } when credentialRequestQueue dep is missing', async () => {
+    const deps = await mockDeps(); // no withCredentialRequestQueue → dep is undefined
+    expect(deps.credentialRequestQueue).toBeUndefined();
+    const handler = createAdminHandler(deps);
+    ({ server, port } = await startTestServer(handler));
+
+    const res = await fetchAdmin(port, '/admin/api/credentials/requests', { token: 'test-secret-token' });
+    // Additive feature: absence isn't a 503.
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ requests: [] });
+  });
+});
+
+describe('POST /admin/api/credentials/provide dequeues the matching request', () => {
+  let server: Server;
+  let port: number;
+
+  beforeEach(() => {
+    _rateLimits.clear();
+  });
+
+  afterEach(() => {
+    server?.close();
+  });
+
+  it('removes the matching (sessionId + envName) entry after a successful provide', async () => {
+    const deps = await mockDeps({ withCredentialRequestQueue: true });
+    const q = deps.credentialRequestQueue as CredentialRequestQueue;
+    q.enqueue(mkCredReq({ sessionId: 'sess-X', envName: 'GITHUB_TOKEN' }));
+    q.enqueue(mkCredReq({ sessionId: 'sess-X', envName: 'OTHER_TOKEN' })); // different env — must remain
+
+    // Before: both entries present.
+    const before = q.snapshot();
+    expect(before).toHaveLength(2);
+    expect(before.some((r) => r.envName === 'GITHUB_TOKEN')).toBe(true);
+
+    const handler = createAdminHandler(deps);
+    ({ server, port } = await startTestServer(handler));
+
+    const res = await fetchAdmin(port, '/admin/api/credentials/provide', {
+      token: 'test-secret-token',
+      method: 'POST',
+      body: { envName: 'GITHUB_TOKEN', value: 'ghp_xxx', sessionId: 'sess-X' },
+    });
+    expect(res.status).toBe(200);
+
+    // After: the matching entry is gone, the unrelated one is still there.
+    const after = q.snapshot();
+    expect(after).toHaveLength(1);
+    expect(after[0].envName).toBe('OTHER_TOKEN');
+    expect(after.some((r) => r.envName === 'GITHUB_TOKEN')).toBe(false);
   });
 });

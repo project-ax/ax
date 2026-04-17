@@ -4,6 +4,14 @@ Git-native skills rollout: snapshot builder, state store, reconcile orchestrator
 
 ## Entries
 
+## [2026-04-17 09:50] — Phase 5 Task 5: credential request queue + GET endpoint
+
+**Task:** Add an in-memory queue for ad-hoc credential requests emitted by the `request_credential` agent tool, expose it via `GET /admin/api/credentials/requests`, and drain on `POST /admin/api/credentials/provide`. Purpose: a dashboard that connects after the `credential.required` SSE event fires still needs to see pending requests.
+**What I did:** Created `src/host/credential-request-queue.ts` — tiny `Map<"${sessionId}:${envName}", CredentialRequest>` with enqueue/dequeue/snapshot. Wired a subscriber in `initHostCore` (`src/host/server-init.ts`) that listens on the event bus for `type === 'credential.required'` and enqueues from `event.data` (the emitter in `src/host/ipc-handlers/skills.ts:273` ships `{ envName, sessionId, agentId, userId }` — no `agentName`, so I fall back `agentName || agentId || ''`). Added the queue to `HostCore`, threaded it through `AdminSetupOpts` + `AdminDeps`, wired `core.credentialRequestQueue` into the `setupAdminHandler` call in `server.ts`. New GET route soft-degrades to `{ requests: [] }` when the dep is absent (additive feature — not a 503). POST /provide dequeues on the SUCCESS path only, inside `if (deps.credentialRequestQueue && credSessionId)`. Unit tests in `tests/host/credential-request-queue.test.ts` (7 cases) plus HTTP tests in `tests/host/server-admin-skills.test.ts` (3 GET cases + 1 dequeue-on-provide case).
+**Files touched:** `src/host/credential-request-queue.ts` (new), `src/host/server-init.ts`, `src/host/server-admin.ts`, `src/host/server-webhook-admin.ts`, `src/host/server.ts`, `tests/host/credential-request-queue.test.ts` (new), `tests/host/server-admin-skills.test.ts`.
+**Outcome:** Success — `npx vitest run tests/host/credential-request-queue.test.ts tests/host/server-admin-skills.test.ts tests/host/server-admin.test.ts` = 72/72 pass (7 new queue unit + 4 new HTTP + 61 prior). `npx tsc --noEmit` clean.
+**Notes:** Queue is intentionally in-memory. Restart drops pending requests, which is fine — the agent re-requests on its next attempt. The `EventBus.subscribe` API is a single callback that receives ALL events (filter by `type` in-handler) — not a `.on('eventName', ...)` style emitter. The dequeue-on-provide guard (`if (credSessionId)`) matters because `sessionId` is optional in the provide body — unscoped stores still work but skip the dequeue.
+
 ## [2026-04-17 09:35] — Phase 5 Task 4: DELETE /admin/api/skills/setup/:agentId/:skillName (dismiss)
 
 **Task:** Phase 5 Task 4. Add a dashboard-only "Dismiss" endpoint that drops a card from the user's view without touching repo files or `skill_states`. Idempotent — dismissing a card that's not in the queue returns `removed: false`. If the skill is still pending on the next reconcile, the card reappears.
