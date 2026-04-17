@@ -3,6 +3,8 @@ import type {
   SkillState,
   SkillStateKind,
   ReconcilerCurrentState,
+  ReconcilerInput,
+  ReconcilerOutput,
   SetupRequest,
 } from './types.js';
 
@@ -165,4 +167,27 @@ export function computeEvents(
     }
   }
   return events;
+}
+
+export function reconcile(input: ReconcilerInput): ReconcilerOutput {
+  const { snapshot, current } = input;
+
+  const skills = computeSkillStates(snapshot, current);
+  const { mcpServers, conflicts } = computeMcpDesired(snapshot, skills);
+  const proxyAllowlist = computeProxyAllowlist(snapshot, skills);
+  const setupQueue = computeSetupQueue(snapshot, current);
+  const events = computeEvents(skills, current.priorSkillStates);
+
+  for (const c of conflicts) {
+    events.push({
+      type: 'skill.mcp_conflict',
+      data: c as unknown as Record<string, unknown>,
+    });
+  }
+  return {
+    skills,
+    desired: { mcpServers, proxyAllowlist },
+    setupQueue,
+    events,
+  };
 }
