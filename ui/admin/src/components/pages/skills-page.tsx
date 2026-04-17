@@ -95,25 +95,12 @@ function SetupCardView({ agentId, card, onChange }: SetupCardViewProps) {
       }, 1500);
     } catch (err) {
       setSubmitting(false);
-      const msg = err instanceof Error ? err.message : String(err);
-      // apiFetch already extracts error.message from the JSON body, so msg is the
-      // server message. Details are lost through that path — surface the raw msg.
-      setError(msg);
-      // Try to parse structured details from the message if the server sent JSON
-      // with a details field. apiFetch's error path flattens to a string so this
-      // is best-effort; we just show the bare error otherwise.
-      try {
-        const parsed = JSON.parse(msg);
-        if (parsed?.details) {
-          setErrorDetails(
-            typeof parsed.details === 'string'
-              ? parsed.details
-              : JSON.stringify(parsed.details)
-          );
-        }
-      } catch {
-        // Not JSON — fine.
-      }
+      // apiFetch hoists the server's `details` string (when present) onto the
+      // thrown Error. Approve errors like credential mismatch or OAuth
+      // rejection carry a details string; other endpoints leave it undefined.
+      const e = err as Error & { details?: string };
+      setError(e instanceof Error ? e.message : String(err));
+      setErrorDetails(e.details ?? null);
     }
   }, [agentId, card, apiKeyCreds, credentialValues, domainChecks, onChange]);
 

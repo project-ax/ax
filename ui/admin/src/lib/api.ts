@@ -69,15 +69,24 @@ export async function apiFetch<T>(
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    // Try to extract a human-readable message from the error JSON
+    // Try to extract a human-readable message from the error JSON. If the
+    // envelope also carries a `details` string (approve endpoints surface
+    // things like the exact unexpected credential name there), hoist it
+    // onto the thrown Error so callers can render it.
     let message = res.statusText;
+    let details: string | undefined;
     try {
       const parsed = JSON.parse(body);
       message = parsed?.error?.message ?? parsed?.error ?? message;
+      if (typeof parsed?.details === 'string') {
+        details = parsed.details;
+      }
     } catch {
       if (body) message = body;
     }
-    throw new Error(message);
+    const err = new Error(message) as Error & { details?: string };
+    if (details) err.details = details;
+    throw err;
   }
 
   return res.json() as Promise<T>;

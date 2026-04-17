@@ -5,6 +5,7 @@ import {
   mockCredentialRequests,
   MOCK_SKILL_SETUP,
   MOCK_CREDENTIAL_REQUESTS,
+  MOCK_TOKEN,
 } from './fixtures';
 
 test.describe('Skills Page', () => {
@@ -19,7 +20,10 @@ test.describe('Skills Page', () => {
     // gotoAuthenticated, so the hooks fetch the empty response.
     await mockSkillsSetup(page, { agents: [] });
     await mockCredentialRequests(page, { requests: [] });
-    await page.reload();
+    // The app strips ?page= from history on boot (so reloads don't pin the
+    // page). Re-navigate with the param so the reloaded state still renders
+    // the Skills page and picks up the empty-response overrides above.
+    await page.goto(`/admin/?page=skills&token=${MOCK_TOKEN}`);
 
     await expect(page.getByRole('heading', { name: 'Skills', exact: true })).toBeVisible();
     await expect(page.getByText(/All your skills are set up/i)).toBeVisible();
@@ -94,6 +98,39 @@ test.describe('Skills Page', () => {
       credentials: [{ envName: 'LINEAR_TOKEN', value: 'secret-token-value' }],
       approveDomains: ['api.linear.app'],
     });
+  });
+
+  test('approve surfaces both error and details when the server rejects', async ({ page }) => {
+    await page.route('**/admin/api/skills/setup/approve', (route) => {
+      const req = route.request();
+      if (req.method() !== 'POST') return route.fallback();
+      return route.fulfill({
+        status: 400,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: { message: 'Request does not match pending setup' },
+          details: 'Unexpected credential: EVIL_KEY',
+        }),
+      });
+    });
+
+    await gotoAuthenticated(page, '/admin/?page=skills');
+
+    // Fill the linear token so the Approve button is enabled
+    const tokenInput = page.locator('#cred-agent-001-abcdef123456-linear-tracker-LINEAR_TOKEN');
+    await tokenInput.fill('secret-token-value');
+
+    await page
+      .locator('[data-testid="setup-card-linear-tracker"]')
+      .getByRole('button', { name: /approve & enable/i })
+      .click();
+
+    // Both strings render — the message from `error.message` and the
+    // structured `details` string from the envelope.
+    await expect(
+      page.getByText('Request does not match pending setup')
+    ).toBeVisible();
+    await expect(page.getByText('Unexpected credential: EVIL_KEY')).toBeVisible();
   });
 
   test('dismiss uses confirm-click pattern and calls DELETE', async ({ page }) => {

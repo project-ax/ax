@@ -35,7 +35,8 @@ const VALID_PAGES: Page[] = [
 
 /**
  * If the URL has ?page=<name>, return it as the initial page.
- * Strips the param afterwards so reloads don't pin the page forever.
+ * Returns 'overview' if absent. The param itself is stripped from history
+ * inside checkAuth() so reloads land on the default page.
  * Lets Playwright (and anyone else) drive to a page without a sidebar entry.
  */
 function readInitialPage(): Page {
@@ -95,8 +96,12 @@ export default function App() {
       const urlToken = params.get('token');
       if (urlToken) {
         setToken(urlToken);
-        // Strip token from URL to avoid leaking it in browser history
+      }
+      // Strip `token` (leaks into history) and `page` (pins reloads to the
+      // param'd page forever) in one history replacement.
+      if (params.has('token') || params.has('page')) {
         params.delete('token');
+        params.delete('page');
         const clean = params.toString();
         const newUrl = window.location.pathname + (clean ? `?${clean}` : '') + window.location.hash;
         window.history.replaceState({}, '', newUrl);
