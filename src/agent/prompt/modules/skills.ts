@@ -55,7 +55,9 @@ export class SkillsModule extends BasePromptModule {
         if (s.warnings?.length) {
           prefix = `${prefix}(missing: ${s.warnings.join(', ')}) `;
         }
-        lines.push(`- **${s.name}** — ${prefix}${s.description}`);
+        const desc = s.description ?? '';
+        const tail = prefix || desc ? ` — ${prefix}${desc}`.trimEnd() : '';
+        lines.push(`- **${s.name}**${tail}`);
       }
       lines.push('', 'To use a skill, read `.ax/skills/<name>/SKILL.md` and follow its instructions.');
     } else {
@@ -71,8 +73,8 @@ export class SkillsModule extends BasePromptModule {
         '',
         '### Creating Skills',
         '',
-        'Use the `skill` tool with `type: "create"` to author a new skill.',
-        'Skills are saved to `/workspace/skills/`.',
+        'Skills are git-native: write `SKILL.md` to `.ax/skills/<name>/SKILL.md` using your file-edit tools, then commit and push.',
+        'The host reconciler picks up the push and enables the skill once any required credentials and domain approvals are in place.',
       );
     }
 

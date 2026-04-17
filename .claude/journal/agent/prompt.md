@@ -2,6 +2,27 @@
 
 Prompt builder, identity module, bootstrap prompt fixes, delegation module, prompt optimizations.
 
+## [2026-04-17 06:45] — Phase 3 PR #178 review fixes: SkillsModule render + git-native Creating Skills
+
+**Task:** Address two CodeRabbit review comments on PR #178 and the sandbox-isolation test that broke when we added `skills?:` to `AgentConfig`.
+**What I did:**
+1. Guard `s.description` in `SkillsModule.render` — legacy/invalid rows can arrive without a description. Output now drops the trailing em dash cleanly when both prefix and description are empty, so no more `— undefined` leaking into the prompt.
+2. Rewrote the "Creating Skills" section copy to the git-native flow: "write `SKILL.md` to `.ax/skills/<name>/SKILL.md` using your file-edit tools, then commit and push" (reconciler takes over). Replaces the legacy `skill({type:'create'}) → /workspace/skills/` guidance.
+3. Tightened the brittle `tests/sandbox-isolation.test.ts::StdinPayload does not include skills field` check so it scans only the `StdinPayload` interface body (not the whole file) — AgentConfig legitimately carries `skills?:` as the host-supplied index.
+4. Added `SkillsModule` test case for the undefined-description path (asserts no `undefined`, no trailing em dash, no extra whitespace).
+5. Updated `tests/agent/tool-catalog-sync.test.ts::skill creation instructions` to assert the new `.ax/skills/` + commit-and-push copy and that `/workspace/skills/` is gone.
+6. Updated `tests/agent/prompt/modules/skills.test.ts::includes skill creation instructions` similarly.
+
+**Files touched:**
+- src/agent/prompt/modules/skills.ts
+- tests/agent/prompt/modules/skills.test.ts
+- tests/agent/tool-catalog-sync.test.ts
+- tests/sandbox-isolation.test.ts
+- .claude/journal/agent/prompt.md
+
+**Outcome:** Success — 632/632 affected tests pass, `npm run build` clean.
+**Notes:** The `workspace/skills/` path referenced the pre-git-native `skill_create` IPC (still lives in `src/host/ipc-handlers/skills.ts` until phase 7 cleanup). Not deleting that handler in this PR — just fixing the prompt so the agent's default authoring flow is git-native.
+
 ## [2026-04-17 06:26] — Phase 3 Task 7: runner fetches skills_index before prompt build
 
 **Task:** Git-native skills phase 3 Task 7 — wire the runner to fetch `skills_index` via IPC before building the system prompt, so the host-authoritative skill list (with `kind`, `pendingReasons`) wins over the workspace filesystem scan.

@@ -174,16 +174,38 @@ describe('SkillsModule', () => {
     expect(text).toMatch(/- \*\*foo\*\* — \(setup pending\) foo skill/);
   });
 
+  test('omits dash + description cleanly when description is missing', () => {
+    const mod = new SkillsModule();
+    // description is typed as required on SkillSummary but host-supplied rows
+    // can have it absent when the reconciler stores an invalid frontmatter
+    // row with no description. Cast through unknown to simulate the wire.
+    const ctx = makeContext({
+      skills: [
+        { name: 'bare-enabled' } as unknown as import('../../../../src/agent/prompt/types.js').SkillSummary,
+        { name: 'bare-invalid', kind: 'invalid' } as unknown as import('../../../../src/agent/prompt/types.js').SkillSummary,
+      ],
+    });
+    const text = mod.render(ctx).join('\n');
+    expect(text).not.toContain('undefined');
+    // Enabled with no description → just the name bullet, no trailing em dash.
+    expect(text).toMatch(/^- \*\*bare-enabled\*\*$/m);
+    // Invalid with no description → kind prefix but no trailing whitespace.
+    expect(text).toMatch(/^- \*\*bare-invalid\*\* — \(invalid\)$/m);
+  });
+
   test('priority is 70', () => {
     const mod = new SkillsModule();
     expect(mod.priority).toBe(70);
   });
 
-  test('includes skill creation instructions when workspace available', () => {
+  test('includes skill creation instructions pointing to .ax/skills/ when workspace available', () => {
     const mod = new SkillsModule();
     const ctx = makeContext({ skills: [makeSkill('Test Skill', 'Do stuff')], hasWorkspace: true });
     const rendered = mod.render(ctx).join('\n');
-    expect(rendered).toContain('/workspace/skills/');
+    expect(rendered).toContain('.ax/skills/<name>/SKILL.md');
+    expect(rendered).toContain('commit and push');
+    expect(rendered).not.toContain('/workspace/skills/');
+    expect(rendered).not.toContain('type: "create"');
   });
 
   test('omits skill creation when no workspace', () => {
@@ -191,13 +213,6 @@ describe('SkillsModule', () => {
     const ctx = makeContext({ skills: [makeSkill('Test Skill', 'Do stuff')] });
     const rendered = mod.render(ctx).join('\n');
     expect(rendered).not.toContain('Creating Skills');
-  });
-
-  test('includes skill creation guidance when workspace available', () => {
-    const mod = new SkillsModule();
-    const ctx = makeContext({ skills: [makeSkill('Test Skill', 'Do stuff')], hasWorkspace: true });
-    const rendered = mod.render(ctx).join('\n');
-    expect(rendered).toContain('type: "create"');
   });
 
   test('includes creating skills section when workspace available', () => {

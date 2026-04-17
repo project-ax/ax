@@ -116,10 +116,12 @@ describe('tool-catalog <-> system prompt sync', () => {
       hasWorkspace: true,
     });
     const rendered = mod.render(ctx).join('\n');
-    // Should reference the git-native skill read path (SKILL.md under .ax/skills/).
+    // Git-native skills: reader uses .ax/skills/<name>/SKILL.md for both loading
+    // existing skills and authoring new ones. The `/workspace/skills/` legacy
+    // path is gone — the agent writes SKILL.md files and commits them.
     expect(rendered, 'skill read path missing from SkillsModule system prompt').toContain('.ax/skills/<name>/SKILL.md');
-    // Creating Skills section surfaces the filesystem path used when authoring new skills.
-    expect(rendered, 'skill creation path missing from SkillsModule system prompt').toContain('/workspace/skills/');
+    expect(rendered, 'creating skills section missing from SkillsModule system prompt').toContain('Creating Skills');
+    expect(rendered, 'creating skills should reference commit-and-push flow').toContain('commit and push');
   });
 
   test('delegate tool is documented in DelegationModule', () => {
