@@ -28,6 +28,8 @@ import { callToolOnServer } from '../plugins/mcp-client.js';
 import { reloadPluginMcpServers, loadDatabaseMcpServers } from '../plugins/startup.js';
 import type { AdminContext } from './server-admin-helpers.js';
 import type { SkillStateStore } from './skills/state-store.js';
+import type { McpApplier } from './skills/mcp-applier.js';
+import type { ProxyApplier } from './skills/proxy-applier.js';
 
 const logger = getLogger();
 
@@ -73,6 +75,13 @@ export interface HostCore {
    *  (skills_index action) and server.ts's reconcile-hook wiring.
    *  Undefined when no database provider is available. */
   stateStore?: SkillStateStore;
+  /** Phase 4: live MCP registration applier. Constructed only when the
+   *  state store is available — shared between the reconcile hook and
+   *  startup rehydration. */
+  mcpApplier?: McpApplier;
+  /** Phase 4: live proxy-allowlist applier. Constructed only when the
+   *  state store is available — shared with startup rehydration. */
+  proxyApplier?: ProxyApplier;
 }
 
 /**
@@ -213,6 +222,18 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     );
     if (migResult.error) throw migResult.error;
     stateStore = createSkillStateStore(providers.database.db);
+  }
+
+  // Phase 4: construct live-state appliers when the state store is available.
+  // These are shared between the reconcile-hook wiring (server.ts) and the
+  // startup-rehydrate pass so both paths push the same live-state contract.
+  let mcpApplier: McpApplier | undefined;
+  let proxyApplier: ProxyApplier | undefined;
+  if (stateStore) {
+    const { createMcpApplier } = await import('./skills/mcp-applier.js');
+    const { createProxyApplier } = await import('./skills/proxy-applier.js');
+    mcpApplier = createMcpApplier({ mcpManager, audit: providers.audit });
+    proxyApplier = createProxyApplier({ proxyDomainList: domainList, audit: providers.audit });
   }
 
   // ── CompletionDeps ──
@@ -390,5 +411,7 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     modelId,
     mcpManager,
     stateStore,
+    mcpApplier,
+    proxyApplier,
   };
 }

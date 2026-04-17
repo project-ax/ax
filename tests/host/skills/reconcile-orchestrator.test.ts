@@ -6,7 +6,7 @@
 //   - real state-store (createSkillStateStore) on in-memory sqlite
 //   - stubs only at the provider boundary: ProxyDomainList, CredentialProvider,
 //     McpManager, EventBus.
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -366,5 +366,198 @@ describe('reconcileAgent', () => {
     expect(types2).toContain('skill.removed');
     expect(types2).toContain('skill.installed');
     expect(types2).toContain('skill.pending');
+  });
+
+  it('invokes mcpApplier + proxyApplier with desired output after DB write', async () => {
+    // Seed a skill that will end up ENABLED (credential + domain are met)
+    seedRepo(bareRepoPath, {
+      '.ax/skills/linear/SKILL.md': `---
+name: linear
+description: Talk to Linear.
+credentials:
+  - envName: LINEAR_TOKEN
+    scope: user
+domains:
+  - api.linear.app
+mcpServers:
+  - name: linear-mcp
+    url: https://mcp.linear.app
+    credential: LINEAR_TOKEN
+---
+# body
+`,
+    });
+
+    const stateStore = createSkillStateStore(dbHandle.db);
+    const proxyDomainList = {
+      getAllowedDomains: () => new Set<string>(['api.linear.app']),
+    } as unknown as ProxyDomainList;
+    const credentials = stubCredentials({
+      byPrefix: { 'user:foo-agent:': [{ scope: 'user:foo-agent:alice', envName: 'LINEAR_TOKEN' }] },
+    });
+    const { bus } = recordingEventBus();
+
+    const mcpCalls: Array<{ id: string; entries: Array<[string, { url: string; bearerCredential?: string }]> }> = [];
+    const proxyCalls: Array<{ id: string; domains: string[] }> = [];
+    const deps: OrchestratorDeps = {
+      agentName: 'foo-agent',
+      proxyDomainList,
+      credentials,
+      stateStore,
+      eventBus: bus,
+      getBareRepoPath: () => bareRepoPath,
+      mcpApplier: {
+        apply: async (id, m) => {
+          mcpCalls.push({ id, entries: [...m] });
+          return { registered: [], unregistered: [], conflicts: [] };
+        },
+      },
+      proxyApplier: {
+        apply: async (id, s) => {
+          proxyCalls.push({ id, domains: [...s] });
+          return { added: [], removed: [] };
+        },
+      },
+    };
+
+    await reconcileAgent('agent-1', 'refs/heads/main', deps);
+
+    expect(mcpCalls).toHaveLength(1);
+    expect(mcpCalls[0].id).toBe('agent-1');
+    expect(mcpCalls[0].entries).toEqual([
+      ['linear-mcp', { url: 'https://mcp.linear.app', bearerCredential: 'LINEAR_TOKEN' }],
+    ]);
+    expect(proxyCalls).toEqual([{ id: 'agent-1', domains: ['api.linear.app'] }]);
+  });
+
+  it('emits audit/report events reflecting applier results', async () => {
+    seedRepo(bareRepoPath, { '.ax/skills/linear/SKILL.md': LINEAR_SKILL });
+    const stateStore = createSkillStateStore(dbHandle.db);
+    const proxyDomainList = {
+      getAllowedDomains: () => new Set<string>(['api.linear.app']),
+    } as unknown as ProxyDomainList;
+    const credentials = stubCredentials({
+      byPrefix: { 'user:foo-agent:': [{ scope: 'user:foo-agent:alice', envName: 'LINEAR_TOKEN' }] },
+    });
+    const { bus, events } = recordingEventBus();
+
+    const deps: OrchestratorDeps = {
+      agentName: 'foo-agent',
+      proxyDomainList,
+      credentials,
+      stateStore,
+      eventBus: bus,
+      getBareRepoPath: () => bareRepoPath,
+      mcpApplier: {
+        apply: async () => ({
+          registered: [{ name: 'linear-mcp', url: 'https://mcp.linear.app' }],
+          unregistered: [],
+          conflicts: [],
+        }),
+      },
+      proxyApplier: {
+        apply: async () => ({ added: ['api.linear.app'], removed: [] }),
+      },
+    };
+
+    await reconcileAgent('agent-1', 'refs/heads/main', deps);
+
+    const types = events.map((e) => e.type);
+    expect(types).toContain('skills.live_state_applied');
+  });
+
+  it('does not emit skills.live_state_applied when both appliers throw', async () => {
+    seedRepo(bareRepoPath, { '.ax/skills/linear/SKILL.md': LINEAR_SKILL });
+    const stateStore = createSkillStateStore(dbHandle.db);
+    const proxyDomainList = {
+      getAllowedDomains: () => new Set<string>(['api.linear.app']),
+    } as unknown as ProxyDomainList;
+    const credentials = stubCredentials({
+      byPrefix: { 'user:foo-agent:': [{ scope: 'user:foo-agent:alice', envName: 'LINEAR_TOKEN' }] },
+    });
+    const { bus, events } = recordingEventBus();
+
+    const deps: OrchestratorDeps = {
+      agentName: 'foo-agent',
+      proxyDomainList,
+      credentials,
+      stateStore,
+      eventBus: bus,
+      getBareRepoPath: () => bareRepoPath,
+      mcpApplier: {
+        apply: async () => { throw new Error('mcp boom'); },
+      },
+      proxyApplier: {
+        apply: async () => { throw new Error('proxy boom'); },
+      },
+    };
+
+    await reconcileAgent('agent-1', 'refs/heads/main', deps);
+
+    const types = events.map((e) => e.type);
+    expect(types).not.toContain('skills.live_state_applied');
+  });
+
+  it('emits skills.live_state_applied when only one applier succeeds', async () => {
+    seedRepo(bareRepoPath, { '.ax/skills/linear/SKILL.md': LINEAR_SKILL });
+    const stateStore = createSkillStateStore(dbHandle.db);
+    const proxyDomainList = {
+      getAllowedDomains: () => new Set<string>(['api.linear.app']),
+    } as unknown as ProxyDomainList;
+    const credentials = stubCredentials({
+      byPrefix: { 'user:foo-agent:': [{ scope: 'user:foo-agent:alice', envName: 'LINEAR_TOKEN' }] },
+    });
+    const { bus, events } = recordingEventBus();
+
+    const deps: OrchestratorDeps = {
+      agentName: 'foo-agent',
+      proxyDomainList,
+      credentials,
+      stateStore,
+      eventBus: bus,
+      getBareRepoPath: () => bareRepoPath,
+      mcpApplier: {
+        apply: async () => { throw new Error('mcp boom'); },
+      },
+      proxyApplier: {
+        apply: async () => ({ added: ['api.linear.app'], removed: [] }),
+      },
+    };
+
+    await reconcileAgent('agent-1', 'refs/heads/main', deps);
+
+    const applied = events.find((e) => e.type === 'skills.live_state_applied');
+    expect(applied).toBeDefined();
+    expect(applied?.data).toEqual({
+      mcp: undefined,
+      proxy: { added: ['api.linear.app'], removed: [] },
+    });
+  });
+
+  it('skips appliers if orchestrator catches an error before DB write', async () => {
+    // Force snapshot failure; appliers must NOT be called.
+    const stateStore = createSkillStateStore(dbHandle.db);
+    const proxyDomainList = {
+      getAllowedDomains: () => new Set<string>(),
+    } as unknown as ProxyDomainList;
+    const { bus } = recordingEventBus();
+    const mcpApply = vi.fn().mockResolvedValue({ registered: [], unregistered: [], conflicts: [] });
+    const proxyApply = vi.fn().mockResolvedValue({ added: [], removed: [] });
+
+    const deps: OrchestratorDeps = {
+      agentName: 'foo-agent',
+      proxyDomainList,
+      credentials: stubCredentials({}),
+      stateStore,
+      eventBus: bus,
+      getBareRepoPath: () => '/nonexistent/path',
+      mcpApplier: { apply: mcpApply },
+      proxyApplier: { apply: proxyApply },
+    };
+
+    await reconcileAgent('agent-1', 'refs/heads/main', deps);
+
+    expect(mcpApply).not.toHaveBeenCalled();
+    expect(proxyApply).not.toHaveBeenCalled();
   });
 });
