@@ -2,6 +2,14 @@
 
 Skills import pipeline, screener, manifest generator, ClawHub client, architecture comparison, install orchestration.
 
+## [2026-04-17 05:53] — Phase 3 Task 1: SkillStateStore.getStates
+
+**Task:** Phase 3 Task 1 of git-native skills rollout — add `getStates(agentId): Promise<SkillState[]>` to `SkillStateStore`. Phase 3's `skills_index` IPC action needs the full persisted rows (name, kind, description, pendingReasons, error), not just the `Map<name, kind>` that `getPriorStates` returns. TDD order: failing tests, implement, passing tests.
+**What I did:** Added `getStates` to the `SkillStateStore` interface (placed next to `getPriorStates` for discoverability) and implemented it on the concrete store. Selects the five relevant columns from `skill_states`, filters by `agent_id`, orders by `skill_name asc`, then maps each row to a `SkillState` — only attaches `description` / `pendingReasons` / `error` when the column is a non-null non-empty string (and the parsed JSON array is non-empty for pending_reasons). Cast the row shape locally so we don't depend on a shared schema type. Tests cover the three required cases: empty agent, round-trip of enabled/pending/invalid preserving optional-field omission, and per-agent scoping.
+**Files touched:** `src/host/skills/state-store.ts` (interface + impl), `tests/host/skills/state-store.test.ts` (+3 tests in a new `describe('getStates')` block)
+**Outcome:** Success — 16/16 tests in `state-store.test.ts` pass, `npm run build` clean.
+**Notes:** Using `expect(row).not.toHaveProperty('pendingReasons')` (vs `toBeUndefined()`) catches the difference between `{pendingReasons: undefined}` and simply not having the key at all — important here because prompt builder code may use `'x' in row` style checks. Kept the row type cast local to this method (same style as `getPriorStates`) rather than introducing a shared `SkillStatesRow` type — premature abstraction for two call sites.
+
 ## [2026-04-17 05:15] — PR #176 review-comment fixes: hostname validation, MCP self-conflict dedup, clean event payload
 
 **Task:** Address actionable CodeRabbit comments on phase-1 PR #176 (`design/git-native-skills`) that apply to phase-1 files only (phase-2 file comments deferred to PR #177 branch). Three concrete issues: (1) `domains` accepted arbitrary strings via `z.string().min(1).max(253)` — anything flowing into `approvedDomains.has` / proxy allowlist needed real hostname validation; (2) `McpServerSchema` didn't enforce `mcpServers[].name` uniqueness, so a single skill declaring two entries with the same name hit `computeMcpDesired`'s `existing` branch and emitted a self-conflict event with `skillName` on both sides; (3) transition events for enabled skills carried `{reasons: undefined, error: undefined}` that structured consumers would treat as meaningful-but-empty.
