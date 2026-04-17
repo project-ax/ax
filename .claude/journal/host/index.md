@@ -4,6 +4,8 @@ Host process work: server, router, IPC handlers, event console, event bus, deleg
 
 ## Entries
 
+- 2026-04-16 23:30 — Phase 2 Task 3: current-state loader aggregates approvals, credentials (both scopes via `listScopePrefix`), mcp, prior states [skills.md](skills.md)
+- 2026-04-16 23:18 — Phase 2 Task 2: skill state store + migration (per-agent authoritative replace for states + setup queue) [skills.md](skills.md)
 - 2026-04-16 23:12 — Phase 2 Task 1: snapshot builder walks `.ax/skills/**/SKILL.md` from bare repo ref [skills.md](skills.md)
 - 2026-04-15 12:15 — Git-based identity system: Tasks 1-4 (validate-commit, loadIdentityFromGit, hostGitCommit integration, validate_commit IPC) [git-identity.md](git-identity.md)
 

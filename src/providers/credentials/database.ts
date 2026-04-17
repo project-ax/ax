@@ -101,5 +101,18 @@ export async function create(
         .execute();
       return rows.map(r => r.env_name as string);
     },
+
+    async listScopePrefix(prefix: string): Promise<Array<{ scope: string; envName: string }>> {
+      // Reject callers that sneak in LIKE wildcards — scopes we generate never
+      // contain `%` or `_`, so this is a bug-or-attack signal.
+      if (/[%_\\]/.test(prefix)) {
+        throw new Error(`listScopePrefix: prefix contains LIKE metacharacters: ${prefix}`);
+      }
+      const rows = await db.selectFrom('credential_store')
+        .select(['scope', 'env_name'])
+        .where('scope', 'like', `${prefix}%`)
+        .execute();
+      return rows.map(r => ({ scope: r.scope as string, envName: r.env_name as string }));
+    },
   };
 }
