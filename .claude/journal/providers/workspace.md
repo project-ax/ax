@@ -1,5 +1,13 @@
 # Workspace Provider Journal
 
+## [2026-04-17 00:00] — Git-native skills Phase 2 Task 7: post-receive hook installer
+
+**Task:** Create a reusable, idempotent installer that drops a post-receive hook into a bare git repo with the right permissions and substitutes the agent ID into the template.
+**What I did:** Wrote tests first (fresh install, idempotent overwrite, mode bits, content sanity). Started with the file-based approach (co-located `hooks/post-receive.sh` loaded via `readFileSync` + `import.meta.url`). Confirmed tests pass and build succeeds, but `tsc` does not copy `.sh` files into `dist/`, so the dist-time load would fail. Per task guidance, switched to inlining the template as a TS template literal and deleted the separate `.sh` file to avoid drift. Added explicit `chmodSync(hookPath, 0o755)` after `writeFileSync` so the exec bit is set on both create and overwrite.
+**Files touched:** src/providers/workspace/install-hook.ts (new), tests/providers/workspace/install-hook.test.ts (new)
+**Outcome:** Success — 7 workspace tests pass (3 new + 4 pre-existing), `npm run build` clean, `sh -n` confirms the generated script has valid POSIX syntax.
+**Notes:** Used `safePath(bareRepoPath, 'hooks', 'post-receive')` for the hook target. Pre-existing server-history/server-multimodal/server.test.ts failures on `design/git-native-skills` are unrelated (verified they fail on base without my changes). The `__AGENT_ID__` placeholder is replaced via `replaceAll`. Escaped all shell `$` sequences inside the TS template literal.
+
 ## [2026-04-16 10:00] — Document `created` flag limitation in git-http workspace
 
 **Task:** Fix two documentation issues: (1) git-http.ts 409 branch doesn't note that `created=false` can be wrong after a timed-out creation, (2) workspace/types.ts over-promises that creation always succeeds.
