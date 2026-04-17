@@ -17,13 +17,14 @@ import { safePath } from '../../utils/safe-path.js';
  *   - If `AX_HOOK_SECRET` is unset in the hook's env, it exits cleanly — push
  *     still succeeds. This is deliberate for dev environments.
  *   - `|| true` on curl ensures a network error does not block the push.
- *   - `xxd -p -c 256` converts binary HMAC to hex; widely available on
- *     Linux/macOS. Alpine containers may need `busybox-extras` installed or
- *     the line rewritten to use `od -An -tx1 | tr -d ' \n'`.
+ *   - HMAC hex encoding uses `od -An -tx1 | tr -d ' \n'` (not `xxd`) — busybox
+ *     ships `od` but not always `xxd`, so this keeps the hook portable to the
+ *     Alpine-based git-http container. The container-side installer
+ *     (container/git-server/install-hook.js) MUST use the identical template.
  */
 const TEMPLATE = `#!/bin/sh
 # AX skills reconciliation hook — installed by the host.
-# Reads refs from stdin (per git hook spec) and POSTs to the host.
+# Kept in sync with container/git-server/install-hook.js.
 set -eu
 
 AGENT_ID="__AGENT_ID__"
@@ -45,8 +46,8 @@ while read -r oldSha newSha ref; do
   body=\$(printf '{"agentId":"%s","ref":"%s","oldSha":"%s","newSha":"%s"}' \\
     "\$AGENT_ID" "\$ref" "\$oldSha" "\$newSha")
 
-  # Compute HMAC-SHA256 hex using openssl.
-  sig="sha256=\$(printf '%s' "\$body" | openssl dgst -sha256 -hmac "\$AX_HOOK_SECRET" -binary | xxd -p -c 256)"
+  # Compute HMAC-SHA256 hex using openssl + busybox-compatible od.
+  sig="sha256=\$(printf '%s' "\$body" | openssl dgst -sha256 -hmac "\$AX_HOOK_SECRET" -binary | od -An -tx1 | tr -d ' \\n')"
 
   # Best-effort. Failure of the hook MUST NOT block the push.
   curl -fsS -m 10 \\

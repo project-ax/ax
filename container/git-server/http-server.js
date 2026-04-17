@@ -8,6 +8,8 @@ const os = require('os');
 
 const crypto = require('crypto');
 
+const { installPostReceiveHook } = require('./install-hook.js');
+
 const PORT = process.env.PORT || 8000;
 const GIT_REPOS_PATH = process.env.GIT_REPOS_PATH || '/var/git/repos';
 const LFS_OBJECTS_PATH = process.env.LFS_OBJECTS_PATH || '/var/git/lfs-objects';
@@ -272,6 +274,18 @@ const server = http.createServer((req, res) => {
 
             // Clean up temp directory
             try { fs.rmSync(tmpDir, { recursive: true }); } catch (e) { /* best-effort */ }
+
+            // Install post-receive hook for skills reconciliation.
+            // Must succeed — if we return 201 without a hook, the agent
+            // will push changes that never trigger reconcile. Fail hard.
+            try {
+              installPostReceiveHook(repoPath, repoName);
+            } catch (hookErr) {
+              console.error(`[ERROR] Failed to install post-receive hook: ${hookErr.message}`);
+              res.writeHead(500, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Failed to install hook', details: hookErr.message }));
+              return;
+            }
 
             // Now respond - the repo has the initial commit and is ready for cloning
             res.writeHead(201, { 'Content-Type': 'application/json' });

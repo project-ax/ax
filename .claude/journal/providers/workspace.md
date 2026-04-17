@@ -1,5 +1,13 @@
 # Workspace Provider Journal
 
+## [2026-04-17 00:15] — Git-native skills Phase 2 Task 9: git-http installs post-receive hook + unify template with host
+
+**Task:** Make the git-http server install the same post-receive reconcile hook into each bare repo it creates, producing byte-identical hook content to the host-side `src/providers/workspace/install-hook.ts`. Also swap the host template from `xxd` to busybox-compatible `od -An -tx1 | tr -d ' \n'` so both paths work under Alpine.
+**What I did:** TDD. Wrote 5 failing tests in new `tests/container/git-server/install-hook.test.ts` (fresh install, idempotent overwrite, required shell snippets, busybox-od not xxd, byte-identical to host template). Extracted the container-side template + installer to `container/git-server/install-hook.js` (CommonJS). Added `container/git-server/package.json` with `"type": "commonjs"` so vitest (repo is type:module) requires it cleanly AND the container still runs it unchanged. Updated `http-server.js` to require the module and call `installPostReceiveHook(repoPath, repoName)` synchronously after the initial push succeeds and before the 201 — hook install failures return 500. Swapped `xxd -p -c 256` → `od -An -tx1 | tr -d ' \n'` in `src/providers/workspace/install-hook.ts` and synchronized the comment header so both templates emit byte-identical content. Added `openssl` + `curl` to the Alpine Dockerfile (they were missing; the hook needs both at runtime) and a `COPY install-hook.js` line.
+**Files touched:** container/git-server/install-hook.js (new), container/git-server/package.json (new), container/git-server/http-server.js, container/git-server/Dockerfile, src/providers/workspace/install-hook.ts, tests/container/git-server/install-hook.test.ts (new)
+**Outcome:** Success — 5/5 container tests pass, 3/3 host install-hook tests pass (unchanged, xxd→od swap didn't break any assertion), `npm run build` clean. Pre-existing failures in server-history / server-multimodal / server.test.ts verified unrelated (same 25 fail on base with my changes stashed).
+**Notes:** The byte-identical test actually materializes both hooks into tmp dirs and compares file contents — cheap and catches drift. Helm deployment env wiring (AX_HOST_URL, AX_HOOK_SECRET on the git-server deployment) is deferred to Phase 4 rehydration per task instructions. Without those env vars the hook is a no-op (`exit 0` when AX_HOOK_SECRET unset), so pushes continue to succeed in the interim.
+
 ## [2026-04-17 00:30] — Git-native skills Phase 2 Task 8: wire git-local to install hook
 
 **Task:** Wire the git-local workspace provider so every `getRepoUrl()` installs the post-receive hook into the bare repo (backfills pre-existing repos too).
