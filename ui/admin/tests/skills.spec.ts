@@ -3,7 +3,9 @@ import {
   gotoAuthenticated,
   mockSkillsSetup,
   mockCredentialRequests,
+  mockSkillsSetupWithOAuth,
   MOCK_SKILL_SETUP,
+  MOCK_SKILL_SETUP_WITH_OAUTH,
   MOCK_CREDENTIAL_REQUESTS,
   MOCK_TOKEN,
 } from './fixtures';
@@ -175,10 +177,204 @@ test.describe('Skills Page', () => {
     await gotoAuthenticated(page, '/admin/?page=skills');
 
     const gcalCard = page.locator('[data-testid="setup-card-gcal-helper"]');
-    await expect(gcalCard.getByText(/OAuth flow/i)).toBeVisible();
+    // Phase 6 replaces the stub with a real Connect button.
+    await expect(
+      gcalCard.getByRole('button', { name: /connect with google/i })
+    ).toBeVisible();
 
     const approveBtn = gcalCard.getByRole('button', { name: /approve & enable/i });
     await expect(approveBtn).toBeDisabled();
+  });
+
+  test('OAuth credential shows Connect with <provider> button', async ({ page }) => {
+    // Install the OAuth-variant response BEFORE gotoAuthenticated so that
+    // mockAllAPIs' default MOCK_SKILL_SETUP route is later-registered and
+    // takes precedence during boot. Then re-install after and re-navigate
+    // (the app strips ?page= on boot so page.reload() lands on Overview).
+    await mockSkillsSetupWithOAuth(page);
+    await gotoAuthenticated(page, '/admin/?page=skills');
+    await mockSkillsSetupWithOAuth(page);
+    await page.goto(`/admin/?page=skills&token=${MOCK_TOKEN}`);
+
+    const card = page.locator('[data-testid="setup-card-linear-oauth"]');
+    await expect(
+      card.getByRole('button', { name: /connect with linear/i })
+    ).toBeVisible();
+    // Approve disabled because OAuth cred is unconnected.
+    await expect(
+      card.getByRole('button', { name: /approve & enable/i })
+    ).toBeDisabled();
+  });
+
+  test('Connect click POSTs start and opens authUrl in new tab', async ({ page }) => {
+    let startBody: unknown = null;
+    await page.route('**/admin/api/skills/oauth/start', (route) => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      try {
+        startBody = JSON.parse(route.request().postData() ?? '{}');
+      } catch {
+        startBody = {};
+      }
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          authUrl: 'https://linear.app/oauth/authorize?client_id=x',
+          state: 'abc',
+        }),
+      });
+    });
+
+    // Capture window.open calls. Install BEFORE the app boots so the override
+    // sticks when the real Connect handler runs.
+    await page.addInitScript(() => {
+      (window as unknown as { __opened: string[] }).__opened = [];
+      window.open = ((url: string) => {
+        (window as unknown as { __opened: string[] }).__opened.push(url);
+        return { closed: false } as unknown as Window;
+      }) as typeof window.open;
+    });
+
+    await mockSkillsSetupWithOAuth(page);
+    await gotoAuthenticated(page, '/admin/?page=skills');
+    await mockSkillsSetupWithOAuth(page);
+    await page.goto(`/admin/?page=skills&token=${MOCK_TOKEN}`);
+
+    const card = page.locator('[data-testid="setup-card-linear-oauth"]');
+    await card.getByRole('button', { name: /connect with linear/i }).click();
+
+    await expect.poll(() => startBody).toMatchObject({
+      agentId: 'agent-001-abcdef123456',
+      skillName: 'linear-oauth',
+      envName: 'LINEAR_TOKEN',
+    });
+
+    const opened = await page.evaluate(
+      () => (window as unknown as { __opened: string[] }).__opened
+    );
+    expect(opened).toContain('https://linear.app/oauth/authorize?client_id=x');
+  });
+
+  test('Approve enables when OAuth credential disappears from missingCredentials', async ({
+    page,
+  }) => {
+    // Mock setup to return a card where LINEAR_TOKEN is already connected
+    // (empty missingCredentials). Registered AFTER gotoAuthenticated so the
+    // override wins over the default mockAllAPIs route.
+    await page.route('**/admin/api/skills/setup', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          agents: [
+            {
+              agentId: 'agent-001-abcdef123456',
+              agentName: 'research-bot',
+              cards: [
+                {
+                  skillName: 'linear-oauth',
+                  description: 'Linear via OAuth',
+                  missingCredentials: [],
+                  unapprovedDomains: ['api.linear.app'],
+                  mcpServers: [
+                    { name: 'linear', url: 'https://mcp.linear.app' },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+      })
+    );
+
+    await gotoAuthenticated(page, '/admin/?page=skills');
+    // Re-register after gotoAuthenticated so the override sticks. Reload to
+    // re-fetch with the new mock.
+    await page.route('**/admin/api/skills/setup', (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          agents: [
+            {
+              agentId: 'agent-001-abcdef123456',
+              agentName: 'research-bot',
+              cards: [
+                {
+                  skillName: 'linear-oauth',
+                  description: 'Linear via OAuth',
+                  missingCredentials: [],
+                  unapprovedDomains: ['api.linear.app'],
+                  mcpServers: [
+                    { name: 'linear', url: 'https://mcp.linear.app' },
+                  ],
+                },
+              ],
+            },
+          ],
+        }),
+      })
+    );
+    await page.goto(`/admin/?page=skills&token=${MOCK_TOKEN}`);
+
+    const card = page.locator('[data-testid="setup-card-linear-oauth"]');
+    await expect(
+      card.getByRole('button', { name: /approve & enable/i })
+    ).toBeEnabled();
+  });
+
+  test('Pop-up blocked surfaces an error on the card', async ({ page }) => {
+    await page.route('**/admin/api/skills/oauth/start', (route) => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          authUrl: 'https://linear.app/oauth/authorize',
+          state: 'abc',
+        }),
+      });
+    });
+
+    // Stub window.open to return null — simulates a blocked popup.
+    await page.addInitScript(() => {
+      window.open = (() => null) as typeof window.open;
+    });
+
+    await mockSkillsSetupWithOAuth(page);
+    await gotoAuthenticated(page, '/admin/?page=skills');
+    await mockSkillsSetupWithOAuth(page);
+    await page.goto(`/admin/?page=skills&token=${MOCK_TOKEN}`);
+
+    const card = page.locator('[data-testid="setup-card-linear-oauth"]');
+    await card.getByRole('button', { name: /connect with linear/i }).click();
+
+    await expect(card.getByText(/pop-up blocked/i)).toBeVisible();
+  });
+
+  test('Start endpoint 404 surfaces the error on the card', async ({ page }) => {
+    await page.route('**/admin/api/skills/oauth/start', (route) => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      return route.fulfill({
+        status: 404,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: { message: 'No provider registered for linear' },
+        }),
+      });
+    });
+
+    await mockSkillsSetupWithOAuth(page);
+    await gotoAuthenticated(page, '/admin/?page=skills');
+    await mockSkillsSetupWithOAuth(page);
+    await page.goto(`/admin/?page=skills&token=${MOCK_TOKEN}`);
+
+    const card = page.locator('[data-testid="setup-card-linear-oauth"]');
+    await card.getByRole('button', { name: /connect with linear/i }).click();
+
+    await expect(
+      card.getByText(/no provider registered for linear/i)
+    ).toBeVisible();
   });
 
   test('credential request card renders and Save POSTs to /credentials/provide', async ({ page }) => {
@@ -225,5 +421,8 @@ test.describe('Skills Page', () => {
     expect(MOCK_SKILL_SETUP.agents).toHaveLength(1);
     expect(MOCK_SKILL_SETUP.agents[0].cards).toHaveLength(2);
     expect(MOCK_CREDENTIAL_REQUESTS.requests).toHaveLength(1);
+    // Phase-6 OAuth fixture must carry a single oauth-typed credential.
+    expect(MOCK_SKILL_SETUP_WITH_OAUTH.agents).toHaveLength(1);
+    expect(MOCK_SKILL_SETUP_WITH_OAUTH.agents[0].cards[0].missingCredentials[0].authType).toBe('oauth');
   });
 });

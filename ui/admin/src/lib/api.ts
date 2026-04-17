@@ -18,6 +18,7 @@ import type {
   SkillApproveBody,
   SkillApproveResponse,
   CredentialRequestsResponse,
+  StartOAuthResponse,
 } from './types';
 
 const BASE = '/admin/api';
@@ -282,6 +283,19 @@ export const api = {
   /** Approve a pending skill setup card atomically (credentials + domains + reconcile). */
   approveSkill(body: SkillApproveBody): Promise<SkillApproveResponse> {
     return apiFetch<SkillApproveResponse>('/skills/setup/approve', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+
+  /** Start the OAuth flow for a skill credential. Returns authUrl + state. */
+  startOAuth(body: {
+    agentId: string;
+    skillName: string;
+    envName: string;
+    userId?: string;
+  }): Promise<StartOAuthResponse> {
+    return apiFetch<StartOAuthResponse>('/skills/oauth/start', {
       method: 'POST',
       body: JSON.stringify(body),
     });

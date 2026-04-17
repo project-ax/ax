@@ -4,6 +4,14 @@ Git-native skills rollout: snapshot builder, state store, reconcile orchestrator
 
 ## Entries
 
+## [2026-04-17 15:30] — Phase 6 Task 5: UI Connect button + polling
+
+**Task:** Replace the phase-5 "OAuth flow — coming in phase 6" stub in `SetupCardView` with a real Connect button. Click POSTs `/admin/api/skills/oauth/start` and opens the returned `authUrl` in a new tab. Parent page auto-polls `/skills/setup` every 2s whenever any card has an unconnected OAuth credential so the callback's reconcile surfaces (card vanishes / missingCredentials shrinks) without a manual refresh.
+**What I did:** Added `StartOAuthResponse` to `lib/types.ts` and `api.startOAuth(body)` to `lib/api.ts`. In `skills-page.tsx`: per-card `connecting: Set<string>` + `connectError: Record<string,string>` state, `handleConnect(envName)` (POST → window.open new tab; popup-blocked path surfaces "Pop-up blocked..." inline; 30s auto-re-enable); renamed `hasOAuth` → `hasUnconnectedOAuth` for intent clarity (same gate). Page-level `useEffect` polls `refreshSetup()` every 2s iff any agent card carries an oauth-typed missing credential — stops when set is empty. Added `MOCK_SKILL_SETUP_WITH_OAUTH` + `mockSkillsSetupWithOAuth` fixture helper (not in `mockAllAPIs`; tests register explicitly so default doesn't win). Updated `skills.spec.ts`: existing gcal test now looks for "Connect with google" button; 5 new cases — Connect renders, click POSTs start + opens authUrl in new tab, Approve enables when missingCreds empty (polling converged state), popup-blocked error, start-404 error.
+**Files touched:** `ui/admin/src/lib/types.ts`, `ui/admin/src/lib/api.ts`, `ui/admin/src/components/pages/skills-page.tsx`, `ui/admin/tests/fixtures.ts`, `ui/admin/tests/skills.spec.ts`.
+**Outcome:** Success. 13/13 skills.spec.ts + 10/10 navigation.spec.ts = 23/23 pass; `tsc --noEmit` clean in both `ui/admin` and root.
+**Notes:** The app strips `?page=...` on boot so `page.reload()` lands on Overview — OAuth-fixture tests must register the mock BOTH before and after `gotoAuthenticated` AND re-navigate with `?page=skills&token=...` (same pattern as the existing empty-state test). Also wasted time on a stale Vite dev server running from the `skills-phase5` worktree (via `reuseExistingServer: true` in playwright.config.ts) — tests served the OLD bundle, Connect button never appeared. Kill cross-worktree dev servers before running tests.
+
 ## [2026-04-17 14:00] — Phase 6 Task 4 follow-up: 15s timeout on OAuth token-exchange fetches
 
 **Task:** Review-fix: the three OAuth token-endpoint fetches (admin-initiated in `admin-oauth-flow.ts#resolveCallback`, agent-initiated in `oauth-skills.ts#resolveOAuthCallback` + `refreshOAuthToken`) had no timeout. A hostile or unresponsive IdP hangs the host request forever AND keeps the pending-flow state consumed with no recovery path. DoS hygiene gap on a security-critical path.

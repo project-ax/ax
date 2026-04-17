@@ -222,6 +222,12 @@ export interface SkillApproveResponse {
   state?: SkillState;
 }
 
+/** Response from POST /admin/api/skills/oauth/start. */
+export interface StartOAuthResponse {
+  authUrl: string;
+  state: string;
+}
+
 /** Ad-hoc credential request from the request_credential agent tool. */
 export interface CredentialRequest {
   sessionId: string;
