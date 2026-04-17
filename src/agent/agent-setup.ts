@@ -34,6 +34,7 @@ function scanMcpCLIs(workspace: string): string[] | undefined {
   } catch { return undefined; }
 }
 
+
 export interface PromptBuildResult {
   systemPrompt: string;
   metadata: { [key: string]: unknown };
@@ -91,6 +92,7 @@ export function buildSystemPrompt(config: AgentConfig): PromptBuildResult {
     hasWorkspace: !!config.workspace,
     mcpCLIs,
     skillInstallEnabled,
+    toolModuleIndex: config.toolModuleIndex,
   });
 
   const toolFilter: ToolFilterContext = {

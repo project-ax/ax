@@ -2,6 +2,14 @@
 
 Server core, completions pipeline, file handling, bootstrap, admin gate, session management.
 
+## [2026-04-16 00:00] — Fix proxy domain allowlist gap for git-native skills
+
+**Task:** Git-native skills seeded into `.ax/skills/` via `seedAxDirectory` never contributed their manifest domains to the proxy allowlist, meaning those skills would be blocked from network access.
+**What I did:** Added a new block in `initHostCore()` (server-init.ts) after the DB-based skill domain loading that reads the seed skills directory, parses each skill with `parseAgentSkill` + `generateManifest`, and registers domains via `domainList.addSkillDomains()`. Mirrors the file/directory pattern from `seedAxDirectory`.
+**Files touched:** `src/host/server-init.ts` (added `readdirSync` import, `seedSkillsDir` import, new domain loading block)
+**Outcome:** Success — builds cleanly. Both file-based (e.g. `default.md`) and directory-based (e.g. `deploy/SKILL.md`) seed skills now contribute domains to the proxy allowlist at init time.
+**Notes:** Uses try/catch liberally since the seed dir may not exist. Dynamic imports for `parseAgentSkill` and `generateManifest` match the existing pattern.
+
 ## [2026-04-15 19:12] — Fix bootstrap flow: template seeding, git command removal, DocumentStore sync
 
 **Task:** Fix agent bootstrap so BOOTSTRAP.md is actually loaded and agents don't run git commands after identity writes

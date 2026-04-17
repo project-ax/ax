@@ -1,5 +1,13 @@
 # Workspace Provider Journal
 
+## [2026-04-16 10:00] — Document `created` flag limitation in git-http workspace
+
+**Task:** Fix two documentation issues: (1) git-http.ts 409 branch doesn't note that `created=false` can be wrong after a timed-out creation, (2) workspace/types.ts over-promises that creation always succeeds.
+**What I did:** Added a comment in git-http.ts on the 409 branch explaining the timeout-retry race and that callers should check repo content as fallback. Updated the JSDoc on `getRepoUrl` in types.ts to say "best-effort" and "callers should verify repo content rather than relying solely on the `created` flag".
+**Files touched:** src/providers/workspace/git-http.ts, src/providers/workspace/types.ts
+**Outcome:** Success — comment/doc-only changes, no tests needed.
+**Notes:** The caller in server-completions.ts (lines 766-779) already has the fallback that seeds when identity is empty even if `created=false`. These comments document that known limitation for future maintainers.
+
 ## [2026-03-17 05:30] — Redesign k8s workspace release: HTTP staging + sidecar pattern
 
 **Task:** Redesign the workspace file syncing from NATS base64+chunking to HTTP staging endpoint. The HTTP forward proxy (commit 54a2ae0) enables pods to reach the host directly. File data should flow via HTTP, not NATS.

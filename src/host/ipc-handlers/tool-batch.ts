@@ -11,6 +11,7 @@
 import type { McpProvider, McpToolCall, McpToolSchema } from '../../providers/mcp/types.js';
 import type { IPCContext } from '../ipc-server.js';
 import { getLogger } from '../../logger.js';
+import type { ToolDispatcher } from '../tool-dispatcher.js';
 
 const logger = getLogger().child({ component: 'tool-batch' });
 
@@ -82,6 +83,9 @@ export type PluginMcpCallTool = (
 ) => Promise<{ content: string | Record<string, unknown>; isError?: boolean }>;
 
 export interface ToolBatchOptions {
+  /** Optional unified dispatcher — when set, all calls go through ToolDispatcher. */
+  dispatcher?: ToolDispatcher;
+
   /** Returns the MCP provider for executing tools in this session. Returns null if not configured. */
   getProvider: (ctx: IPCContext) => ToolBatchProvider | null;
 
@@ -130,9 +134,23 @@ export function createToolBatchHandlers(
       const results: unknown[] = [];
 
       for (const call of req.calls) {
-        const resolvedArgs = resolveRefs(call.args, results) as Record<string, unknown>;
-
         try {
+          const resolvedArgs = resolveRefs(call.args, results) as Record<string, unknown>;
+
+          // ── ToolDispatcher preferred path ──
+          if (opts.dispatcher) {
+            const result = await opts.dispatcher.dispatch(
+              { tool: call.tool, args: resolvedArgs },
+              { agentId: ctx.agentId, sessionId: ctx.sessionId, userId: ctx.userId ?? '' },
+            );
+            if (result.isError) {
+              results.push({ ok: false, error: result.content });
+            } else {
+              try { results.push(JSON.parse(result.content)); }
+              catch { results.push(result.content); }
+            }
+            continue;
+          }
           // ── Unified path: resolveServer covers ALL MCP tools ──
           const unifiedUrl = opts.resolveServer?.(ctx.agentId, call.tool);
           if (unifiedUrl && opts.mcpCallTool) {

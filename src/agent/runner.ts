@@ -69,6 +69,8 @@ export interface AgentConfig {
   agentId?: string;
   /** Pre-loaded identity files from host (via stdin payload). Skips filesystem reads when present. */
   identity?: IdentityFiles;
+  /** Compact tool module index for system prompt (one line per server). */
+  toolModuleIndex?: string;
 }
 
 /** Sanitize a sender name: only alphanumeric, underscore, dot, dash; max 100 chars. */
@@ -275,6 +277,8 @@ export interface StdinPayload {
   singleTurn?: boolean;
   /** MCP CLI executables — one file per server, written to /workspace/bin/. */
   mcpCLIs?: Array<{ path: string; content: string }>;
+  /** Compact tool module index for system prompt (one line per server). */
+  toolModuleIndex?: string;
 }
 
 /**
@@ -324,6 +328,7 @@ export function parseStdinPayload(data: string): StdinPayload {
         caCert: typeof parsed.caCert === 'string' ? parsed.caCert : undefined,
         singleTurn: parsed.singleTurn === true,
         mcpCLIs: Array.isArray(parsed.mcpCLIs) ? parsed.mcpCLIs : undefined,
+        toolModuleIndex: typeof parsed.toolModuleIndex === 'string' ? parsed.toolModuleIndex : undefined,
       };
     }
   } catch {
@@ -333,12 +338,50 @@ export function parseStdinPayload(data: string): StdinPayload {
 }
 
 /**
+ * Wait for the workspace mount to become ready (VirtioFS in Apple Container
+ * may lag behind process startup). Polls for the .ax/ sentinel directory.
+ */
+async function waitForWorkspace(workspace: string, timeoutMs = 30_000): Promise<void> {
+  const sentinel = join(workspace, '.ax');
+  try {
+    const entries = readdirSync(workspace);
+    process.stderr.write(`[diag] workspace_check path=${workspace} entries=[${entries.join(',')}] sentinel_exists=${existsSync(sentinel)}\n`);
+    if (existsSync(sentinel)) return;
+  } catch (err) {
+    process.stderr.write(`[diag] workspace_check path=${workspace} error=${(err as Error).message}\n`);
+  }
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    await new Promise(r => setTimeout(r, 200));
+    if (existsSync(sentinel)) {
+      const waitMs = Date.now() - start;
+      process.stderr.write(`[diag] workspace_mount_ready waitMs=${waitMs}\n`);
+      logger.info('workspace_mount_ready', { waitMs });
+      return;
+    }
+  }
+  try {
+    const entries = readdirSync(workspace);
+    process.stderr.write(`[diag] workspace_mount_timeout entries=[${entries.join(',')}]\n`);
+  } catch { /* ignore */ }
+  logger.warn('workspace_mount_timeout', { timeoutMs, workspace });
+}
+
+/**
  * Dispatch to the appropriate agent implementation based on config.agent.
  */
 export async function run(config: AgentConfig): Promise<void> {
   const agent = config.agent ?? 'pi-coding-agent';
   process.stderr.write(`[diag] dispatch agent=${agent}\n`);
   logger.debug('dispatch', { agent, workspace: config.workspace, ipcSocket: config.ipcSocket });
+
+  // VirtioFS mounts (Apple Container) may not be visible immediately at process
+  // start. Wait for the workspace to have content before building the prompt.
+  // Only run inside containers (AX_WORKSPACE is set by container entrypoint).
+  if (config.workspace && process.env.AX_WORKSPACE) {
+    await waitForWorkspace(config.workspace);
+  }
+
   switch (agent) {
     case 'pi-coding-agent': {
       const { runPiSession } = await import('./runners/pi-session.js');
@@ -479,6 +522,40 @@ function applyPayload(config: AgentConfig, payload: StdinPayload): void {
       writeFileSync(filePath, file.content, { mode: 0o755 });
     }
     logger.info('mcp_clis_written', { count: payload.mcpCLIs.length, dir: binDir });
+  }
+
+  // ── Write tool modules to /workspace/tools/ ──
+  if (Array.isArray(payload.mcpCLIs) && config.workspace) {
+    // Tool modules are .js files included alongside CLIs in the mcpCLIs payload
+    const moduleFiles = payload.mcpCLIs.filter(f => f.path.endsWith('.js'));
+    const toolsDir = resolve(config.workspace, 'tools');
+    mkdirSync(toolsDir, { recursive: true });
+    // Always prune stale modules, even when no new modules exist
+    const incomingModulePaths = new Set(moduleFiles.map(f => f.path));
+    try {
+      for (const existing of readdirSync(toolsDir)) {
+        if (!incomingModulePaths.has(existing)) {
+          const fullPath = resolve(toolsDir, existing);
+          if (fullPath.startsWith(toolsDir + sep) && statSync(fullPath).isFile()) {
+            unlinkSync(fullPath);
+          }
+        }
+      }
+    } catch { /* toolsDir may not exist yet */ }
+    for (const file of moduleFiles) {
+      const filePath = resolve(toolsDir, file.path);
+      if (!filePath.startsWith(toolsDir + sep) && filePath !== toolsDir) {
+        logger.warn('tool_module_path_traversal_blocked', { path: file.path });
+        continue;
+      }
+      writeFileSync(filePath, file.content, { mode: 0o644 });
+    }
+    logger.info('tool_modules_written', { count: moduleFiles.length, dir: toolsDir });
+  }
+
+  // Store toolModuleIndex on config for prompt building
+  if (payload.toolModuleIndex) {
+    config.toolModuleIndex = payload.toolModuleIndex;
   }
 
   if (payload.identity) {

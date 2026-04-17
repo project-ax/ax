@@ -3,6 +3,7 @@ import type { IIPCClient } from './runner.js';
 import { TOOL_CATALOG, filterTools } from './tool-catalog.js';
 import type { ToolFilterContext } from './tool-catalog.js';
 import { createLocalSandbox } from './local-sandbox.js';
+import { executeScript } from './execute-script.js';
 
 function text(t: string) {
   return { content: [{ type: 'text' as const, text: t }], details: undefined };
@@ -55,6 +56,18 @@ export function createIPCTools(client: IIPCClient, opts?: IPCToolsOptions): Agen
         // Singleton
         action = spec.singletonAction ?? spec.name;
         callParams = p;
+      }
+
+      // execute_script always runs locally — it only needs Node.js and the filesystem
+      if (action === 'execute_script') {
+        if (typeof callParams.code !== 'string') {
+          return text(`Error: execute_script requires a "code" string parameter`);
+        }
+        const result = executeScript(
+          { code: callParams.code, timeoutMs: typeof callParams.timeoutMs === 'number' ? callParams.timeoutMs : undefined },
+          opts?.localSandbox?.workspace ?? process.cwd(),
+        );
+        return text(JSON.stringify(result));
       }
 
       // Route sandbox tools to local executor when in container

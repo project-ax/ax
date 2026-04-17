@@ -1,5 +1,22 @@
 # Git-Based Identity
 
+## [2026-04-16 10:00] — Fix identity cache invalidation: wire clearIdentityCache() after writes
+
+**Task:** Fix stale identity cache bug — `clearIdentityCache()` was defined but never called, so after `hostGitCommit` or `seedRemoteRepo` modified identity files, stale cached data could be served for up to 30 seconds.
+
+**What I did:**
+- Added `clearIdentityCache` to the import in `src/host/server-completions.ts`
+- Added `clearIdentityCache()` calls after `hostGitCommit()` (line ~1864), and after both `seedRemoteRepo()` calls (lines ~768, ~776)
+- Updated the module doc comment in `identity-reader.ts` to reflect that cache invalidation IS done (was incorrectly saying "No explicit invalidation")
+- Updated the `clearIdentityCache` JSDoc from "Useful for tests" to "Called after identity writes and in tests"
+
+**Files touched:**
+- Modified: `src/host/server-completions.ts`, `src/host/identity-reader.ts`
+
+**Outcome:** Success — build passes, all changes are wiring existing dead code to the correct call sites.
+
+**Notes:** `clearIdentityCache()` clears the entire Map rather than per-agentId because the write paths don't have `agentId` in scope and full-cache clear is safe given the low cost of cache misses.
+
 ## [2026-04-15 12:15] — Git-based identity system: Tasks 1-4
 
 **Task:** Implement Tasks 1-4 of the git-based identity plan: validateCommit, loadIdentityFromGit, hostGitCommit integration, and validate_commit IPC action.

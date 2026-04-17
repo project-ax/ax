@@ -143,6 +143,14 @@ describe('Local sandbox executor', () => {
       const result = await sandbox.readFile('missing.txt');
       expect(result.error).toMatch(/error reading file/i);
     });
+
+    test('strips workspace prefix when LLM sends absolute path', async () => {
+      writeFileSync(join(workspace, 'abs.txt'), 'absolute path content');
+      const client = mockClient();
+      const sandbox = createLocalSandbox({ client, workspace });
+      const result = await sandbox.readFile(workspace + '/abs.txt');
+      expect(result.content).toBe('absolute path content');
+    });
   });
 
   // ── writeFile ──
@@ -169,6 +177,16 @@ describe('Local sandbox executor', () => {
       const sandbox = createLocalSandbox({ client, workspace });
       const result = await sandbox.writeFile('new.txt', 'content');
       expect(result.error).toContain('Denied');
+    });
+
+    test('strips workspace prefix when LLM sends absolute path', async () => {
+      const client = mockClient();
+      const sandbox = createLocalSandbox({ client, workspace });
+      const absPath = workspace + '/tools/math.js';
+      const result = await sandbox.writeFile(absPath, 'export function add(a, b) { return a + b; }');
+      expect(result.written).toBe(true);
+      // Should be at workspace/tools/math.js, NOT workspace/workspace/tools/math.js
+      expect(readFileSync(join(workspace, 'tools', 'math.js'), 'utf-8')).toBe('export function add(a, b) { return a + b; }');
     });
   });
 
@@ -197,6 +215,26 @@ describe('Local sandbox executor', () => {
       const sandbox = createLocalSandbox({ client, workspace });
       const result = await sandbox.editFile('edit.txt', 'a', 'b');
       expect(result.error).toBe('Denied: policy');
+    });
+  });
+
+  // ── glob path="." ──
+
+  describe('glob', () => {
+    test('path "." resolves to workspace root, not _empty_', async () => {
+      writeFileSync(join(workspace, 'hello.txt'), 'hi');
+      const client = mockClient();
+      const sandbox = createLocalSandbox({ client, workspace });
+      const result = await sandbox.glob('**/*', { path: '.' });
+      expect(result.files).toContain('hello.txt');
+    });
+
+    test('no path defaults to workspace root', async () => {
+      writeFileSync(join(workspace, 'hello.txt'), 'hi');
+      const client = mockClient();
+      const sandbox = createLocalSandbox({ client, workspace });
+      const result = await sandbox.glob('**/*');
+      expect(result.files).toContain('hello.txt');
     });
   });
 
