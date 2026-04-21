@@ -97,12 +97,17 @@ export class McpConnectionManager {
   }
 
   /**
-   * Get metadata (source, headers, transport) for a specific server.
+   * Get metadata (url, source, headers, transport) for a specific server.
+   *
+   * The URL field is load-bearing for the unified `call_tool` dispatcher,
+   * which starts from the catalog's server *name* and needs the URL to
+   * actually reach the server. Pre-existing callers (that used this to
+   * read `source`/`headers`/`transport`) keep working unchanged.
    */
-  getServerMeta(_agentId: string, name: string): { source?: string; headers?: Record<string, string>; transport?: 'http' | 'sse' } | undefined {
+  getServerMeta(_agentId: string, name: string): { url: string; source?: string; headers?: Record<string, string>; transport?: 'http' | 'sse' } | undefined {
     const server = this.servers.get(name);
     if (!server) return undefined;
-    return { source: server.source, headers: server.headers, transport: server.transport };
+    return { url: server.url, source: server.source, headers: server.headers, transport: server.transport };
   }
 
   /**
@@ -274,15 +279,11 @@ export class McpConnectionManager {
    *
    * Motivation: subprocess-sandbox completions don't trigger `discoverAllTools`
    * anywhere in their per-turn path (the inprocess fast-path does; subprocess
-   * does not). Before this hook, the `toolServerMap` only got populated by
-   * admin refresh-tools clicks — so a pod restart left tool routes unknown
-   * until the admin pressed the button, and the tool-batch handler had no
-   * choice but to emit "MCP gateway not configured for this tool". Wiring
-   * this into the turn path gives us auto-recovery without making discovery
-   * fire on every call.
+   * does not). Wiring this into the turn path gives us auto-recovery without
+   * making discovery fire on every call.
    *
-   * Pass `force: true` to bypass the cache — used by admin refresh-tools
-   * so a credential/server change always re-discovers even at the same HEAD.
+   * Pass `force: true` to bypass the cache — useful when callers know a
+   * credential/server change needs re-discovery even at the same HEAD.
    *
    * Discovery errors are swallowed by `discoverAllTools` (per-server), so
    * this method's only failure mode is a thrown error from the underlying

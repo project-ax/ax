@@ -26,6 +26,8 @@ import { createAgentRegistry, type AgentRegistry } from './agent-registry.js';
 import { AgentProvisioner } from './agent-provisioner.js';
 import type { Server as NetServer } from 'node:net';
 import { callToolOnServer } from '../plugins/mcp-client.js';
+import { parseMcpTextResult } from './ipc-handlers/call-tool.js';
+import { applyUrlRewrite } from '../plugins/url-rewrite.js';
 import { loadDatabaseMcpServers } from '../plugins/startup.js';
 import type { AdminContext } from './server-admin-helpers.js';
 import type { SkillCredStore } from './skills/skill-cred-store.js';
@@ -35,11 +37,6 @@ import { createAdminOAuthFlow, type AdminOAuthFlow } from './admin-oauth-flow.js
 import { createSnapshotCache } from './skills/snapshot-cache.js';
 import type { SkillSnapshotEntry } from './skills/types.js';
 import type { GetAgentSkillsDeps } from './skills/get-agent-skills.js';
-import {
-  syncToolModulesForSkill,
-  type ToolModuleSyncInput,
-  type ToolModuleSyncResult,
-} from './skills/tool-module-sync.js';
 
 const logger = getLogger();
 
@@ -107,11 +104,6 @@ export interface HostCore {
   /** Resolves (cloning + fetching as needed) the local bare-repo path for an
    *  agent. Consumed by `agentSkillsDeps` for live snapshot walks. */
   getBareRepoPath: (agentId: string) => Promise<string>;
-  /** Commits a skill's MCP tool modules into the agent's repo under
-   *  `.ax/tools/<skillName>/`. Bound at construction time to mcpManager,
-   *  skillCredStore, and providers.workspace. Throws when any of those is
-   *  unavailable at call time. */
-  syncToolModules: (input: ToolModuleSyncInput) => Promise<ToolModuleSyncResult>;
 }
 
 /**
@@ -174,6 +166,13 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
   const ipcSocketPath = join(ipcSocketDir, 'proxy.sock');
   const sessionCanaries = new Map<string, string>();
   const workspaceMap = new Map<string, string>();
+  // Per-session catalog registry — populated in `processCompletion` after
+  // the per-turn `ToolCatalog` is built, consumed by the `describe_tools`
+  // and `call_tool` IPC handlers via the `resolveCatalog` closure below.
+  // Same lifetime as `workspaceMap` (register at turn-start, unregister in
+  // `finally`), so an uncaught error in the turn cannot leak a stale
+  // catalog into the next turn or another concurrent session.
+  const catalogMap = new Map<string, import('./ipc-handlers/describe-tools.js').CatalogReader>();
 
   // ── Git-native skills stores ──
   // Only created when a database provider is available; power the admin
@@ -308,19 +307,6 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     mcpManager,
   };
 
-  // Tool-module sync closure. Binds the heavy deps (mcpManager + the DB-backed
-  // skill cred store + workspace provider) so the admin approve + refresh-tools
-  // routes can invoke it without knowing about them. Fails loud if the
-  // workspace provider isn't wired — skill approval without a workspace to
-  // commit into is a misconfiguration, not a runtime hazard.
-  const syncToolModules = async (input: ToolModuleSyncInput): Promise<ToolModuleSyncResult> => {
-    if (!providers.workspace) throw new Error('workspace provider required for syncToolModules');
-    return syncToolModulesForSkill(
-      { mcpManager, skillCredStore, workspace: providers.workspace },
-      input,
-    );
-  };
-
   // ── CompletionDeps ──
   const completionDeps: CompletionDeps = {
     config,
@@ -338,6 +324,7 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     gcsFileStorage,
     eventBus,
     workspaceMap,
+    catalogMap,
     mcpManager,
     agentSkillsDeps,
     skillCredStore,
@@ -350,7 +337,7 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     const tier = req.resourceTier ?? 'default';
     const tierConfig = tier === 'heavy'
       ? { memory_mb: 2048, cpus: 4 }
-      : { memory_mb: config.sandbox.memory_mb, cpus: 1 };
+      : { memory_mb: config.sandbox.memory_mb, cpus: config.sandbox.cpus };
 
     const childConfig = {
       ...config,
@@ -410,50 +397,84 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     orchestrator,
     workspaceMap,
     adminCtx,
-    // Legacy: providers.mcp (database MCP provider) is kept as fallback for
-    // tool batching. When all callers migrate to McpConnectionManager, remove
-    // providers.mcp and the legacy fallback paths in tool-router.ts,
-    // tool-batch.ts, inprocess.ts, and server-completions.ts.
-    toolBatchProvider: (providers.mcp || mcpManager)
+    // Per-turn catalog lookup for `describe_tools` and `call_tool`. The
+    // catalog is registered in `processCompletion` (keyed on sessionId)
+    // after it's been built from the active skills; this closure just
+    // reads that per-session state at IPC dispatch time.
+    resolveCatalog: (ctx) => catalogMap.get(ctx.sessionId),
+    // MCP dispatcher for `call_tool`. Adapts from the existing
+    // `mcpManager` server-name → URL + headers lookup and the
+    // `callToolOnServer` free function, matching the `{server, tool,
+    // args, ctx}` shape the handler threads.
+    //
+    // Per-request identity (agentId + userId) comes from `ctx` — the
+    // handler pulls it off the IPC context at dispatch time. This
+    // mirrors tool-batch's `ctx.userId ?? ''` pattern so skill
+    // credentials resolve against the caller's user, not a host-wide
+    // default. DO NOT reintroduce a captured `defaultUserId` here — on
+    // multi-user hosts it silently misattributes auth.
+    callToolMcpDispatcher: mcpManager
       ? {
-          getProvider: providers.mcp ? () => providers.mcp! : () => null,
-          resolveServer: mcpManager
-            ? (agentId: string, toolName: string) => mcpManager.getToolServerUrl(agentId, toolName)
-            : undefined,
-          mcpCallTool: mcpManager ? callToolOnServer : undefined,
-          getServerMetaByUrl: mcpManager
-            ? (agentId: string, serverUrl: string) => mcpManager.getServerMetaByUrl(agentId, serverUrl)
-            : undefined,
-          resolveHeaders: providers.credentials
-            ? async (h: Record<string, string>) => {
-                const { resolveHeaders: rh } = await import('../providers/mcp/database.js');
-                return rh(JSON.stringify(h), providers.credentials);
-              }
-            : undefined,
-          // Resolve Bearer auth for skill-declared MCP servers from the
-          // tuple-keyed `skill_credentials` store, not the legacy
-          // `providers.credentials`. The skills SSoT migration moved
-          // per-skill credentials off the generic key/value store; the
-          // tool-batch call-time path was left pointing at the wrong
-          // source and every turn-time tool call ended up sending no
-          // Authorization header (symptom: Linear 401 invalid_token even
-          // with a valid API key stored via the Approvals tab).
-          //
-          // `resolveMcpAuthHeaders` already has the right precedence
-          // (user-scope → agent-scope sentinel → last-resort first row
-          // → process.env fallback) — reuse it instead of rolling a
-          // second lookup.
-          authForServer: skillCredStore
-            ? async (server: { name: string; url: string; agentId: string; userId: string }) =>
-                resolveMcpAuthHeaders({
-                  serverName: server.name,
-                  agentId: server.agentId,
-                  userId: server.userId,
-                  skillCredStore,
-                })
-            : undefined,
+          callToolOnServer: async ({
+            server,
+            tool,
+            args,
+            ctx,
+          }: {
+            server: string;
+            tool: string;
+            args: Record<string, unknown>;
+            ctx: { agentId: string; userId: string };
+          }) => {
+            const meta = mcpManager.getServerMeta(ctx.agentId, server);
+            if (!meta) {
+              throw new Error(`MCP server not registered: ${server}`);
+            }
+            // Resolve headers: prefer explicit headers (with placeholder
+            // substitution), fall back to skill-credential auto-discovery
+            // against the caller's (agentId, userId).
+            let headers: Record<string, string> | undefined;
+            if (meta.headers) {
+              headers = providers.credentials
+                ? await (async () => {
+                    const { resolveHeaders: rh } = await import(
+                      '../providers/mcp/database.js'
+                    );
+                    return rh(JSON.stringify(meta.headers), providers.credentials);
+                  })()
+                : meta.headers;
+            } else if (skillCredStore) {
+              headers = await resolveMcpAuthHeaders({
+                serverName: server,
+                agentId: ctx.agentId,
+                userId: ctx.userId,
+                skillCredStore,
+              });
+            }
+            // Apply `config.url_rewrites` at host dispatch time. No-op
+            // in production (the map is unset); e2e uses it to redirect
+            // `https://mock-target.test/...` frontmatter URLs to the
+            // mock server's dynamic port.
+            const dispatchUrl = applyUrlRewrite(meta.url, config.url_rewrites);
+            const result = await callToolOnServer(dispatchUrl, tool, args, {
+              ...(headers ? { headers } : {}),
+              ...(meta.transport ? { transport: meta.transport } : {}),
+            });
+            if (result.isError) {
+              throw new Error(
+                typeof result.content === 'string'
+                  ? result.content
+                  : JSON.stringify(result.content),
+              );
+            }
+            return parseMcpTextResult(result.content);
+          },
         }
       : undefined,
+    // Auto-spill threshold for `call_tool` responses. `tool_dispatch`
+    // is non-optional on Config and the Zod schema fills the default —
+    // no optional chaining here (Task 4.3).
+    spillThresholdBytes: config.tool_dispatch.spill_threshold_bytes,
     gcsFileStorage,
     fileStore,
   });
@@ -503,6 +524,5 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     adminOAuthFlow,
     agentSkillsDeps,
     getBareRepoPath,
-    syncToolModules,
   };
 }

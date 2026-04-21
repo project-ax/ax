@@ -3,7 +3,6 @@ import type { IIPCClient } from './runner.js';
 import { TOOL_CATALOG, filterTools } from './tool-catalog.js';
 import type { ToolFilterContext } from './tool-catalog.js';
 import { createLocalSandbox } from './local-sandbox.js';
-import { executeScript } from './execute-script.js';
 
 function text(t: string) {
   return { content: [{ type: 'text' as const, text: t }], details: undefined };
@@ -15,7 +14,7 @@ export interface IPCToolsOptions {
   /** Tool filter context — excludes tools irrelevant to the current session. */
   filter?: ToolFilterContext;
   /** When set, sandbox tools execute locally with host audit gate. */
-  localSandbox?: { client: IIPCClient; workspace: string };
+  localSandbox?: { client: IIPCClient; workspace: string; sessionId?: string };
 }
 
 /** Create tools that route through IPC to the host process. */
@@ -31,12 +30,12 @@ export function createIPCTools(client: IIPCClient, opts?: IPCToolsOptions): Agen
 
   // Lazily create local sandbox executor if configured
   const sandbox = opts?.localSandbox
-    ? createLocalSandbox({ client: opts.localSandbox.client, workspace: opts.localSandbox.workspace })
+    ? createLocalSandbox({ client: opts.localSandbox.client, workspace: opts.localSandbox.workspace, sessionId: opts.localSandbox.sessionId })
     : null;
 
   const catalog = opts?.filter ? filterTools(opts.filter) : TOOL_CATALOG;
 
-  return catalog.map(spec => ({
+  const builtIns: AgentTool[] = catalog.map(spec => ({
     name: spec.name,
     label: spec.label,
     description: spec.description,
@@ -58,16 +57,13 @@ export function createIPCTools(client: IIPCClient, opts?: IPCToolsOptions): Agen
         callParams = p;
       }
 
-      // execute_script always runs locally — it only needs Node.js and the filesystem
-      if (action === 'execute_script') {
-        if (typeof callParams.code !== 'string') {
-          return text(`Error: execute_script requires a "code" string parameter`);
-        }
-        const result = executeScript(
-          { code: callParams.code, timeoutMs: typeof callParams.timeoutMs === 'number' ? callParams.timeoutMs : undefined },
-          opts?.localSandbox?.workspace ?? process.cwd(),
-        );
-        return text(JSON.stringify(result));
+      // skill_write lands the SKILL.md in the same workspace the agent
+      // container owns (and the git sidecar reads) — routing it through
+      // the host would write to the host-side workspace in k8s and the
+      // sidecar would never see it. Validator lives in src/skills/ so it
+      // runs inside the pod.
+      if (sandbox && action === 'skill_write') {
+        return text(JSON.stringify(await sandbox.writeSkillFile(callParams as never)));
       }
 
       // Route sandbox tools to local executor when in container
@@ -106,4 +102,6 @@ export function createIPCTools(client: IIPCClient, opts?: IPCToolsOptions): Agen
       return ipcCall(action, callParams, spec.timeoutMs);
     },
   }));
+
+  return builtIns;
 }

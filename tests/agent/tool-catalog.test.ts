@@ -3,8 +3,8 @@ import { TOOL_CATALOG, TOOL_NAMES, getToolParamKeys, filterTools } from '../../s
 import type { ToolFilterContext, ToolCategory } from '../../src/agent/tool-catalog.js';
 
 describe('tool-catalog', () => {
-  test('exports exactly 13 tools', () => {
-    expect(TOOL_CATALOG.length).toBe(13);
+  test('exports exactly 15 tools (13 original + describe_tools + call_tool; execute_script removed in Task 11)', () => {
+    expect(TOOL_CATALOG.length).toBe(15);
   });
 
   test('TOOL_NAMES matches TOOL_CATALOG names', () => {
@@ -55,7 +55,13 @@ describe('tool-catalog', () => {
       'save_artifact',
       'audit', 'agent',
       'bash', 'read_file', 'write_file', 'edit_file',
-      'grep', 'glob', 'execute_script',
+      // Skill authoring — dedicated tool with structured args + validator.
+      'skill_write',
+      'grep', 'glob',
+      // Tool-dispatch meta-tools (Task 3.5) — indirect mode only; filterTools
+      // hides them in direct mode.
+      'describe_tools', 'call_tool',
+      // execute_script removed in Task 11 — replaced by tool CLI shims.
     ];
     expect(TOOL_NAMES).toEqual(expected);
   });
@@ -90,6 +96,13 @@ describe('tool-catalog', () => {
     for (const spec of TOOL_CATALOG) {
       expect(validCategories, `"${spec.name}" has invalid category "${spec.category}"`).toContain(spec.category);
     }
+  });
+
+  test('execute_script is NOT in the catalog (Tasks 11 + 12 — replaced by tool CLI shims)', () => {
+    // Catalog entry removed in Task 11; handler + preamble + spill protocol
+    // removed in Task 12. The LLM now dispatches via the `tool` CLI shims.
+    expect(TOOL_NAMES).not.toContain('execute_script');
+    expect(TOOL_CATALOG.find(s => s.name === 'execute_script')).toBeUndefined();
   });
 
   test('every category has at least one tool', () => {
@@ -145,5 +158,36 @@ describe('filterTools', () => {
     expect(names).toContain('web');
     expect(names).toContain('audit');
     expect(names).toContain('agent');
+  });
+
+  // ── tool-dispatch mode filtering (Task 3.5) ──────────────────────────
+
+  test('indirect mode (default) exposes describe_tools + call_tool', () => {
+    const result = filterTools({ hasHeartbeat: true, toolDispatchMode: 'indirect' });
+    const names = result.map(s => s.name);
+    expect(names).toContain('describe_tools');
+    expect(names).toContain('call_tool');
+  });
+
+  test('omitted toolDispatchMode defaults to indirect', () => {
+    const result = filterTools({ hasHeartbeat: true });
+    const names = result.map(s => s.name);
+    expect(names).toContain('describe_tools');
+    expect(names).toContain('call_tool');
+  });
+
+  test('direct mode hides describe_tools + call_tool', () => {
+    const result = filterTools({ hasHeartbeat: true, toolDispatchMode: 'direct' });
+    const names = result.map(s => s.name);
+    expect(names).not.toContain('describe_tools');
+    expect(names).not.toContain('call_tool');
+    // Other tools survive the filter
+    expect(names).toContain('memory');
+    expect(names).toContain('bash');
+  });
+
+  test('direct mode still includes all non-meta tools (catalog minus describe_tools + call_tool)', () => {
+    const result = filterTools({ hasHeartbeat: true, toolDispatchMode: 'direct' });
+    expect(result.length).toBe(TOOL_CATALOG.length - 2);
   });
 });

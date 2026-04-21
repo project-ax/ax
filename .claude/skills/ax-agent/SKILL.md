@@ -21,6 +21,7 @@ The agent subsystem runs inside a sandboxed process (no network, no credentials)
 | `src/agent/tool-catalog.ts` | Single source of truth for tool metadata, context-aware filtering, plugin commands, and Cowork plugin tools | `TOOL_CATALOG`, `filterTools()`, `ToolFilterContext`, `normalizeOrigin()`, `normalizeIdentityFile()` |
 | `src/agent/prompt/modules/commands.ts` | Plugin commands prompt module (priority 72) — surfaces installed plugin slash commands | `CommandsModule` |
 | `src/agent/ipc-tools.ts` | Tools that proxy to host via IPC (pi-session runner) | `createIPCTools(client, opts)` |
+| `src/agent/tools/describe-tools.ts` | Agent-side factory stubs for the `describe_tools` + `call_tool` meta-tools (indirect dispatch mode). Catalog entries in `tool-catalog.ts` plumb the real wiring; the factories exist for isolated unit tests and Task 4.x hook points (projection, spill). | `createDescribeToolsTool()`, `createCallToolTool()` |
 | `src/host/ipc-handlers/sandbox-tools.ts` | IPC handlers for bash/file ops (host-side, subprocess mode only) | `createSandboxToolHandlers()` |
 | `src/agent/identity-loader.ts` | Loads identity files from preloaded stdin payload (or filesystem fallback) | `loadIdentityFiles(opts)` |
 | `src/agent/agent-setup.ts` | Shared setup: prompt building, event subscription, tool filtering | `buildSystemPrompt()`, `subscribeAgentEvents()` |
@@ -60,6 +61,7 @@ The agent subsystem runs inside a sandboxed process (no network, no credentials)
 ## Tool System
 
 - **Tool Catalog** (`tool-catalog.ts`): Single source of truth. Defines `TOOL_CATALOG` (TypeBox-based specs) and `filterTools(ctx)` for context-aware filtering.
+- **Tool-dispatch mode** (`tool-dispatch-unification`): `ToolFilterContext.toolDispatchMode` (`'direct' | 'indirect'`, default `indirect`) controls whether the `describe_tools` + `call_tool` meta-tools are registered. The host ships `config.tool_dispatch` through the stdin payload; the agent threads `mode` into `buildSystemPrompt`'s returned `toolFilter` so both the pi-session and claude-code runners pick it up.
 - **Context-aware filtering**: `ToolFilterContext` flags (hasHeartbeat, hasSkills, hasWorkspaceTiers, hasGovernance) control which tools are available. Filtering is automatic in both pi-session and claude-code runners.
   - No heartbeat content -> no scheduler tools
   - No skills loaded -> no skill tools

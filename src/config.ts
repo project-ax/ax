@@ -9,6 +9,9 @@ import { PROVIDER_MAP } from './host/provider-map.js';
 
 const AGENT_TYPES = ['pi-coding-agent', 'claude-code'] as const;
 
+/** Default spill threshold for tool_dispatch result payloads (20 KiB). */
+export const DEFAULT_TOOL_DISPATCH_SPILL_THRESHOLD_BYTES = 20480;
+
 // Derive Zod enums from PROVIDER_MAP keys for compile-time + runtime validation.
 const providerEnum = (kind: string) => {
   const names = Object.keys(PROVIDER_MAP[kind] ?? {}) as [string, ...string[]];
@@ -81,7 +84,8 @@ const ConfigSchema = z.strictObject({
     idle_timeout_sec: z.number().int().min(60).max(7200).optional(),
     clean_idle_timeout_sec: z.number().int().min(60).max(7200).optional(),
     memory_mb: z.number().int().min(64).max(8192),
-  }).optional().default({ timeout_sec: 120, memory_mb: 512 }),
+    cpus: z.number().min(0.1).max(16).optional().default(1),
+  }).optional().default({ timeout_sec: 120, memory_mb: 512, cpus: 1 }),
   scheduler: z.strictObject({
     active_hours: z.strictObject({
       start: z.string().regex(/^\d{2}:\d{2}$/, 'Must be HH:MM format'),
@@ -128,6 +132,14 @@ const ConfigSchema = z.strictObject({
     max_concurrent: z.number().int().min(1).max(10).default(3),
     max_depth: z.number().int().min(1).max(5).default(2),
   }).optional(),
+  tool_dispatch: z.strictObject({
+    mode: z.enum(['direct', 'indirect']).default('indirect'),
+    spill_threshold_bytes: z.number().int().positive()
+      .default(DEFAULT_TOOL_DISPATCH_SPILL_THRESHOLD_BYTES),
+  }).optional().default({
+    mode: 'indirect',
+    spill_threshold_bytes: DEFAULT_TOOL_DISPATCH_SPILL_THRESHOLD_BYTES,
+  }),
   webhooks: z.strictObject({
     enabled: z.boolean(),
     token: z.string().min(1),

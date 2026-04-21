@@ -13,7 +13,6 @@ import type { IIPCClient } from './runner.js';
 import { filterTools, getToolDescription } from './tool-catalog.js';
 import type { ToolFilterContext } from './tool-catalog.js';
 import { createLocalSandbox } from './local-sandbox.js';
-import { executeScript } from './execute-script.js';
 
 function stripTaint(data: unknown): unknown {
   if (Array.isArray(data)) {
@@ -47,7 +46,7 @@ export interface MCPServerOptions {
   /** Tool filter context — excludes tools irrelevant to the current session. */
   filter?: ToolFilterContext;
   /** When set, sandbox tools execute locally with host audit gate. */
-  localSandbox?: { client: IIPCClient; workspace: string };
+  localSandbox?: { client: IIPCClient; workspace: string; sessionId?: string };
 }
 
 // ── Action maps for tools with irregular IPC action names ──
@@ -70,7 +69,7 @@ export function createIPCMcpServer(client: IIPCClient, opts?: MCPServerOptions):
 
   // Local sandbox executor for container-local tool execution
   const sandbox = opts?.localSandbox
-    ? createLocalSandbox({ client: opts.localSandbox.client, workspace: opts.localSandbox.workspace })
+    ? createLocalSandbox({ client: opts.localSandbox.client, workspace: opts.localSandbox.workspace, sessionId: opts.localSandbox.sessionId })
     : null;
 
   // Build name set of allowed tools based on filter context
@@ -219,6 +218,47 @@ export function createIPCMcpServer(client: IIPCClient, opts?: MCPServerOptions):
         : (args) => ipcCall('sandbox_edit_file', args),
     ),
 
+    // ── Skill authoring — structured, validator-backed ──
+    // `skill_write` is the only authoring path for .ax/skills/<name>/SKILL.md.
+    // write_file / edit_file refuse SKILL.md paths and redirect here. The
+    // handler round-trips the bytes through parseSkillFile so failures
+    // surface as actionable errors naming the bad field and its received
+    // value. All other skill-adjacent file ops (read, delete, bash) still
+    // go through the normal file tools.
+    tool('skill_write', getToolDescription('skill_write'),
+      {
+        name: z.string().max(100),
+        description: z.string().min(1).max(2000),
+        source: z.object({
+          url: z.string().max(2048),
+          version: z.string().max(200).optional(),
+        }).optional(),
+        credentials: z.array(z.object({
+          envName: z.string().max(64),
+          authType: z.enum(['api_key', 'oauth']),
+          scope: z.enum(['user', 'agent']).optional(),
+          oauth: z.object({
+            provider: z.string().max(100),
+            clientId: z.string().max(500),
+            authorizationUrl: z.string().max(2048),
+            tokenUrl: z.string().max(2048),
+            scopes: z.array(z.string().max(100)).optional(),
+          }).optional(),
+        })).max(32).optional(),
+        mcpServers: z.array(z.object({
+          name: z.string().max(100),
+          url: z.string().max(2048),
+          credential: z.string().max(64).optional(),
+          transport: z.enum(['http', 'sse']).optional(),
+        })).max(32).optional(),
+        domains: z.array(z.string().max(253)).max(64).optional(),
+        body: z.string().max(100_000),
+      },
+      sandbox
+        ? async (args) => textResult(await sandbox.writeSkillFile(args as never))
+        : (args) => ipcCall('skill_write', args),
+    ),
+
     // ── Grep (search file contents) ──
     tool('grep', getToolDescription('grep'),
       {
@@ -243,13 +283,24 @@ export function createIPCMcpServer(client: IIPCClient, opts?: MCPServerOptions):
           },
     ),
 
-    // ── Execute Script (PTC) — always runs locally, no IPC needed ──
-    tool('execute_script', getToolDescription('execute_script'),
+    // ── Tool-dispatch meta-tools (indirect mode) ──
+    // Thin IPC pass-throughs to the host's describe_tools / call_tool handlers.
+    // Filtered out in direct mode via filterTools() (Task 3.5 / 5.1).
+    tool('describe_tools', getToolDescription('describe_tools'),
       {
-        code: z.string().max(500_000).describe('JavaScript code to execute. Can import from /workspace/.ax/tools/.'),
-        timeoutMs: z.number().int().min(1000).max(120_000).optional().describe('Execution timeout in ms (default: 30000, max: 120000)'),
+        names: z.array(z.string())
+          .describe('Empty array lists every tool (directory mode); non-empty fetches full schemas for those names.'),
       },
-      async (args) => textResult(executeScript(args, opts?.localSandbox?.workspace ?? process.cwd())),
+      (args) => ipcCall('describe_tools', args),
+    ),
+
+    tool('call_tool', getToolDescription('call_tool'),
+      {
+        tool: z.string().describe('The catalog tool name to invoke.'),
+        args: z.record(z.string(), z.unknown())
+          .describe('Structured arguments matching the tool schema.'),
+      },
+      (args) => ipcCall('call_tool', args),
     ),
 
     // ── Glob (find files by pattern) ──

@@ -275,6 +275,98 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     singletonAction: 'sandbox_edit_file',
   },
   {
+    // `skill_write` — the ONLY authoring path for .ax/skills/<name>/SKILL.md.
+    // write_file and edit_file refuse SKILL.md paths and point here. Direct
+    // file tools still work for everything else under .ax/skills/ (scripts,
+    // reference docs, deletes).
+    name: 'skill_write',
+    label: 'Create or Update Skill',
+    description:
+      'Create or update a skill at `.ax/skills/<name>/SKILL.md`. Use this ' +
+      'instead of write_file when authoring a skill — it takes structured ' +
+      'frontmatter fields and runs the host Zod validator, so mistakes (missing ' +
+      'description, `authType: apiKey` instead of `api_key`, nested credential ' +
+      'objects, etc.) come back as actionable errors that name the offending ' +
+      'field AND show what you actually wrote, instead of the skill silently ' +
+      'landing in the repo as invalid.\n\n' +
+      'Replaces the file atomically. To update an existing skill, read the old ' +
+      'SKILL.md first with `read_file`, then call skill_write with the full new ' +
+      'spec — partial frontmatter edits are not supported.',
+    parameters: Type.Object({
+      name: Type.String({
+        description:
+          'Skill directory name. Must match [a-zA-Z0-9][a-zA-Z0-9._-]* and ' +
+          'will be used as the `<name>` segment in `.ax/skills/<name>/SKILL.md`. ' +
+          'Must equal the `name` field in the frontmatter the host parses.',
+      }),
+      description: Type.String({
+        minLength: 1,
+        maxLength: 2000,
+        description:
+          'Required. When and why to use this skill — concrete trigger ' +
+          'phrases the next-turn agent will read. Do not leave this empty.',
+      }),
+      source: Type.Optional(Type.Object({
+        url: Type.String({ description: 'Provenance URL' }),
+        version: Type.Optional(Type.String()),
+      })),
+      credentials: Type.Optional(Type.Array(Type.Object({
+        envName: Type.String({
+          description:
+            'SCREAMING_SNAKE_CASE env var name (e.g. "LINEAR_API_KEY"). ' +
+            'Regex: ^[A-Z][A-Z0-9_]{1,63}$',
+        }),
+        authType: Type.Union([Type.Literal('api_key'), Type.Literal('oauth')], {
+          description:
+            'EXACTLY "api_key" or "oauth" — snake_case literals. Not ' +
+            '"apiKey", not "API_KEY", not "bearer". These are the only two values.',
+        }),
+        scope: Type.Optional(Type.Union([Type.Literal('user'), Type.Literal('agent')], {
+          description: '"user" (per-user credential, default) or "agent" (shared across users of this agent).',
+        })),
+        oauth: Type.Optional(Type.Object({
+          provider: Type.String(),
+          clientId: Type.String(),
+          authorizationUrl: Type.String({ description: 'Must start with https://' }),
+          tokenUrl: Type.String({ description: 'Must start with https://' }),
+          scopes: Type.Optional(Type.Array(Type.String())),
+        }, { description: 'Required ONLY when authType is "oauth".' })),
+      }), {
+        description:
+          'Credentials this skill needs. Each entry defines an env var name ' +
+          'and its auth mechanism. Omit this field entirely when the skill has no secrets.',
+      })),
+      mcpServers: Type.Optional(Type.Array(Type.Object({
+        name: Type.String({ description: 'Arbitrary short name for the server entry.' }),
+        url: Type.String({ description: 'Must start with https://' }),
+        credential: Type.Optional(Type.String({
+          description:
+            'BARE envName STRING — a reference to an entry in credentials[] above. ' +
+            'NOT a nested {envName, authType, scope} object. Example: "LINEAR_API_KEY".',
+        })),
+        transport: Type.Optional(Type.Union([Type.Literal('http'), Type.Literal('sse')], {
+          description: 'Transport. Inferred from URL path if omitted (/sse → sse, else http).',
+        })),
+      }), {
+        description:
+          'Remote MCP server endpoints. Omit entirely if the service has no MCP — ' +
+          'do not invent a fake entry to "hold" a credential.',
+      })),
+      domains: Type.Optional(Type.Array(Type.String(), {
+        description:
+          'Additional hostnames the skill needs the proxy to allow. Plain hostnames only — ' +
+          'no scheme, no path. Leading wildcards like "*.foo.com" allowed.',
+      })),
+      body: Type.String({
+        description:
+          'Markdown body of the SKILL.md (everything after the YAML frontmatter). ' +
+          'Should include "## When to use", "## When pending", and "## How to use" sections.',
+      }),
+    }),
+    category: 'workspace',
+    singletonAction: 'skill_write',
+  },
+  {
     name: 'grep',
     label: 'Search File Contents',
     description:
@@ -317,31 +409,64 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
     singletonAction: 'sandbox_glob',
   },
 
-  // ── Execute Script (PTC) ──
+  // ── Tool-dispatch meta-tools (indirect mode only) ──
+  // `describe_tools` + `call_tool` are the unified tool-dispatch meta-tools
+  // introduced in Phase 3 of the tool-dispatch-unification work. They are
+  // filtered out of the catalog in `direct` mode (see filterTools).
+  //
+  // Both are structural pass-throughs — the agent forwards args to the host
+  // via IPC, and the host consults the per-turn catalog (built from active
+  // skills) to resolve the dispatch.
   {
-    name: 'execute_script',
-    label: 'Execute Script',
+    name: 'describe_tools',
+    label: 'Describe Tools',
     description:
-      'Run a JavaScript script with access to tool modules.\n\n' +
-      'The script can import modules from /workspace/.ax/tools/ to call external tools ' +
-      '(MCP servers, APIs). Only the script\'s stdout output is returned — ' +
-      'intermediate tool calls do NOT enter your context window.\n\n' +
-      'Use this for multi-step tool pipelines instead of calling tools individually.\n\n' +
-      'Example:\n' +
-      '```\n' +
-      'import { listIssues } from \'/workspace/.ax/tools/linear/index.js\';\n' +
-      'const bugs = await listIssues({ query: \'bug\', limit: 5 });\n' +
-      'console.log(JSON.stringify(bugs, null, 2));\n' +
-      '```\n\n' +
-      'IMPORTANT: Use console.log() for output. Only stdout is captured.',
+      "Look up catalog tools. Two modes:\n\n" +
+      "• `names: []` (empty array) — DIRECTORY MODE: returns every catalog tool " +
+      "(name + summary, no schema). Use this when you don't know the tool name " +
+      "yet — one call and you have the full list, no name-guessing.\n\n" +
+      "• `names: ['mcp_foo_bar', ...]` — SCHEMA MODE: returns full JSON schemas " +
+      "for the named tools. Call this after the directory mode narrowed you to " +
+      "the 1-3 tools you'll actually use.\n\n" +
+      "Always returns `{tools: [{name, summary, schema}], unknown: [names_not_found]}`. " +
+      "In schema mode, every returned schema includes an optional `_select` (jq " +
+      "projection) property injected by the host — pair it with `call_tool` to " +
+      "keep the response in your context small.",
     parameters: Type.Object({
-      code: Type.String({ maxLength: 500_000, description: 'JavaScript code to execute. Can import from /workspace/.ax/tools/.' }),
-      timeoutMs: Type.Optional(Type.Integer({ minimum: 1000, maximum: 120_000, description: 'Execution timeout in ms (default: 30000, max: 120000)' })),
+      names: Type.Array(Type.String(), {
+        description:
+          'Pass [] to list every catalog tool (directory mode), or an array of ' +
+          'tool names to fetch full schemas for those tools (schema mode).',
+      }),
     }),
-    category: 'sandbox',
-    timeoutMs: 120_000,
-    singletonAction: 'execute_script',
+    category: 'delegation',
+    singletonAction: 'describe_tools',
   },
+  {
+    name: 'call_tool',
+    label: 'Call Tool',
+    description:
+      "Invoke a catalog tool by name with structured arguments. Use after " +
+      "optionally consulting `describe_tools` for the schema. Pass a jq " +
+      "filter via `args._select` to project the response server-side — " +
+      "useful for keeping your context small. Returns " +
+      "`{result}` on success or `{error, kind}` on failure " +
+      "(`unknown_tool` | `unsupported_dispatch` | `dispatch_failed` | `select_failed`).",
+    parameters: Type.Object({
+      tool: Type.String({ description: 'The catalog tool name to invoke.' }),
+      args: Type.Record(Type.String(), Type.Unknown(), {
+        description: 'Structured arguments matching the tool schema.',
+      }),
+    }),
+    category: 'delegation',
+    singletonAction: 'call_tool',
+  },
+
+  // ── execute_script REMOVED (Tasks 11 + 12) ──
+  // Retired in favor of the `tool` CLI shim model
+  // (`mcp_linear_get_team --query=Product | jq -r .id` from the `bash` tool).
+  // Task 11 removed the catalog entry; Task 12 deleted the handler, preamble,
+  // and /tmp/ax-results spill protocol.
 ] as const;
 
 /** All tool names, derived from the catalog. */
@@ -381,13 +506,26 @@ export function getToolParamKeys(name: string): string[] {
 export interface ToolFilterContext {
   /** identityFiles.heartbeat is non-empty (used by prompt modules, not tool filtering) */
   hasHeartbeat: boolean;
+  /** Tool-dispatch mode. `indirect` (default) exposes describe_tools + call_tool;
+   *  `direct` filters them out (catalog tools are registered individually instead). */
+  toolDispatchMode?: 'direct' | 'indirect';
 }
+
+/** Tool names that are only relevant in `indirect` tool-dispatch mode. */
+const INDIRECT_ONLY_TOOLS = new Set(['describe_tools', 'call_tool']);
 
 /**
  * Filter the catalog to tools relevant to the current session.
- * Without a context, returns the full catalog (backward compat).
+ *
+ * In `direct` dispatch mode, the meta-tools `describe_tools` and `call_tool`
+ * are hidden — the agent is expected to receive individual catalog tools as
+ * first-class `tools[]` entries instead (Task 5.1). In `indirect` mode (the
+ * default), both meta-tools are exposed so the LLM can discover schemas and
+ * dispatch by name.
  */
-export function filterTools(_ctx: ToolFilterContext): readonly ToolSpec[] {
-  return TOOL_CATALOG;
+export function filterTools(ctx: ToolFilterContext): readonly ToolSpec[] {
+  const mode = ctx.toolDispatchMode ?? 'indirect';
+  if (mode === 'indirect') return TOOL_CATALOG;
+  return TOOL_CATALOG.filter(spec => !INDIRECT_ONLY_TOOLS.has(spec.name));
 }
 

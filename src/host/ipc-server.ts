@@ -16,7 +16,8 @@ import { createArtifactHandlers } from './ipc-handlers/artifact.js';
 import { createPluginHandlers } from './ipc-handlers/plugin.js';
 import { createOrchestrationHandlers } from './ipc-handlers/orchestration.js';
 import { createSandboxToolHandlers } from './ipc-handlers/sandbox-tools.js';
-import { createToolBatchHandlers, type ToolBatchProvider, type ToolBatchOptions } from './ipc-handlers/tool-batch.js';
+import { createDescribeToolsHandler, type CatalogReader } from './ipc-handlers/describe-tools.js';
+import { createCallToolHandler, type CallToolMcpDispatcher } from './ipc-handlers/call-tool.js';
 import { validateCommit } from './validate-commit.js';
 import type { Orchestrator } from './orchestration/orchestrator.js';
 
@@ -78,9 +79,6 @@ export interface IPCHandlerOptions {
   orchestrator?: Orchestrator;
   /** Maps sessionId → workspace directory path. Populated by processCompletion(), consumed by sandbox tool handlers. */
   workspaceMap?: Map<string, string>;
-  /** Returns the MCP provider for tool batch execution (null = not configured).
-   *  Accepts either a simple callback or full ToolBatchOptions with plugin MCP routing. */
-  toolBatchProvider?: ((ctx: IPCContext) => ToolBatchProvider | null) | ToolBatchOptions;
   /** GCS file storage for persistent file access. */
   gcsFileStorage?: import('./gcs-file-storage.js').GcsFileStorage;
   /** File store for file metadata lookups. */
@@ -89,6 +87,22 @@ export interface IPCHandlerOptions {
   onArtifactWritten?: (fileId: string, mimeType: string, filename: string) => void;
   /** Unified session manager — used by fetch_work handler to return queued work. */
   sessionManager?: import('./session-manager.js').SessionManager;
+  /** Per-turn catalog lookup for `describe_tools` / `call_tool` handlers.
+   *  The host populates per-turn state in `processCompletion` (same
+   *  lifetime as `workspaceMap`); this closure reads that state by
+   *  context at IPC time. Returns `undefined` when no catalog has been
+   *  registered for this context — handler treats that as "every name
+   *  is unknown" instead of erroring. */
+  resolveCatalog?: (ctx: IPCContext) => CatalogReader | undefined;
+  /** MCP dispatcher for the `call_tool` handler. Absent → `call_tool` is
+   *  not registered, requests fall through to the default "No handler"
+   *  path (correct failure mode for hosts not in unified-dispatch mode). */
+  callToolMcpDispatcher?: CallToolMcpDispatcher;
+  /** Spill threshold (UTF-8 bytes) for `call_tool` responses. Sourced
+   *  from `config.tool_dispatch.spill_threshold_bytes`. When omitted, the
+   *  `call_tool` handler falls back to the default constant — keeps
+   *  unit-test harnesses that skip server-init wiring working. */
+  spillThresholdBytes?: number;
 }
 
 export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerOptions) {
@@ -114,7 +128,26 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
       agentId,
       onArtifactWritten: opts?.onArtifactWritten,
     }) : {}),
-    ...(opts?.toolBatchProvider ? createToolBatchHandlers(opts.toolBatchProvider) : {}),
+    // describe_tools — indirect-mode meta-tool, returns full inputSchemas
+    // for host-catalog entries the agent names. Schemas are augmented with
+    // an `_select` jq projection knob (paired with `applyJq` in
+    // `call-tool.ts`). Wired only when a catalog lookup is provided —
+    // absent, the action falls through to the generic "No handler" path,
+    // which is the right failure mode for a host that isn't in
+    // unified-dispatch mode yet.
+    ...(opts?.resolveCatalog ? { describe_tools: createDescribeToolsHandler({ resolveCatalog: opts.resolveCatalog }) } : {}),
+    // call_tool — single-tool dispatch by catalog lookup. Same catalog
+    // plumbing as describe_tools; also needs an MCP dispatcher to route
+    // MCP-kind catalog entries. Absent either → action falls through.
+    ...(opts?.resolveCatalog && opts?.callToolMcpDispatcher
+      ? {
+          call_tool: createCallToolHandler({
+            resolveCatalog: opts.resolveCatalog,
+            mcpProvider: opts.callToolMcpDispatcher,
+            spillThresholdBytes: opts.spillThresholdBytes,
+          }),
+        }
+      : {}),
     // Session work loop — agent polls for queued work
     ...(opts?.sessionManager ? {
       fetch_work: async (_req: unknown, ctx: IPCContext) => {
@@ -122,9 +155,10 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
         return { ok: true, payload: payload ?? null };
       },
     } : {}),
-    // Commit validation — git sidecar sends diff for .ax/ file validation
+    // Commit validation — git sidecar sends diff + optional full files for
+    // .ax/ file validation (size + path + SKILL.md frontmatter schema).
     validate_commit: async (req: any) => {
-      return validateCommit(req.diff);
+      return validateCommit(req.diff, req.files);
     },
   };
 

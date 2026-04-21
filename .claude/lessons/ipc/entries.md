@@ -1,5 +1,11 @@
 # IPC
 
+### Per-turn host state reaches IPC handlers via closure or a shared Map, not handler re-creation
+**Date:** 2026-04-19
+**Context:** Task 3.3 of tool-dispatch-unification needed the per-turn `ToolCatalog` (built in `processCompletion`) to be readable by the `describe_tools` IPC handler. The IPC handler is built once in `createIPCHandler` and lives for the whole server lifetime — the naive fix (re-create the handler each turn) doesn't fit.
+**Lesson:** When an IPC handler needs per-turn state, plumb it via one of two patterns that already exist in the codebase: (1) a shared `Map<sessionId, T>` populated by `processCompletion` and captured by the handler factory — `workspaceMap` is the canonical example (`src/host/server-init.ts:176`, `src/host/server-completions.ts:875`); (2) a `getX(ctx): T | undefined` closure passed into `IPCHandlerOptions` — cleaner when the handler only needs read-only lookup and you want to hide the storage strategy. Do NOT move the state's lifetime to session-scope just to simplify access — per-turn is per-turn for correctness reasons (e.g. skill-HEAD-keyed catalog caches). Handler contract: returning an empty result when no state is registered for this ctx is usually the right failure mode (no throw), because the handler lands outside a turn's lifetime only in pathological cases (e.g. agent calls after `workspaceMap.delete(sessionId)` in the completion `finally` block).
+**Tags:** ipc, per-turn-state, workspace-map, tool-catalog, handler-lifetime, plumbing
+
 ### Removing IPC actions has a massive blast radius across tests
 **Date:** 2026-04-15
 **Context:** Removing identity/governance IPC schemas, handlers, and tools required updating 20+ test files across agent, host, integration, and e2e directories.

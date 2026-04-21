@@ -4,6 +4,7 @@ Agent process lessons: runner implementations, prompt building, image forwarding
 
 ## Entries
 
+- Conditional catalog tools piggyback on ToolFilterContext, not parallel registration paths [entries.md](entries.md)
 - Integration tests of the Runtime prompt module need non-empty identity [entries.md](entries.md)
 - ALL LLM providers must handle image_data and file_data ContentBlocks — not just Anthropic [entries.md](entries.md)
 - Both runners must handle ALL ContentBlock types from server — not just text [entries.md](entries.md)

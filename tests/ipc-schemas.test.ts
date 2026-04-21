@@ -3,6 +3,7 @@ import {
   IPC_SCHEMAS, IPCEnvelopeSchema,
   LlmCallSchema, MemoryWriteSchema, MemoryReadSchema,
   AuditQuerySchema, WebFetchSchema,
+  DescribeToolsSchema, CallToolSchema,
 } from '../src/ipc-schemas.js';
 
 describe('IPC Schema Validation (SC-SEC-001)', () => {
@@ -229,6 +230,90 @@ describe('IPC Schema Validation (SC-SEC-001)', () => {
         action: 'audit_query',
         filter: { action: 'llm_call', limit: 10 },
       }).success).toBe(true);
+    });
+  });
+
+  // ── Describe Tools ──
+  describe('DescribeToolsSchema', () => {
+    test('accepts list of names', () => {
+      const envelope = { action: 'describe_tools', names: ['mcp_linear_x'] };
+      expect(() => IPCEnvelopeSchema.parse(envelope)).not.toThrow();
+      expect(DescribeToolsSchema.safeParse(envelope).success).toBe(true);
+    });
+
+    test('accepts multiple names', () => {
+      expect(DescribeToolsSchema.safeParse({
+        action: 'describe_tools',
+        names: ['bash', 'read_file', 'grep'],
+      }).success).toBe(true);
+    });
+
+    test('accepts empty names array (directory mode — list every catalog tool)', () => {
+      expect(DescribeToolsSchema.safeParse({
+        action: 'describe_tools',
+        names: [],
+      }).success).toBe(true);
+    });
+
+    test('rejects missing names', () => {
+      expect(DescribeToolsSchema.safeParse({ action: 'describe_tools' }).success).toBe(false);
+    });
+
+    test('rejects extra fields (strict mode)', () => {
+      expect(DescribeToolsSchema.safeParse({
+        action: 'describe_tools',
+        names: ['bash'],
+        evil: 'field',
+      }).success).toBe(false);
+    });
+
+    test('rejects non-string names', () => {
+      expect(DescribeToolsSchema.safeParse({
+        action: 'describe_tools',
+        names: [42],
+      }).success).toBe(false);
+    });
+  });
+
+  // ── Call Tool ──
+  describe('CallToolSchema', () => {
+    test('accepts tool + args', () => {
+      const envelope = { action: 'call_tool', tool: 'mcp_linear_x', args: { team: 'p' } };
+      expect(() => IPCEnvelopeSchema.parse(envelope)).not.toThrow();
+      expect(CallToolSchema.safeParse(envelope).success).toBe(true);
+    });
+
+    test('accepts empty args object', () => {
+      expect(CallToolSchema.safeParse({
+        action: 'call_tool',
+        tool: 'list_files',
+        args: {},
+      }).success).toBe(true);
+    });
+
+    test('rejects missing args', () => {
+      expect(CallToolSchema.safeParse({ action: 'call_tool', tool: 'x' }).success).toBe(false);
+    });
+
+    test('rejects missing tool', () => {
+      expect(CallToolSchema.safeParse({ action: 'call_tool', args: {} }).success).toBe(false);
+    });
+
+    test('rejects non-object args', () => {
+      expect(CallToolSchema.safeParse({
+        action: 'call_tool',
+        tool: 'bash',
+        args: 'not an object',
+      }).success).toBe(false);
+    });
+
+    test('rejects extra fields (strict mode)', () => {
+      expect(CallToolSchema.safeParse({
+        action: 'call_tool',
+        tool: 'bash',
+        args: {},
+        evil: 'field',
+      }).success).toBe(false);
     });
   });
 

@@ -149,7 +149,7 @@ describe('IPC MCP Server', () => {
     expect(Object.keys(tools)).not.toContain('skill');
   });
 
-  test('all 13 tools are registered without filter', () => {
+  test('all 15 tools are registered without filter (indirect default)', () => {
     const client = createMockClient();
     const server = createIPCMcpServer(client);
     const tools = getTools(server);
@@ -160,14 +160,18 @@ describe('IPC MCP Server', () => {
       'agent',
       'save_artifact',
       'bash', 'read_file', 'write_file', 'edit_file',
-      'grep', 'glob', 'execute_script',
+      'skill_write',
+      'grep', 'glob',
+      // Tool-dispatch meta-tools (Task 3.5) — indirect mode, but no filter
+      // means no mode-based exclusion, so they show up here.
+      'describe_tools', 'call_tool',
     ];
 
     const registeredNames = Object.keys(tools);
     for (const name of expectedTools) {
       expect(registeredNames, `expected tool "${name}" to be registered`).toContain(name);
     }
-    expect(registeredNames.length).toBe(13);
+    expect(registeredNames.length).toBe(15);
   });
 
   test('scheduler is always present regardless of hasHeartbeat', () => {
@@ -206,5 +210,30 @@ describe('IPC MCP Server', () => {
     const toolNames = Object.keys(tools);
 
     expect(toolNames).toContain('scheduler');
+  });
+
+  // ── Tool-dispatch meta-tools (Task 3.5) ──────────────────────────────
+
+  test('indirect mode (default) exposes describe_tools + call_tool', () => {
+    const client = createMockClient();
+    const server = createIPCMcpServer(client, {
+      filter: { hasHeartbeat: false, toolDispatchMode: 'indirect' },
+    });
+    const names = Object.keys(getTools(server));
+    expect(names).toContain('describe_tools');
+    expect(names).toContain('call_tool');
+  });
+
+  test('direct mode hides describe_tools + call_tool', () => {
+    const client = createMockClient();
+    const server = createIPCMcpServer(client, {
+      filter: { hasHeartbeat: false, toolDispatchMode: 'direct' },
+    });
+    const names = Object.keys(getTools(server));
+    expect(names).not.toContain('describe_tools');
+    expect(names).not.toContain('call_tool');
+    // Other tools survive
+    expect(names).toContain('memory');
+    expect(names).toContain('bash');
   });
 });

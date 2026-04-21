@@ -286,6 +286,47 @@ export const SandboxEditFileSchema = ipcAction('sandbox_edit_file', {
   new_string: safeString(500_000),
 });
 
+// ── Skill authoring ────────────────────────────────────────
+// `skill_write` is the ONLY path for creating or updating
+// `.ax/skills/<name>/SKILL.md`. The handler takes structured frontmatter
+// fields (matching `SkillFrontmatterSchema`), serializes to YAML, round-trips
+// through the shared parser so the bytes it writes are proven to validate,
+// and returns actionable errors on failure. sandbox_write_file and
+// sandbox_edit_file refuse SKILL.md paths and redirect callers here.
+
+const skillCredential = z.strictObject({
+  envName: safeString(64),
+  authType: z.enum(['api_key', 'oauth']),
+  scope: z.enum(['user', 'agent']).optional(),
+  oauth: z.strictObject({
+    provider: safeString(100),
+    clientId: safeString(500),
+    authorizationUrl: safeString(2048),
+    tokenUrl: safeString(2048),
+    scopes: z.array(safeString(100)).optional(),
+  }).optional(),
+});
+
+const skillMcpServer = z.strictObject({
+  name: safeString(100),
+  url: safeString(2048),
+  credential: safeString(64).optional(),
+  transport: z.enum(['http', 'sse']).optional(),
+});
+
+export const SkillWriteSchema = ipcAction('skill_write', {
+  name: safeString(100),
+  description: safeString(2000),
+  source: z.strictObject({
+    url: safeString(2048),
+    version: safeString(200).optional(),
+  }).optional(),
+  credentials: z.array(skillCredential).max(32).optional(),
+  mcpServers: z.array(skillMcpServer).max(32).optional(),
+  domains: z.array(safeString(253)).max(64).optional(),
+  body: safeString(100_000),
+});
+
 export const SandboxGrepSchema = ipcAction('sandbox_grep', {
   pattern: safeString(10_000),
   path: safeString(1024).optional(),
@@ -322,14 +363,22 @@ export const SandboxResultSchema = ipcAction('sandbox_result', {
   error: safeString(10_000).optional(),
 });
 
-// ── Tool Batch (scripted tool execution) ────────────
+// ── Tool Dispatch (describe + call) ──────────────────
 
-export const ToolBatchSchema = ipcAction('tool_batch', {
-  /** Ordered tool calls. Args may contain { __batchRef, path } for dependent pipelining. */
-  calls: z.array(z.object({
-    tool: safeString(200),
-    args: z.record(z.string(), z.unknown()),
-  })),
+/** Fetch full schemas + descriptions for one or more tools (host-side tool catalog). */
+export const DescribeToolsSchema = ipcAction('describe_tools', {
+  // Empty `names` = "list every catalog tool (name + summary, no schema)".
+  // Non-empty `names` = "return full schemas for the named tools".
+  // Letting the agent discover the catalog with one call prevents the
+  // name-guessing thrash that happens when the Available-tools section
+  // isn't enough (dropped for budget, skill tools not yet discovered, etc).
+  names: z.array(safeString(200)),
+});
+
+/** Invoke a single tool by name with typed args (host-side dispatch). */
+export const CallToolSchema = ipcAction('call_tool', {
+  tool: safeString(200),
+  args: z.record(z.string(), z.unknown()),
 });
 
 // ── Agent Work Loop ─────────────────────────────────
@@ -349,6 +398,16 @@ export const PluginStatusSchema = ipcAction('plugin_status', {
 
 export const ValidateCommitSchema = ipcAction('validate_commit', {
   diff: safeString(262_144), // 256KB max diff
+  // Optional full-file contents for deeper per-file checks that need more
+  // than just the diff hunks (currently: SKILL.md frontmatter schema, which
+  // needs the `---` delimiters that partial diffs often omit). The sidecar
+  // collects full content only for the narrow paths the host wants to
+  // schema-check; everything else goes through the diff-only path.
+  // Per-file size caps to 128KB — skills are 64KB by validateCommit() anyway.
+  files: z.array(z.strictObject({
+    path: safeString(500),
+    content: safeString(131_072),
+  })).max(50).optional(),
 });
 
 // ═══════════════════════════════════════════════════════
