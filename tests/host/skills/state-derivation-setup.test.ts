@@ -119,4 +119,50 @@ describe('computeSetupQueue', () => {
     const queue = computeSetupQueue(snapshot, empty);
     expect(queue).toEqual([]);
   });
+
+  it('surfaces the full editable frontmatter — every credential, every domain (with approved flag), every mcpServer with transport + credential ref', () => {
+    const snapshot: SkillSnapshotEntry[] = [
+      {
+        name: 'linear',
+        ok: true,
+        frontmatter: {
+          name: 'linear',
+          description: 'x',
+          credentials: [{ envName: 'LINEAR_API_KEY', authType: 'api_key', scope: 'user' }],
+          mcpServers: [{
+            name: 'linear',
+            url: 'https://mcp.linear.app/sse',
+            transport: 'sse',
+            credential: 'LINEAR_API_KEY',
+          }],
+          domains: ['api.linear.app', 'extra.linear.app'],
+        },
+        body: '',
+      },
+    ];
+    const queue = computeSetupQueue(snapshot, {
+      // One of the two domains already approved; the card must still
+      // surface both so the admin can inspect + remove the approved one.
+      approvedDomains: new Set(['linear/api.linear.app']),
+      storedCredentials: new Set(),
+    });
+    expect(queue).toHaveLength(1);
+    const card = queue[0];
+    expect(card.credentials).toEqual([
+      { envName: 'LINEAR_API_KEY', authType: 'api_key', scope: 'user', oauth: undefined },
+    ]);
+    expect(card.domains).toEqual([
+      { domain: 'api.linear.app', approved: true },
+      { domain: 'extra.linear.app', approved: false },
+    ]);
+    expect(card.unapprovedDomains).toEqual(['extra.linear.app']);
+    expect(card.mcpServers).toEqual([
+      {
+        name: 'linear',
+        url: 'https://mcp.linear.app/sse',
+        transport: 'sse',
+        credential: 'LINEAR_API_KEY',
+      },
+    ]);
+  });
 });

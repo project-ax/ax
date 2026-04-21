@@ -4,7 +4,10 @@
  * can be authenticated at tool-discovery time using skill-scoped credentials.
  */
 import { describe, test, expect, afterEach } from 'vitest';
-import { resolveMcpAuthHeaders } from '../../src/host/server-completions.js';
+import { resolveMcpAuthHeaders, fingerprintCred } from '../../src/host/server-completions.js';
+import { initLogger } from '../../src/logger.js';
+
+initLogger({ file: false, level: 'silent' });
 import type {
   SkillCredStore,
   SkillCredRow,
@@ -144,5 +147,43 @@ describe('resolveMcpAuthHeaders', () => {
       skillCredStore: store,
     });
     expect(headers).toEqual({ Authorization: 'Bearer from-store' });
+  });
+});
+
+// ── Credential fingerprinting ──────────────────────────────────────────
+//
+// Fingerprints are logged alongside every resolution so ops can tell which
+// stored row was selected without seeing any plaintext. These tests guard
+// the two invariants that matter: no secret portion ever leaks, and two
+// distinct values never collide in practice. (Log shape itself is manually
+// verified via the `skill_cred_resolved` entries — child-logger isolation
+// makes spy-based capture clunkier than the fix is worth.)
+
+describe('fingerprintCred', () => {
+  test('same value → same fingerprint (idempotent)', () => {
+    expect(fingerprintCred('abc-123')).toBe(fingerprintCred('abc-123'));
+  });
+
+  test('different values → different fingerprints', () => {
+    expect(fingerprintCred('value-A')).not.toBe(fingerprintCred('value-B'));
+    expect(fingerprintCred('super-secret-token')).not.toBe(fingerprintCred('other-secret-token'));
+  });
+
+  test('never returns any portion of the plaintext', () => {
+    const secret = 'super-secret-api-key-value';
+    const fp = fingerprintCred(secret);
+    // Every 3+ char window of the plaintext must be absent from the fingerprint.
+    for (let i = 0; i + 3 <= secret.length; i++) {
+      expect(fp).not.toContain(secret.slice(i, i + 3));
+    }
+  });
+
+  test('returns exactly 8 hex characters for non-empty values', () => {
+    expect(fingerprintCred('anything')).toMatch(/^[0-9a-f]{8}$/);
+    expect(fingerprintCred('xoxb-1234567890')).toMatch(/^[0-9a-f]{8}$/);
+  });
+
+  test('returns the sentinel `<empty>` for the empty string so log consumers can distinguish it from a real fingerprint', () => {
+    expect(fingerprintCred('')).toBe('<empty>');
   });
 });
