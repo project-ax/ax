@@ -26,7 +26,7 @@ const mockConfig = {
     credentials: 'database', audit: 'database',
     sandbox: 'docker', scheduler: 'none',
   },
-  sandbox: { timeout_sec: 120, memory_mb: 512 },
+  sandbox: { timeout_sec: 120, memory_mb: 512, cpus: 1 },
   scheduler: {
     active_hours: { start: '07:00', end: '23:00', timezone: 'America/New_York' },
     max_token_budget: 4096, heartbeat_interval_min: 30,
@@ -368,7 +368,7 @@ describe('spawn command construction', () => {
 // ── MCP Server Tool Registry ─────────────────────────────────────────
 
 describe('MCP server tool registry security', () => {
-  test('exposes exactly 13 IPC tools', () => {
+  test('exposes exactly 15 IPC tools', () => {
     const client = createMockClient();
     const server = createIPCMcpServer(client);
     const tools = getTools(server);
@@ -380,11 +380,14 @@ describe('MCP server tool registry security', () => {
       'save_artifact',
       // Sandbox tools
       'bash', 'read_file', 'write_file', 'edit_file', 'grep', 'glob',
-      'execute_script',
+      // Skill authoring — dedicated validator-backed tool.
+      'skill_write',
+      // Tool-dispatch meta-tools (Task 3.5) — indirect mode default.
+      'describe_tools', 'call_tool',
     ];
 
     expect(Object.keys(tools).sort()).toEqual(expected.sort());
-    expect(Object.keys(tools).length).toBe(13);
+    expect(Object.keys(tools).length).toBe(15);
   });
 
   test('tool results are JSON strings, not raw objects with taint', () => {

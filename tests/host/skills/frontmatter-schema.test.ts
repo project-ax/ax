@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SkillFrontmatterSchema } from '../../../src/host/skills/frontmatter-schema.js';
+import { SkillFrontmatterSchema } from '../../../src/skills/frontmatter-schema.js';
 
 describe('SkillFrontmatterSchema', () => {
   it('accepts minimal valid frontmatter', () => {
