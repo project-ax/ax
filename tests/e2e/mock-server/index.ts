@@ -14,6 +14,7 @@ import type { AddressInfo } from 'node:net';
 import { handleGCS, resetGCS } from './gcs.js';
 import { handleOpenRouter, resetOpenRouter } from './openrouter.js';
 import { handleLinear, resetLinear } from './linear.js';
+import { handleMcp, resetMcp } from './mcp.js';
 
 let server: Server | null = null;
 
@@ -53,6 +54,7 @@ export function resetAll(): void {
   resetGCS();
   resetOpenRouter();
   resetLinear();
+  resetMcp();
 }
 
 function routeRequest(req: IncomingMessage, res: ServerResponse): void {
@@ -87,6 +89,12 @@ function routeRequest(req: IncomingMessage, res: ServerResponse): void {
   // Linear — /graphql
   if (url.startsWith('/graphql')) {
     handleLinear(req, res);
+    return;
+  }
+
+  // MCP — /mcp/* (Task 4.4 e2e: mock Linear MCP server + /_stats hook)
+  if (url.startsWith('/mcp/') || url === '/mcp') {
+    handleMcp(req, res);
     return;
   }
 

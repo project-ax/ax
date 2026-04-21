@@ -198,6 +198,83 @@ export async function setup(): Promise<void> {
   console.log(`[setup] Waiting for rollout...`);
   run('kubectl', ['rollout', 'status', 'deployment/ax-host', '-n', 'ax-e2e', '--timeout=300s'], { timeout: 600_000 });
 
+  // 10a. Seed the `ax` agent's bare repo with the linear_mcp fixture skill.
+  //
+  // Why this is needed: the `git-local` workspace provider creates an
+  // empty bare repo at ~/.ax/repos/ax/ on first use, but nothing actually
+  // commits to it until `hostGitCommit` fires AFTER a successful turn —
+  // which doesn't happen in k8s-sandbox mode because the sandbox pod owns
+  // the workspace writes, not the host. So the catalog-building code path
+  // (`buildSnapshotFromBareRepo` → git ls-tree) sees an empty repo and
+  // yields an empty catalog, and `mcp_linear_mcp_get_team` never lands in
+  // the catalog.
+  //
+  // Rather than reshape the k8s seeding pipeline (out of scope for Task
+  // 4.4), we pre-seed the fixture skill directly into the bare repo via
+  // kubectl exec. Production gets the usual seed-on-first-turn flow;
+  // e2e's kind cluster gets this explicit pre-commit.
+  console.log(`[setup] Seeding linear_mcp fixture skill into agent bare repo...`);
+  const podName = run('kubectl', [
+    'get', 'pod', '-n', 'ax-e2e', '-l', 'app.kubernetes.io/name=ax-host',
+    '-o', 'jsonpath={.items[0].metadata.name}',
+  ]);
+  // Build the seed script that runs inside the pod. It:
+  //   1. Reads the fixture SKILL.md from /opt/ax/fixtures/skills/linear_mcp/
+  //      (baked into the image by container/agent/Dockerfile).
+  //   2. Uses git plumbing (hash-object, update-index, commit-tree,
+  //      update-ref) directly against the bare repo so we don't need a
+  //      working tree.
+  //   3. Idempotent — skips if refs/heads/main already exists.
+  const seedScript = `set -eu
+REPO=/home/ax/.ax/repos/ax
+SKILL_SRC=/opt/ax/fixtures/skills/linear_mcp/SKILL.md
+
+# Wait for the repo to appear (the host process creates it lazily on
+# first workspace request; on a fresh pod it may not exist yet).
+for i in $(seq 1 30); do
+  if [ -d "$REPO" ]; then break; fi
+  sleep 1
+done
+if [ ! -d "$REPO" ]; then
+  # Create the bare repo ourselves if the host hasn't yet.
+  mkdir -p "$REPO"
+  git init --bare -b main "$REPO" >/dev/null
+fi
+
+# Skip if already seeded (idempotent).
+if git -C "$REPO" rev-parse --verify refs/heads/main >/dev/null 2>&1; then
+  echo "already seeded"
+  exit 0
+fi
+
+# Set up author identity for commit-tree.
+export GIT_AUTHOR_NAME="e2e-setup"
+export GIT_AUTHOR_EMAIL="e2e-setup@ax.local"
+export GIT_COMMITTER_NAME="e2e-setup"
+export GIT_COMMITTER_EMAIL="e2e-setup@ax.local"
+
+# Hash SKILL.md as a blob in the bare repo.
+BLOB=$(git -C "$REPO" hash-object -w "$SKILL_SRC")
+
+# Build tree: .ax/skills/linear_mcp/SKILL.md -> BLOB.
+INNER=$(printf "100644 blob $BLOB\\tSKILL.md\\n" | git -C "$REPO" mktree)
+SKILLS=$(printf "040000 tree $INNER\\tlinear_mcp\\n" | git -C "$REPO" mktree)
+AX=$(printf "040000 tree $SKILLS\\tskills\\n" | git -C "$REPO" mktree)
+ROOT=$(printf "040000 tree $AX\\t.ax\\n" | git -C "$REPO" mktree)
+
+# Commit and point main at it.
+COMMIT=$(git -C "$REPO" commit-tree "$ROOT" -m "e2e: seed linear_mcp fixture skill")
+git -C "$REPO" update-ref refs/heads/main "$COMMIT"
+echo "seeded: $COMMIT"
+`;
+  // Fail the whole setup if seeding doesn't land — a silent skip here would
+  // show up downstream as "test 18 mysteriously fails" with no actionable
+  // signal. Fail-fast is cheaper than 12 minutes of debugging.
+  const seedOut = run('kubectl', [
+    'exec', '-n', 'ax-e2e', podName, '--', 'sh', '-c', seedScript,
+  ], { timeout: 120_000 });
+  console.log(`[setup] Seed result: ${seedOut.trim()}`);
+
   // 11. Port-forward
   const localPort = await findFreePort();
   console.log(`[setup] Port-forwarding to localhost:${localPort}...`);
@@ -242,6 +319,15 @@ export async function teardown(): Promise<void> {
   }
 
   const state: SetupState = JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
+
+  // Debug hook: AX_E2E_KEEP_CLUSTER=1 leaves the kind cluster + port-forward
+  // running so you can kubectl exec / kubectl logs after a failing run.
+  if (process.env.AX_E2E_KEEP_CLUSTER === '1') {
+    console.log(`[teardown] AX_E2E_KEEP_CLUSTER=1 — leaving cluster ${state.clusterName} + port-forward pid ${state.portForwardPid} running`);
+    console.log(`[teardown] Server still reachable at ${state.serverUrl}`);
+    return;
+  }
+
   console.log(`[teardown] Cleaning up...`);
 
   // Kill port-forward

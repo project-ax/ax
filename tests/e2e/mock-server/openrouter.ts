@@ -35,14 +35,42 @@ function handleChatCompletion(req: IncomingMessage, res: ServerResponse): void {
     const messages = body.messages ?? [];
 
     // Detect tool-result follow-ups: if the last message is a tool result,
-    // return a content-only summary instead of matching scripted turns again.
-    // Without this, the mock matches the same user message and returns
-    // another tool_call, creating an infinite tool loop in the agent.
+    // we have two possible behaviors:
+    //   (a) Scripted multi-turn chain — try to match the tool-result content
+    //       against any turn's `matchToolResult` pattern. If one matches,
+    //       emit that turn's response (which may itself be another tool_call,
+    //       driving the next step in the chain).
+    //   (b) Fallback (preserves legacy behavior for tests 1-17) — no match →
+    //       return a content-only summary so the agent doesn't loop forever
+    //       by re-matching the same user message and re-emitting the same
+    //       tool_call.
     const lastMsg = messages[messages.length - 1];
     const isToolResultFollowUp = lastMsg?.role === 'tool';
     if (isToolResultFollowUp) {
       const toolContent = lastMsg.content ?? '';
-      const summary = `Done. Tool returned: ${typeof toolContent === 'string' ? toolContent.slice(0, 200) : JSON.stringify(toolContent).slice(0, 200)}`;
+      const toolText = typeof toolContent === 'string'
+        ? toolContent
+        : JSON.stringify(toolContent);
+
+      // (a) Scripted match against `matchToolResult`.
+      let chainedTurn: ScriptedTurn | undefined;
+      for (const t of ALL_TURNS) {
+        if (!t.matchToolResult) continue;
+        const matched = typeof t.matchToolResult === 'string'
+          ? toolText.toLowerCase().includes(t.matchToolResult.toLowerCase())
+          : t.matchToolResult.test(toolText);
+        if (matched) {
+          chainedTurn = t;
+          break;
+        }
+      }
+      if (chainedTurn) {
+        sendResponse(res, body, chainedTurn);
+        return;
+      }
+
+      // (b) Fallback — content-only summary.
+      const summary = `Done. Tool returned: ${toolText.slice(0, 200)}`;
       const followUpTurn: ScriptedTurn = {
         match: '',
         response: { content: summary },

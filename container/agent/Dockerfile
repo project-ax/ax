@@ -34,6 +34,11 @@ COPY dist/ ./dist/
 COPY templates/ ./templates/
 COPY skills/ ./skills/
 
+# e2e test fixtures — test-only skills used by the regression harness.
+# Production ignores this path unless AX_SKILLS_DIR points here (which it
+# only does in `tests/e2e/kind-values.yaml`). A few KB; not gated.
+COPY tests/e2e/fixtures/ ./fixtures/
+
 RUN groupadd -r ax && useradd -r -g ax -m ax
 USER ax
 

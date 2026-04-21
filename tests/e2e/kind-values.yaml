@@ -25,6 +25,14 @@ host:
   resources:
     requests: { cpu: "500m", memory: "1Gi" }
     limits: { cpu: "1", memory: "2Gi" }
+  # Point at the e2e test-fixture skills dir baked into the image.
+  # Default prod path is the project-root `skills/` dir; here we swap
+  # to the fixture dir so Task 4.4's `linear-mcp` SKILL.md (with
+  # https://mock-target.test/mcp/linear frontmatter) gets seeded into
+  # every agent's `.ax/skills/`.
+  env:
+    - name: AX_SKILLS_DIR
+      value: /opt/ax/fixtures/skills
 
 config:
   agent: pi-coding-agent
@@ -39,7 +47,6 @@ config:
     sandbox: k8s
     security: patterns
     scheduler: plainjob
-    skills: git
     channels: []
     web:
       extract: none
@@ -47,7 +54,7 @@ config:
     storage: database
     database: postgresql
     eventbus: postgres
-    workspace: gcs
+    workspace: git-local
   history:
     max_turns: 50
     thread_context_turns: 5
@@ -59,14 +66,6 @@ config:
     memory_recall_scope: "*"
     embedding_model: deepinfra/Qwen/Qwen3-Embedding-0.6B
     embedding_dimensions: 1024
-  workspace:
-    bucket: ax-e2e-workspace
-    maxFileSize: 10485760
-    maxFiles: 100
-    maxCommitSize: 52428800
-    ignorePatterns:
-      - "node_modules"
-      - ".git"
   sandbox:
     timeout_sec: 120
     memory_mb: 512
@@ -105,6 +104,12 @@ postgresql:
 
 webProxy:
   enabled: true
+
+# Disable the git-server deployment — e2e uses workspace: git-local (on-disk
+# bare repos), so no external git server is needed. Also avoids the
+# ImagePullBackOff for `ax-git-server:local` (that image isn't built by e2e).
+gitServer:
+  enabled: false
 
 networkPolicies:
   enabled: false
