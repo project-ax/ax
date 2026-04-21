@@ -270,6 +270,30 @@ providers:
       const config = loadConfig(tmpPath);
       expect(config.sandbox.timeout_sec).toBe(120);
       expect(config.sandbox.memory_mb).toBe(512);
+      expect(config.sandbox.cpus).toBe(1);
+    });
+  });
+
+  test('sandbox.cpus is configurable with decimals', async () => {
+    const yaml = `profile: balanced\nsandbox:\n  timeout_sec: 60\n  memory_mb: 1024\n  cpus: 2.5\n`;
+    await withTempConfig(yaml, (tmpPath) => {
+      const config = loadConfig(tmpPath);
+      expect(config.sandbox.cpus).toBe(2.5);
+    });
+  });
+
+  test('sandbox.cpus defaults to 1 when sandbox block omits it', async () => {
+    const yaml = `profile: balanced\nsandbox:\n  timeout_sec: 60\n  memory_mb: 1024\n`;
+    await withTempConfig(yaml, (tmpPath) => {
+      const config = loadConfig(tmpPath);
+      expect(config.sandbox.cpus).toBe(1);
+    });
+  });
+
+  test('sandbox.cpus rejects out-of-range values', async () => {
+    const yaml = `profile: balanced\nsandbox:\n  timeout_sec: 60\n  memory_mb: 1024\n  cpus: 32\n`;
+    await withTempConfig(yaml, (tmpPath) => {
+      expect(() => loadConfig(tmpPath)).toThrow();
     });
   });
 

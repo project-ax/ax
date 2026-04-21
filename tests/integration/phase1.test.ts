@@ -46,7 +46,7 @@ function mockConfig(profile: 'paranoid' | 'balanced' | 'yolo' = 'balanced'): Con
       credentials: 'database', audit: 'database',
       sandbox: 'docker', scheduler: 'none',
     },
-    sandbox: { timeout_sec: 30, memory_mb: 256 },
+    sandbox: { timeout_sec: 30, memory_mb: 256, cpus: 1 },
     scheduler: {
       active_hours: { start: '00:00', end: '23:59', timezone: 'UTC' },
       max_token_budget: 4096,

@@ -16,7 +16,7 @@ const config: Config = {
     sandbox: 'docker',
     scheduler: 'none',
   },
-  sandbox: { timeout_sec: 120, memory_mb: 512 },
+  sandbox: { timeout_sec: 120, memory_mb: 512, cpus: 1 },
   scheduler: {
     active_hours: { start: '07:00', end: '23:00', timezone: 'America/New_York' },
     max_token_budget: 4096,

@@ -1,5 +1,11 @@
 # Config
 
+### Adding a new field to an already-spread config object may be dead on arrival
+**Date:** 2026-04-21
+**Context:** While adding `config.sandbox.cpus`, discovered `server-init.ts` heavy-tier branch had been spreading `cpus: 4` into the child config for months — but the spawn site in `server-completions.ts` hardcoded `cpus: 1` in the `SandboxConfig`, so the heavy-tier CPU value was silently overwritten. The field existed in `SandboxConfig` and docker/apple providers already read `config.cpus`, but the plumbing from `Config.sandbox` → `SandboxConfig` was broken.
+**Lesson:** When exposing a new config field, trace the full path: Zod schema → TS `Config` type → the spawn/construction site that builds the provider-facing `SandboxConfig` (or equivalent) → the provider's usage site. Spreading a value into `Config.sandbox` is not enough — the spawn site must explicitly forward `config.sandbox.X` into the provider config. Hardcoded defaults at spawn sites are silent killers for "configurable" fields.
+**Tags:** config, plumbing, sandbox, dead-code, zod, blast-radius
+
 ### Renaming a Config field has massive blast radius — check YAML fixtures too
 **Date:** 2026-02-26
 **Context:** Renamed `config.model` + `config.model_fallbacks` to `config.models` array. First test run after updating source had 8 test file failures because 6 YAML test fixtures and 2 inline test configs still used the old `model:` field. Zod strict mode rejected the unrecognized key.

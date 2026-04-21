@@ -12,7 +12,7 @@ function testConfig(channelConfig?: Record<string, unknown>): Config {
       audit: 'database', sandbox: 'docker', scheduler: 'none',
     },
     channel_config: channelConfig as any,
-    sandbox: { timeout_sec: 30, memory_mb: 512 },
+    sandbox: { timeout_sec: 30, memory_mb: 512, cpus: 1 },
     scheduler: {
       active_hours: { start: '09:00', end: '17:00', timezone: 'UTC' },
       max_token_budget: 1000, heartbeat_interval_min: 60,
