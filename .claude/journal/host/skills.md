@@ -4,6 +4,167 @@ Git-native skills rollout: snapshot builder, state store, reconcile orchestrator
 
 ## Entries
 
+## [2026-04-21 05:52] — Block SKILL.md frontmatter mutations from non-interactive sessions
+
+**Task:** After the sidebar-fix landed, the deeper issue remained: heartbeat/cron turns were rewriting SKILL.md frontmatter to "fix" pending skills — commonly flipping envName, credential ref, or transport — breaking admin-approved state and flipping the skill PENDING. Symptom was intermittent `invalid_token` errors that resolved after an admin re-approved via Test-&-Enable, then recurred next heartbeat.
+
+**What I did:**
+- Added `src/skills/frontmatter-diff.ts` — `frontmattersEqual`, `changedFrontmatterFields`, `isInteractiveSession`. Canonical key-order-independent JSON comparison; `isInteractiveSession` matches the same `http:` prefix filter used by the chat-sidebar gate.
+- Gated the host-side `skill_write` IPC handler in `sandbox-tools.ts`: if the session isn't `http:` AND an existing SKILL.md's frontmatter differs from the incoming write, reject with a message naming the changed fields + a distinct `blocked: 'non_interactive_frontmatter_mutation'` audit entry. Body-only edits still pass through because `frontmattersEqual` ignores the body. Creation (ENOENT) is allowed.
+- Mirrored the guard in pod-side `local-sandbox.ts` `writeSkillFile`. Threaded `config.sessionId` through `pi-session.ts` + `claude-code.ts` → `createIPCMcpServer` / `createIPCTools` / `createIPCToolDefinitions` → `createLocalSandbox`.
+- Tests: 12 frontmatter-diff unit tests; 4 new end-to-end guard tests on the IPC handler covering creation / body-only / blocked mutation / allowed-for-http.
+
+**Files touched:**
+- Added: `src/skills/frontmatter-diff.ts`, `tests/skills/frontmatter-diff.test.ts`
+- Modified (host): `src/host/ipc-handlers/sandbox-tools.ts`
+- Modified (agent): `src/agent/local-sandbox.ts`, `src/agent/mcp-server.ts`, `src/agent/ipc-tools.ts`, `src/agent/runners/pi-session.ts`, `src/agent/runners/claude-code.ts`
+- Modified (tests): `tests/host/ipc-handlers/sandbox-tools.test.ts`
+
+**Outcome:** 743/743 agent + ipc + skills tests green. Intermittent `invalid_token` should resolve — non-interactive turns can't drift frontmatter out from under stored credentials anymore.
+
+**Notes:** Alternative considered: block `skill_write` entirely from non-http sessions. Rejected because agents legitimately update skill bodies during long-running tasks (adding usage notes, examples, pending-state instructions). The narrow "frontmatter only" guard preserves that utility while closing the auth-break path. The `changedFrontmatterFields` list is surfaced in the error so the agent learns exactly what it's not allowed to change — next time it'll write the same frontmatter with only body edits.
+
+## [2026-04-21 05:35] — Scheduler/cron sessions were polluting the chat UI sidebar
+
+**Task:** User noticed strange threads in the chat sidebar with hallucinated titles ("Rotates GKE cluster credentials for PROD-2241") and fabricated "configure Linear skill" responses — all tagged as if they were user chats. Hypothesis: heartbeat/cron runs were being stored as chat sessions.
+
+**Root cause:** `server-completions.ts` unconditionally called `chatSessions.ensureExists(persistentSessionId)` on first-turn-with-history, then kicked off title generation. But `persistentSessionId` is populated for EVERY provider — including `scheduler:dm:...` sessions from cron jobs and heartbeat ticks. Result: every agent self-initiated turn (skill retry, reconcile, periodic check-ins) wrote a row to `chat_sessions` and surfaced in the chat UI sidebar as an orphan thread with an LLM-generated title.
+
+**What I did:** Gated the `ensureExists` + title-gen block on `persistentSessionId.startsWith('http:')`. Chat UI sessions canonicalize as `http:dm:<agent>:<localId>:<userId>`; scheduler / cron / heartbeat / channel sessions start with other providers (`scheduler:`, `slack:`, etc.). Left a comment explaining the sidebar-pollution symptom so a future maintainer doesn't relax the guard without knowing why.
+
+**Files touched:** `src/host/server-completions.ts`.
+
+**Outcome:** tsc clean; 174/174 storage + skills tests still pass. Existing sidebar rows from prior cron runs persist in the DB until the user manually cleans them — `DELETE FROM chat_sessions WHERE id NOT LIKE 'http:%'` does it.
+
+**Notes:** The deeper issue — the agent hallucinating tasks like "rotate GKE credentials for PROD-2241" during heartbeats — is separate. Likely needs tightening of HEARTBEAT.md prompt + constraints on self-initiated actions. This commit only stops those runs from leaking into the user's chat UI.
+
+## [2026-04-21 05:05] — Don't cache a catalog build that had per-server listTools failures
+
+**Task:** User reported Linear worked on first approval, then started returning "invalid_token" on subsequent turns + staying broken. Fingerprints identical across both resolver paths; same value being sent both ways. `credential_ref` fires during catalog discovery (cache miss), `pattern` fires during actual `call_tool` dispatch — explaining which path was visible on "failing" vs "succeeding" turns.
+
+**Root cause:** `populateCatalogFromSkills` silently swallowed per-server `listTools` failures — `catalog_populate_server_failed` logged, loop continued. `getOrBuildCatalog` then cached the resulting (empty-for-the-flaky-server) catalog, keyed on `(agentId, userId, headSha)`. Every subsequent turn at the same HEAD hit the cache and got "no Linear tools" forever — until HEAD changed or the OAuth callback fired. A single transient 401 locked the agent out.
+
+**What I did:**
+- `populateCatalogFromSkills` now returns `PopulateCatalogResult { serverFailures, toolRegisterFailures }`. Server failures are transient (network, rate-limit, auth flake); tool-register failures are deterministic dupes and don't count against cache-ability.
+- `getOrBuildCatalog`'s `build()` closure now returns `{tools, partial}`. When `partial: true`, the cache SKIPS the `store.set()` so the next turn retries the flaky server. The calling turn still gets whatever tools were successfully gathered — skip-write is purely about not poisoning future turns.
+- Wired in `server-completions.ts`: `partial = buildResult.serverFailures > 0`, plus a `catalog_partial_build` warn log with serverFailures + catalogSize so partial builds surface in logs instead of sliding by.
+
+**Files touched:** `src/host/skills/catalog-population.ts`, `src/host/tool-catalog/cache.ts`, `src/host/server-completions.ts`, `tests/host/skills/catalog-population.test.ts`, `tests/host/tool-catalog/cache.test.ts`.
+
+**Outcome:** 329/329 skill + auth tests green. One new test in each file: `populateCatalogFromSkills` reports `serverFailures > 0` on rejects; `getOrBuildCatalog` skips cache on `partial: true` and next turn rebuilds. Existing tests exercised the clean (`serverFailures: 0`) path.
+
+**Notes:** This was the most load-bearing bug of the Test-&-Enable rollout — the symptom looked identical to "wrong credential" (the invalid_token error) but the underlying issue was stale-cache poisoning. The fix composes: existing invalidation paths (post-receive hook, OAuth callback) still work; the new partial-skip is orthogonal and only fires when the build itself reports trouble. Deterministic failures (dupe tool names) stay cache-safe because we're NOT treating them as retryable.
+
+## [2026-04-20 22:15] — skill_cred_resolved log: every matching row + selection reason + fingerprint (no value leak)
+
+**Task:** User reported intermittent `invalid_token` errors from Linear after approval. Three candidate causes: stale rows from multiple Test-&-Enable runs, probe false-positive, or `process.env` shadowing. Need to see which stored row is being selected at turn time without leaking the secret.
+
+**What I did:**
+- `resolveMcpAuthHeaders` and `resolveMcpAuthHeadersByCredential` now emit a single `skill_cred_resolved` log per call with:
+  - `matchingRowCount` + `matchingRows[]` — every row the query found (skillName, envName, userScope, userId, valueFingerprint, valueLength).
+  - `selectedRow` — the row actually used.
+  - `selectionReason` — `user_scope_match` / `agent_scope_fallback` / `first_row_fallback` / `process_env` / `none`.
+  - `resolverPath` — `credential_ref` (authoritative) vs `pattern` (legacy) so ops can tell the paths apart in one grep.
+  - `source` — `skill_credentials` / `process_env` / `none`.
+- `fingerprintCred(value)` helper: first 8 hex chars of SHA-256, exported for unit tests. Empty values get sentinel `<empty>`.
+- Attempted logger-capture tests but gave up — child loggers are module-scoped, can't spy post-import. Kept 5 static fingerprint tests that verify the no-leak invariant (no 3-char window of the plaintext appears in the fingerprint) and distinctness + idempotence. The log shape itself is verifiable manually from the actual log lines.
+
+**Files touched:** `src/host/server-completions.ts`, `tests/host/server-completions-mcp-auth.test.ts`.
+
+**Outcome:** 13/13 mcp-auth tests, 208/208 in the related cluster. The next "invalid_token" incident can be diagnosed from `grep skill_cred_resolved` alone: compare the fingerprint of the selected row against what the admin thinks they typed; a different 8-char hex means the store holds a stale or wrong value.
+
+**Notes:** The big realization: "which row got picked" is the load-bearing question, not "what value" — and you can answer it with a hash prefix. Never log plaintext secrets, even at debug level. Security invariant: the test suite proves no 3+ char substring of the input leaks into the fingerprint.
+
+## [2026-04-20 21:22] — Actionable unknown-tool error + catalog name logging for name-guessing diagnosis
+
+**Task:** After the ref-auth fix deployed, the next failure mode was the agent hitting `call_tool("mcp_linear_get_team")` — a name not in the catalog — and bouncing off the flat "unknown tool: X" error without any hint to call `describeTool([])` or try a near name. Also: the `catalog_registered` log emitted counts but not names, so diagnosing "did the agent guess wrong or is the catalog empty?" required an extra round trip.
+
+**What I did:**
+- `createCallToolHandler` now decorates unknown-tool errors with (a) the top-N closest name matches from the live catalog and (b) a pointer at `ax.describeTool([])` for the full directory. Empty catalog gets a distinct "catalog is empty" message so the agent doesn't spin on suggestions that don't exist.
+- New exported `pickClosestNames(target, candidates, limit)` helper — shared-token scoring with a same-skill prefix bonus and a `mcp` stop-token so cross-skill candidates don't surface just because they share the catalog's universal prefix.
+- Extended `catalog_registered` log with `catalogNames: [...]` when the catalog has 1-50 entries. Big catalogs stay counts-only (log line bloat), but small ones — the common case — let "empty vs wrong-name" be answered from the log alone.
+
+**Files touched:** `src/host/ipc-handlers/call-tool.ts`, `src/host/server-completions.ts`, `tests/host/ipc-handlers/call-tool.test.ts`.
+
+**Outcome:** 33/33 call-tool tests green. Four new tests: unknown-tool hint with close matches, generic nudge when nothing overlaps, empty-catalog message, and three `pickClosestNames` ranking assertions (same-skill wins, no-overlap returns empty, limit honored).
+
+**Notes:** The prompt-catalog one-liner already lists every tool by name, so in theory the agent should never name-guess. In practice it still does — probably because the catalog section drops under budget pressure, because the agent's training prior is strong, or because partial-name recall is just noisy. The error-hint is a cheap safety net that converts one wrong call into one right call instead of N wrong calls.
+
+## [2026-04-20 21:15] — Fix turn-time catalog 401 for admin-approved skills (asymmetric auth path)
+
+**Task:** User reported "linear skill ENABLED but no tools" — pulled the `catalog_registered` log and saw `catalogSize: 0, catalogBySkill: {}`. Catalog population silently failed. Probe during Test-&-Enable had worked (otherwise approve would've rejected); turn-time catalog-build was failing.
+
+**Root cause:** Asymmetric credential resolution. Probe used the authoritative `mcpServers[].credential` envName from frontmatter. Catalog population used `resolveMcpAuthHeaders(serverName)` — a name-prefix pattern match (`<SERVER>_API_KEY`, `<SERVER>_TOKEN`, etc.) that never looked at the skill's explicit credential ref. Skills whose server name didn't match the prefix pattern (e.g. server `linear-mcp-server` + envName `LINEAR_API_KEY`) got a successful probe followed by silent 401s on every turn. Same asymmetry in the parallel `ensureToolsDiscoveredForHead` path.
+
+**What I did:**
+- New `resolveMcpAuthHeadersByCredential({envName, agentId, userId, skillCredStore})` in `server-completions.ts` — direct lookup by bare envName + same scope precedence as the pattern resolver.
+- Extended `BuildTurnMcpClientFactoryInput` with an optional `resolveAuthHeadersByCredential(envName)` resolver. Factory now indexes `credentialRef` per server from the snapshot and prefers the ref-based lookup when it's pinned, falling through to the legacy pattern resolver for ref-less servers.
+- Also indexed `transport` per server in the factory — meta from `McpConnectionManager` is authoritative when present, but when the manager hasn't been warmed we now fall back to the frontmatter's declared transport rather than the `connectAndListTools` default `http`. Fixes the SSE-transport regression that the original test caught.
+- Wired both resolvers into `server-completions.ts` for both `populateCatalogFromSkills` AND the parallel `ensureToolsDiscoveredForHead` path — side-indexed the credential refs by server name so `authForServer({name, url})` can look up without touching the full snapshot.
+- Added a `debug`-level `auth_resolved` log with `authSource` ∈ `meta` / `credential_ref` / `pattern` / `none` so the next "empty catalog" incident is one grep away from a root cause.
+
+**Files touched:** `src/host/skills/mcp-client-factory.ts`, `src/host/server-completions.ts`, `tests/host/skills/mcp-client-factory.test.ts`.
+
+**Outcome:** 306/306 skill + ipc-handler tests green. `tsc` clean. Three new tests: ref-resolver wins when declared, pattern fallback when ref-resolver returns undefined, pattern-only path when no ref was pinned. The invariant "probe OK → turn-time OK" now holds regardless of server-name shape.
+
+**Notes:** The pattern resolver wasn't wrong — it's a useful fallback for skills that don't pin credentials or for dev env-var overrides. But it was being asked to do a job it couldn't: guess the envName from the server name. The ref is authoritative when present, and the probe's success proved the admin typed a value that works. Making turn-time use the same lookup closes the loop.
+
+## [2026-04-20 21:05] — Prompt hint: MCP list tools wrap results + point at `_select` as the drill-in knob
+
+**Task:** After the JSON-parse fix, `ax.callTool('mcp_linear_list_teams', {})` correctly returned `{teams: [...]}` — but the agent kept calling `.map()` / `.find()` on the top-level value, so it still thrashed ("teams.map is not a function"). The model has no prior signal about MCP's common `{<plural>: [...]}` wrap convention.
+
+**What I did:** Extended `ToolCatalogModule` to append a 3-line usage note after the `## Available tools` block, rendered only when the catalog has at least one tool. The note names the wrap pattern explicitly (`{teams: [...]}`, `{issues: [...]}`), suggests `Object.keys(result)` as a probe, and shows `_select: '.teams[] | {id, name}'` as the drill-in-and-shape-in-one-call shortcut. Two new tests: presence when catalog renders, absence when catalog is empty.
+
+**Files touched:** `src/agent/prompt/modules/tool-catalog.ts`, `tests/agent/prompt/modules/tool-catalog.test.ts`.
+
+**Outcome:** 11/11 tool-catalog prompt tests pass. `tsc` clean. Deploy + observe: one call with a shape the agent sees should cut re-attempt count from 5+ to 1.
+
+**Notes:** Picking the right length here mattered — the model's attention is limited, so a 10-line block hurts more than it helps. Three tight bullets (what ax.callTool returns, the wrap pattern, the _select escape hatch) covers the decision each time. If agents still thrash after this, the next lever is making `describe_tools` return a sample response shape — but MCP's listTools only exposes inputSchema, so that's a probe-and-cache problem, not a free-data one.
+
+## [2026-04-20 21:00] — Fix ax.callTool returning MCP content as a raw JSON-encoded string
+
+**Task:** Agent thrashed 7+ times trying `ax.callTool('mcp_linear_list_teams', ...)` → `.find()` failed ("teams.find is not a function"), then `_select: '.[] | ...'` failed with "jq: Cannot iterate over string (\"{\"issues\")". Root cause: the `call_tool` dispatcher adapter in `server-init.ts` returned `result.content` verbatim. MCP delivers structured tool results as text content blocks whose `.text` is a JSON-encoded string (Linear returns `'{"teams":[...]}'`), so the agent always got a string where it expected an object/array, and jq can't iterate strings.
+
+**What I did:** Extracted a one-liner helper `parseMcpTextResult(content)` into `src/host/ipc-handlers/call-tool.ts` — if `content` is a string, try `JSON.parse`; on parse failure return the string unchanged; pass-through non-strings. Wired the adapter in `server-init.ts` to use it. Plain-text tool responses (status messages, single-line replies) still work because `JSON.parse` throws and the string falls through.
+
+**Files touched:** `src/host/ipc-handlers/call-tool.ts`, `src/host/server-init.ts`, `tests/host/ipc-handlers/call-tool.test.ts`.
+
+**Outcome:** `tsc` clean. call-tool.test.ts 26/26 pass (20 existing + 6 new covering object/array/primitive parse, non-JSON-string passthrough, non-string passthrough, JSON-looking-but-broken string). The fix is in one place (the dispatcher adapter); the `call_tool` handler stays dispatcher-agnostic.
+
+**Notes:** The global-MCP-server path (`src/providers/mcp/database.ts:148`) has the same raw-string return but its caller contract expects `{content: string, isError}` so I left it alone — different surface. This fix only touches the skill-catalog dispatch path that `ax.callTool` rides on. Agents still need to drill into wrapper fields (`.teams`, `.issues`) but at least now `.find()` + jq actually work on the parsed structure.
+
+## [2026-04-20 20:30] — Test-&-Enable approval flow: live-probe MCP + editable frontmatter in card + SKILL.md rewrite on approve
+
+**Task:** Agent-written SKILL.md was landing with wrong URL / wrong transport (`.../sse` with `transport: sse` when `.../mcp` + `http` was needed) and a bad skill just sat in the approval queue — admin couldn't fix it without dismissing + re-asking. New flow: every high-risk field in the card is editable; one "Test & Enable" button probes each declared MCP server with the admin's (typed or stored) creds; only if every probe passes do we rewrite SKILL.md in the agent's repo + persist creds + approve domains. SKILL.md rewrite closes the loop so the agent learns from the correction.
+
+**What I did:**
+- New helper `src/host/skills/probe-mcp-server.ts` — `probeMcpServer`/`probeMcpServers` call the same `connectAndListTools` + `applyUrlRewrite` path catalog population uses, so "passes here → works next turn" is a tight invariant. 6 tests cover success, MCP error, header/transport passthrough, missing-headers omission, url_rewrite application, and parallel + order preservation.
+- Extended `SetupRequest` in `src/host/skills/types.ts` with full editable surface: `credentials[]` (every entry, not just missing), `domains: [{domain, approved}]` (so approved entries stay visible + removable), `mcpServers[]` now carries `transport` + `credential` ref. Kept `missingCredentials` + `unapprovedDomains` as derived subsets for back-compat. Updated `computeSetupQueue` to populate the new fields; added a test case.
+- Rewrote `approveSkillSetup` in `src/host/server-admin-skills-helpers.ts` as a single atomic Test-&-Enable: `ApproveBodySchema` now takes `frontmatter: { credentials, mcpServers, domains }` + `credentialValues[]` instead of the old `credentials: [{envName, value}]` + `approveDomains[]`. Flow: load current SKILL.md (snapshot), compose intended frontmatter, round-trip through parseSkillFile, build Authorization headers from admin-typed or stored values, probe every MCP server, on failure return 400 with per-server `probeFailures[]` and nothing persists. On pass: `providers.workspace.commitFiles` rewrites SKILL.md, credentials go to `skill_credentials`, domains go to `skill_domain_store`, audit log fires. Commit message + author identify admin provenance.
+- Wired `urlRewrites: deps.config.url_rewrites` through the HTTP handler + surfaced `probeFailures` in the error envelope without tripping `sendError`'s wrapper.
+- Rebuilt the approval card UI (`ui/admin/src/components/pages/approvals-page.tsx`): every credential row is now 3 editable inputs (envName / authType / scope) + a password field; every MCP server row has transport dropdown, URL input, and a credential reference dropdown populated from the credentials edited above; domains render as removable chips with an "Add" input. Probe failures display inline on the offending server with a red border. Button renamed "Test & Enable". envName rename also rewrites any mcpServer.credential refs pointing at the old name — no orphan references.
+- Updated `SkillApproveBody` / `SkillApproveResponse` / `SetupCard` / `SetupCardCredential` in `ui/admin/src/lib/types.ts` + `apiFetch` to hoist `probeFailures[]` onto the thrown Error.
+- Rewrote skill-creator's step 5 preamble in `skills/skill-creator/SKILL.md`: every high-risk field now MUST appear in the preview — MCP URL, **transport** (was silently inferred, which is what bit us), envName, authType, scope, domains. Added the note that admins can fix anything in the dashboard so the preview is a confidence check, not the last chance.
+
+**Files touched:**
+- Added: `src/host/skills/probe-mcp-server.ts`, `tests/host/skills/probe-mcp-server.test.ts`
+- Modified (host): `src/host/skills/types.ts`, `src/host/skills/state-derivation.ts`, `src/host/server-admin-skills-helpers.ts`, `src/host/server-admin.ts`
+- Modified (agent skill): `skills/skill-creator/SKILL.md`
+- Modified (admin UI): `ui/admin/src/components/pages/approvals-page.tsx`, `ui/admin/src/lib/api.ts`, `ui/admin/src/lib/types.ts`, `ui/admin/tests/fixtures.ts`
+- Modified (tests): `tests/host/skills/state-derivation-setup.test.ts`, `tests/host/server-admin-skills.test.ts` (185 tests rewritten to the new body shape via subagent).
+
+**Outcome:** Vitest skill suite 185/185 green; full suite 2783/2840 (33 pre-existing macOS socket failures unchanged, 24 skipped). Admin UI builds clean (tsc + vite). Playwright approvals spec fully rewritten — **14/14 tests pass** against the new UI: editable credential row, URL + transport flip, probe-failure inline render, domain add/remove round-trip, OAuth Connect-via hint, all fixture-shape guards. The 15 failing tests in `agents.spec.ts` + `agent-tabs.spec.ts` are pre-existing (reproduce with my changes stashed) and unrelated.
+
+**Notes:** The critical missing piece before this was "agent can't verify its own SKILL.md before writing + admin can't fix it after". Now the agent only has to get close; the human closes the loop with one button press. The probe uses the SAME `connectAndListTools` path catalog population uses, so there's no drift between "Test says OK" and "actual turn works". SKILL.md rewrite via `providers.workspace.commitFiles` reuses the existing bare-repo commit plumbing — the post-receive hook auto-triggers reconcile, no extra cache-invalidation call needed.
+
+## [2026-04-20 13:55] — Task 6.3: retire `.ax/tools/` codegen pipeline (host side)
+
+**Task:** Tool-dispatch-unification Phase 6 — with catalog-delivered tools + `ax.callTool()` now the single source-of-truth (Tasks 2–5 + 6.1–6.2), the per-skill codegen that wrote `.ax/tools/<skill>/*.js` at approve time is dead weight. This was the big end of the skills-pipeline's side of the work.
+**What I did:** Deleted `src/host/toolgen/` (4 files) + its 5-file test tree. Deleted `src/host/skills/tool-module-sync.ts` and its test. Removed the refresh-tools admin endpoint + `syncToolModules` plumbing from every layer that threaded it: `AdminDeps`, `HostCore`, `AdminSetupOpts`, `ApproveDeps`. Removed the approve-time tool-sync block from `approveSkillSetup()` — skills approve cleanly without committing `.ax/tools/` side effects; the per-turn catalog covers discovery. Pruned `syncToolModules` stubs from 4 admin test files; deleted the entire "tool-module sync on approval" describe block (6 tests) from `server-admin-skills.test.ts`.
+**Files touched:** Deleted `src/host/toolgen/`, `src/host/skills/tool-module-sync.ts`, `tests/host/toolgen/`, `tests/host/skills/tool-module-sync.test.ts`, `tests/host/server-admin-refresh-tools.test.ts`. Modified `server-init.ts`, `server-admin.ts`, `server-admin-skills-helpers.ts`, `server-webhook-admin.ts`, `server.ts`, plus 4 admin test files.
+**Outcome:** Success. Build clean; 77 admin tests pass. Agent-side follow-ups (tool-index-loader, prompt-runtime branch, admin-ui button) land in subsequent commits.
+**Notes:** The subtle bit is the approve helper — the old path synchronously committed tool modules as a best-effort side effect of skill approval. That's gone. The skill's credentials + domain approvals are still written synchronously (hard state), and the catalog gets built per-turn against the live MCP server on the next chat turn. Nothing the agent sees changes: the committed `.ax/tools/` tree was already stale between turns anyway (codegen ran at approve time, not on every MCP server update).
+
 ## [2026-04-19 10:33] — Render tool-index signatures with destructuring braces (single-object-arg call shape)
 
 **Task:** After 10:25 fix landed, next log showed agent calling `getTeam('Product')` and `listCycles(team.id, 'current')` — positional args. The enum hint worked (picked `'current'`), the wrap hint worked (`cycles.cycles?.[0]`), but the signature render `listCycles(teamId, type?: "current"|"previous"|"next")` read to the model as a TypeScript *positional* signature (`fn(a, b)`). It was Claude's best guess from its training, not something it had looked up.

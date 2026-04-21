@@ -30,6 +30,16 @@ vi.mock('../../src/host/identity-reader.js', () => ({
   IDENTITY_FILE_MAP: [],
 }));
 
+// Mock the MCP probe: Test-&-Enable calls this for every declared MCP server
+// before persisting. Tests that want the probe to pass return ok:true; the
+// probe-failure tests override this mock per-test with mockImplementationOnce.
+vi.mock('../../src/host/skills/probe-mcp-server.js', () => ({
+  probeMcpServers: vi.fn(async (servers: Array<{ name: string }>) =>
+    servers.map(s => ({ name: s.name, ok: true, toolCount: 1 }))),
+  probeMcpServer: vi.fn(async (server: { name: string }) =>
+    ({ name: server.name, ok: true, toolCount: 1 })),
+}));
+
 initLogger({ file: false, level: 'silent' });
 
 // ── Git bare-repo seed helpers for agentSkillsDeps fixtures ──
@@ -173,7 +183,7 @@ function makeConfig(): Config {
       sandbox: 'docker',
       scheduler: 'none',
     },
-    sandbox: { timeout_sec: 120, memory_mb: 512 },
+    sandbox: { timeout_sec: 120, memory_mb: 512, cpus: 1 },
     scheduler: {
       active_hours: { start: '07:00', end: '23:00', timezone: 'UTC' },
       max_token_budget: 4096,
@@ -242,7 +252,10 @@ function stubAgentSkillsDeps(opts: {
         const agentId = key.split('@')[0];
         const cards = byAgentId.get(agentId) ?? [];
         // Synthesize one entry per card with frontmatter that reproduces the
-        // pending card (missing creds + unapproved domains).
+        // pending card (missing creds + unapproved domains). The new SetupRequest
+        // shape carries `credentials` + `domains` (full lists) + mcpServers with
+        // transport; we mirror those onto the synthetic frontmatter so loadSnapshot
+        // returns a file that round-trips through approveSkillSetup.
         return cards.map((c): SkillSnapshotEntry => ({
           name: c.skillName,
           ok: true,
@@ -250,14 +263,19 @@ function stubAgentSkillsDeps(opts: {
           frontmatter: {
             name: c.skillName,
             description: c.description,
-            credentials: c.missingCredentials.map(m => ({
+            credentials: c.credentials.map(m => ({
               envName: m.envName,
               authType: m.authType,
               scope: m.scope,
               oauth: m.oauth,
             })),
-            domains: c.unapprovedDomains,
-            mcpServers: c.mcpServers,
+            domains: c.domains.map(d => d.domain),
+            mcpServers: c.mcpServers.map(m => ({
+              name: m.name,
+              url: m.url,
+              transport: m.transport,
+              ...(m.credential !== undefined ? { credential: m.credential } : {}),
+            })),
           },
         }));
       },
@@ -308,7 +326,6 @@ class InMemorySkillCredStore implements SkillCredStore {
 async function mockDeps(opts: MockDepsOpts = {}): Promise<AdminDeps & {
   skillCredStoreMem: InMemorySkillCredStore;
   setupByAgentId: Map<string, SetupRequest[]>;
-  syncToolModulesMock: ReturnType<typeof vi.fn>;
 }> {
   const tmpDir = mkdtempSync(join(tmpdir(), 'ax-admin-skills-test-'));
   const config = makeConfig();
@@ -333,6 +350,16 @@ async function mockDeps(opts: MockDepsOpts = {}): Promise<AdminDeps & {
 
   const providers: Record<string, unknown> = {
     audit: { log: vi.fn().mockResolvedValue(undefined), query: vi.fn().mockResolvedValue([]) },
+    // Test-&-Enable rewrites SKILL.md via workspace.commitFiles when the
+    // rewritten bytes differ from what's in the bare repo. In these tests,
+    // loadSnapshot reads from the synthetic snapshotCache (no real git), so
+    // readSkillFileFromBareRepo returns "" and commitFiles runs every time.
+    workspace: {
+      commitFiles: vi.fn().mockResolvedValue({ commit: 'abc123', changed: true }),
+      getRepoUrl: vi.fn().mockResolvedValue({ url: 'file:///unused', created: false }),
+      ensureLocalMirror: vi.fn().mockResolvedValue('/unused'),
+      close: vi.fn().mockResolvedValue(undefined),
+    },
   };
 
   if (opts.withCredentials !== false) {
@@ -348,24 +375,12 @@ async function mockDeps(opts: MockDepsOpts = {}): Promise<AdminDeps & {
     }
   }
 
-  // Stub syncToolModules. Required in AdminDeps — every test gets a mock
-  // that returns a fixed success result so approvals on skills without MCP
-  // servers don't invoke it (the handler gates on `mcpServers.length > 0`),
-  // and approvals on skills WITH MCP servers record the input for assertions.
-  const syncToolModulesMock = vi.fn().mockResolvedValue({
-    commit: 'abc123',
-    changed: true,
-    moduleCount: 2,
-    toolCount: 3,
-  });
-
   const deps: AdminDeps = {
     config,
     providers: providers as unknown as AdminDeps['providers'],
     eventBus: createEventBus(),
     agentRegistry: registry,
     startTime: Date.now() - 60_000,
-    syncToolModules: syncToolModulesMock,
   };
 
   // Shared in-memory stores — reused across seeded queue + approve writes.
@@ -414,7 +429,7 @@ async function mockDeps(opts: MockDepsOpts = {}): Promise<AdminDeps & {
     });
   }
 
-  return Object.assign(deps, { skillCredStoreMem, skillDomainStoreMem, setupByAgentId, syncToolModulesMock });
+  return Object.assign(deps, { skillCredStoreMem, skillDomainStoreMem, setupByAgentId });
 }
 
 function startTestServer(
@@ -466,11 +481,15 @@ async function fetchAdmin(
 const mainCard: SetupRequest = {
   skillName: 'linear',
   description: 'Linear stuff',
+  credentials: [
+    { envName: 'LINEAR_TOKEN', authType: 'api_key', scope: 'user' },
+  ],
   missingCredentials: [
     { envName: 'LINEAR_TOKEN', authType: 'api_key', scope: 'user' },
   ],
+  domains: [{ domain: 'api.linear.app', approved: false }],
   unapprovedDomains: ['api.linear.app'],
-  mcpServers: [{ name: 'linear-mcp', url: 'https://mcp.linear.app/sse' }],
+  mcpServers: [{ name: 'linear-mcp', url: 'https://mcp.linear.app/sse', transport: 'sse' }],
 };
 
 // SKILL.md fixtures used by the GET /admin/api/skills/setup tests. Each
@@ -616,10 +635,14 @@ describe('GET /admin/api/skills/setup', () => {
     expect(body.agents[0].cards).toEqual([
       {
         ...mainCard,
-        missingCredentials: mainCard.missingCredentials.map(mc => ({
-          ...mc,
+        credentials: mainCard.credentials.map(c => ({
+          ...c,
           // `oauth` is always present (possibly undefined) on the live-computed
           // shape — see reconciler.computeSetupQueue.
+          oauth: undefined,
+        })),
+        missingCredentials: mainCard.missingCredentials.map(mc => ({
+          ...mc,
           oauth: undefined,
           hasExistingValue: false,
         })),
@@ -716,10 +739,18 @@ describe('GET /admin/api/skills/setup', () => {
     expect(cards).toHaveLength(2);
 
     // alpha: agent-scoped api_key missing + two unapproved domains, with a
-    // hasExistingValue hint on the missing credential.
+    // hasExistingValue hint on the missing credential. `credentials` +
+    // `domains` carry the full editable lists; `missingCredentials` +
+    // `unapprovedDomains` are the back-compat subsets.
     expect(cards[0]).toEqual({
       skillName: 'alpha',
       description: 'First skill',
+      credentials: [{
+        envName: 'A_TOKEN',
+        authType: 'api_key',
+        scope: 'agent',
+        oauth: undefined,
+      }],
       missingCredentials: [{
         envName: 'A_TOKEN',
         authType: 'api_key',
@@ -727,14 +758,30 @@ describe('GET /admin/api/skills/setup', () => {
         oauth: undefined,
         hasExistingValue: false,
       }],
+      domains: [
+        { domain: 'a.example.com', approved: false },
+        { domain: 'b.example.com', approved: false },
+      ],
       unapprovedDomains: ['a.example.com', 'b.example.com'],
-      mcpServers: [{ name: 'alpha-mcp', url: 'https://a.example.com/mcp' }],
+      mcpServers: [{ name: 'alpha-mcp', url: 'https://a.example.com/mcp', transport: 'http' }],
     });
 
     // beta: user-scoped oauth missing, no domains, no mcp servers.
     expect(cards[1]).toEqual({
       skillName: 'beta',
       description: 'Second skill',
+      credentials: [{
+        envName: 'B_OAUTH',
+        authType: 'oauth',
+        scope: 'user',
+        oauth: {
+          provider: 'github',
+          clientId: 'abc123',
+          authorizationUrl: 'https://github.com/login/oauth/authorize',
+          tokenUrl: 'https://github.com/login/oauth/access_token',
+          scopes: ['repo', 'read:user'],
+        },
+      }],
       missingCredentials: [{
         envName: 'B_OAUTH',
         authType: 'oauth',
@@ -748,6 +795,7 @@ describe('GET /admin/api/skills/setup', () => {
         },
         hasExistingValue: false,
       }],
+      domains: [],
       unapprovedDomains: [],
       mcpServers: [],
     });
@@ -812,9 +860,13 @@ describe('GET /admin/api/skills/setup', () => {
 const weatherAgentScoped: SetupRequest = {
   skillName: 'weather',
   description: 'Weather lookups',
+  credentials: [
+    { envName: 'W_KEY', authType: 'api_key', scope: 'agent' },
+  ],
   missingCredentials: [
     { envName: 'W_KEY', authType: 'api_key', scope: 'agent' },
   ],
+  domains: [{ domain: 'api.weather.com', approved: false }],
   unapprovedDomains: ['api.weather.com'],
   mcpServers: [],
 };
@@ -822,9 +874,13 @@ const weatherAgentScoped: SetupRequest = {
 const weatherUserScoped: SetupRequest = {
   skillName: 'weather',
   description: 'Weather lookups',
+  credentials: [
+    { envName: 'W_KEY', authType: 'api_key', scope: 'user' },
+  ],
   missingCredentials: [
     { envName: 'W_KEY', authType: 'api_key', scope: 'user' },
   ],
+  domains: [{ domain: 'api.weather.com', approved: false }],
   unapprovedDomains: ['api.weather.com'],
   mcpServers: [],
 };
@@ -832,6 +888,20 @@ const weatherUserScoped: SetupRequest = {
 const weatherOauth: SetupRequest = {
   skillName: 'weather',
   description: 'Weather lookups',
+  credentials: [
+    {
+      envName: 'W_OAUTH',
+      authType: 'oauth',
+      scope: 'user',
+      oauth: {
+        provider: 'weather-corp',
+        clientId: 'cid',
+        authorizationUrl: 'https://auth.weather.com/authorize',
+        tokenUrl: 'https://auth.weather.com/token',
+        scopes: ['read'],
+      },
+    },
+  ],
   missingCredentials: [
     {
       envName: 'W_OAUTH',
@@ -846,6 +916,7 @@ const weatherOauth: SetupRequest = {
       },
     },
   ],
+  domains: [],
   unapprovedDomains: [],
   mcpServers: [],
 };
@@ -881,8 +952,12 @@ describe('POST /admin/api/skills/setup/approve', () => {
       body: {
         agentId: 'main',
         skillName: 'weather',
-        credentials: [{ envName: 'W_KEY', value: 'secret-123' }],
-        approveDomains: ['api.weather.com'],
+        frontmatter: {
+          credentials: [{ envName: 'W_KEY', authType: 'api_key', scope: 'agent' }],
+          mcpServers: [],
+          domains: ['api.weather.com'],
+        },
+        credentialValues: [{ envName: 'W_KEY', value: 'secret-123' }],
       },
     });
 
@@ -927,8 +1002,12 @@ describe('POST /admin/api/skills/setup/approve', () => {
       body: {
         agentId: 'main',
         skillName: 'weather',
-        credentials: [{ envName: 'W_KEY', value: 's' }],
-        approveDomains: [],
+        frontmatter: {
+          credentials: [{ envName: 'W_KEY', authType: 'api_key', scope: 'user' }],
+          mcpServers: [],
+          domains: [],
+        },
+        credentialValues: [{ envName: 'W_KEY', value: 's' }],
         userId: 'alice',
       },
     });
@@ -955,8 +1034,12 @@ describe('POST /admin/api/skills/setup/approve', () => {
       body: {
         agentId: 'main',
         skillName: 'weather',
-        credentials: [{ envName: 'W_KEY', value: 's' }],
-        approveDomains: [],
+        frontmatter: {
+          credentials: [{ envName: 'W_KEY', authType: 'api_key', scope: 'user' }],
+          mcpServers: [],
+          domains: [],
+        },
+        credentialValues: [{ envName: 'W_KEY', value: 's' }],
       },
     });
 
@@ -982,8 +1065,12 @@ describe('POST /admin/api/skills/setup/approve', () => {
       body: {
         agentId: 'main',
         skillName: 'weather',
-        credentials: [{ envName: 'W_KEY', value: 's' }],
-        approveDomains: [],
+        frontmatter: {
+          credentials: [{ envName: 'W_KEY', authType: 'api_key', scope: 'user' }],
+          mcpServers: [],
+          domains: [],
+        },
+        credentialValues: [{ envName: 'W_KEY', value: 's' }],
       },
     });
 
@@ -997,9 +1084,26 @@ describe('POST /admin/api/skills/setup/approve', () => {
     }]);
   });
 
-  it('rejects unexpected credential envName with 400; nothing applied', async () => {
+  // Removed: endpoint no longer cross-checks cred envName against the card — admin can rename envNames.
+  // Removed: endpoint no longer cross-checks domains against the card — admin can add any hostname.
+
+  it('probe failure: MCP server that fails listTools returns 400 with probeFailures; nothing applied', async () => {
+    // Replace strict cross-validation: the new endpoint accepts arbitrary
+    // admin-edited frontmatter but refuses to persist when any declared MCP
+    // server fails its live probe. This exercises the "probe catches bogus
+    // input" path that replaces the old domain/credential cross-check.
+    const { probeMcpServers } = await import('../../src/host/skills/probe-mcp-server.js');
+    (probeMcpServers as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      async (servers: Array<{ name: string }>) =>
+        servers.map(s => ({ name: s.name, ok: false, error: 'connect ECONNREFUSED' })),
+    );
+
+    const weatherWithMcp: SetupRequest = {
+      ...weatherAgentScoped,
+      mcpServers: [{ name: 'weather-mcp', url: 'https://mcp.weather.com/mcp', transport: 'http' }],
+    };
     const deps = await mockDeps();
-    seed(deps, [weatherAgentScoped]);
+    seed(deps, [weatherWithMcp]);
     const domainApprove = deps.skillDomainStoreMem.approve;
     const handler = createAdminHandler(deps);
     ({ server, port } = await startTestServer(handler));
@@ -1010,46 +1114,30 @@ describe('POST /admin/api/skills/setup/approve', () => {
       body: {
         agentId: 'main',
         skillName: 'weather',
-        credentials: [{ envName: 'EVIL_KEY', value: 's' }],
-        approveDomains: ['api.weather.com'],
+        frontmatter: {
+          credentials: [{ envName: 'W_KEY', authType: 'api_key', scope: 'agent' }],
+          mcpServers: [{ name: 'weather-mcp', url: 'https://mcp.weather.com/mcp', transport: 'http' }],
+          domains: ['api.weather.com'],
+        },
+        credentialValues: [{ envName: 'W_KEY', value: 's' }],
       },
     });
 
     expect(res.status).toBe(400);
-    const body = res.body as { error: string; details: string };
-    expect(body.error).toBe('Request does not match pending setup');
-    expect(body.details).toContain('EVIL_KEY');
+    const body = res.body as { error: string; probeFailures: Array<{ name: string; error: string }> };
+    expect(body.error).toBe('MCP server probe failed');
+    expect(body.probeFailures).toEqual([{ name: 'weather-mcp', error: 'connect ECONNREFUSED' }]);
+    // Load-bearing: probe failure MUST block every persist step.
     expect(deps.skillCredStoreMem.rows).toEqual([]);
     expect(domainApprove).not.toHaveBeenCalled();
   });
 
-  it('rejects unexpected domain with 400; nothing applied', async () => {
-    const deps = await mockDeps();
-    seed(deps, [weatherAgentScoped]);
-    const domainApprove = deps.skillDomainStoreMem.approve;
-    const handler = createAdminHandler(deps);
-    ({ server, port } = await startTestServer(handler));
-
-    const res = await fetchAdmin(port, '/admin/api/skills/setup/approve', {
-      token: 'test-secret-token',
-      method: 'POST',
-      body: {
-        agentId: 'main',
-        skillName: 'weather',
-        credentials: [{ envName: 'W_KEY', value: 's' }],
-        approveDomains: ['evil.com'],
-      },
-    });
-
-    expect(res.status).toBe(400);
-    const body = res.body as { error: string; details: string };
-    expect(body.error).toBe('Request does not match pending setup');
-    expect(body.details).toContain('evil.com');
-    expect(deps.skillCredStoreMem.rows).toEqual([]);
-    expect(domainApprove).not.toHaveBeenCalled();
-  });
-
-  it('rejects OAuth credential with 400 and clear message', async () => {
+  it('OAuth credentials skip the probe path and do not require a typed value', async () => {
+    // The new flow keeps OAuth creds out of Test-&-Enable — they go through
+    // the dedicated OAuth start/callback flow and the api_key filter in
+    // approveSkillSetup skips them. Posting an OAuth credential with no
+    // credentialValues entry should still succeed (provided the probe passes
+    // or there are no mcpServers to probe).
     const deps = await mockDeps();
     seed(deps, [weatherOauth]);
     const handler = createAdminHandler(deps);
@@ -1061,21 +1149,34 @@ describe('POST /admin/api/skills/setup/approve', () => {
       body: {
         agentId: 'main',
         skillName: 'weather',
-        credentials: [{ envName: 'W_OAUTH', value: 's' }],
-        approveDomains: [],
+        frontmatter: {
+          credentials: [{
+            envName: 'W_OAUTH',
+            authType: 'oauth',
+            scope: 'user',
+            oauth: {
+              provider: 'weather-corp',
+              clientId: 'cid',
+              authorizationUrl: 'https://auth.weather.com/authorize',
+              tokenUrl: 'https://auth.weather.com/token',
+              scopes: ['read'],
+            },
+          }],
+          mcpServers: [],
+          domains: [],
+        },
+        credentialValues: [],
       },
     });
 
-    expect(res.status).toBe(400);
-    const body = res.body as { error: string; details: string };
-    expect(body.error).toContain('OAuth');
-    expect(body.details).toBe('W_OAUTH');
+    expect(res.status).toBe(200);
+    // No api_key cred → no row written.
     expect(deps.skillCredStoreMem.rows).toEqual([]);
   });
 
-  it('returns 404 when skill is not in the setup queue', async () => {
+  it('returns 404 when skill is not in the snapshot for the agent', async () => {
     const deps = await mockDeps();
-    // no seed — queue is empty for `main`.
+    // no seed — no SKILL.md exists for `weather`.
     const handler = createAdminHandler(deps);
     ({ server, port } = await startTestServer(handler));
 
@@ -1085,14 +1186,16 @@ describe('POST /admin/api/skills/setup/approve', () => {
       body: {
         agentId: 'main',
         skillName: 'weather',
-        credentials: [],
-        approveDomains: [],
+        frontmatter: { credentials: [], mcpServers: [], domains: [] },
+        credentialValues: [],
       },
     });
 
     expect(res.status).toBe(404);
+    // The new helper returns `No skill <name> for agent <id>` as the error
+    // string, which server-admin.ts wraps via sendError → {error: {message}}.
     const body = res.body as { error: { message: string } };
-    expect(body.error.message).toBe('No pending setup for this skill');
+    expect(body.error.message).toContain('No skill weather');
   });
 
   it('returns 503 when agentSkillsDeps is missing', async () => {
@@ -1106,8 +1209,8 @@ describe('POST /admin/api/skills/setup/approve', () => {
       body: {
         agentId: 'main',
         skillName: 'weather',
-        credentials: [],
-        approveDomains: [],
+        frontmatter: { credentials: [], mcpServers: [], domains: [] },
+        credentialValues: [],
       },
     });
 
@@ -1130,9 +1233,22 @@ describe('POST /admin/api/skills/setup/approve', () => {
     expect(res.status).toBe(400);
   });
 
-  it('validation is atomic: mix of valid credential + invalid domain → nothing applied', async () => {
+  it('atomic persist: probe failure with a valid credential leaves NO rows written', async () => {
+    // Under the new "probe-gates-persist" contract, a credential the admin
+    // has typed in MUST NOT be persisted if the probe step rejects the
+    // frontmatter. Exercises the same invariant the old cross-check gave us.
+    const { probeMcpServers } = await import('../../src/host/skills/probe-mcp-server.js');
+    (probeMcpServers as unknown as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      async (servers: Array<{ name: string }>) =>
+        servers.map(s => ({ name: s.name, ok: false, error: '401 Unauthorized' })),
+    );
+
+    const weatherWithMcp: SetupRequest = {
+      ...weatherAgentScoped,
+      mcpServers: [{ name: 'w-mcp', url: 'https://mcp.weather.com/mcp', transport: 'http' }],
+    };
     const deps = await mockDeps();
-    seed(deps, [weatherAgentScoped]);
+    seed(deps, [weatherWithMcp]);
     const domainApprove = deps.skillDomainStoreMem.approve;
     const handler = createAdminHandler(deps);
     ({ server, port } = await startTestServer(handler));
@@ -1143,8 +1259,12 @@ describe('POST /admin/api/skills/setup/approve', () => {
       body: {
         agentId: 'main',
         skillName: 'weather',
-        credentials: [{ envName: 'W_KEY', value: 'valid-secret' }],
-        approveDomains: ['evil.com'], // invalid — not in card
+        frontmatter: {
+          credentials: [{ envName: 'W_KEY', authType: 'api_key', scope: 'agent' }],
+          mcpServers: [{ name: 'w-mcp', url: 'https://mcp.weather.com/mcp', transport: 'http' }],
+          domains: ['api.weather.com'],
+        },
+        credentialValues: [{ envName: 'W_KEY', value: 'valid-secret' }],
       },
     });
 
@@ -1166,8 +1286,12 @@ describe('POST /admin/api/skills/setup/approve', () => {
       body: {
         agentId: 'main',
         skillName: 'weather',
-        credentials: [{ envName: 'W_KEY', value: 's' }],
-        approveDomains: ['api.weather.com'],
+        frontmatter: {
+          credentials: [{ envName: 'W_KEY', authType: 'api_key', scope: 'agent' }],
+          mcpServers: [],
+          domains: ['api.weather.com'],
+        },
+        credentialValues: [{ envName: 'W_KEY', value: 's' }],
       },
     });
 
@@ -1199,8 +1323,12 @@ describe('POST /admin/api/skills/setup/approve', () => {
       body: {
         agentId: 'main',
         skillName: 'weather',
-        credentials: [{ envName: 'W_KEY', value: 's' }],
-        approveDomains: ['api.weather.com'],
+        frontmatter: {
+          credentials: [{ envName: 'W_KEY', authType: 'api_key', scope: 'agent' }],
+          mcpServers: [],
+          domains: ['api.weather.com'],
+        },
+        credentialValues: [{ envName: 'W_KEY', value: 's' }],
       },
     });
 
@@ -1208,202 +1336,6 @@ describe('POST /admin/api/skills/setup/approve', () => {
     // Must NOT be the old 400 "Invalid request: ..." response.
     const body = res.body as { error?: { message?: string } } | null;
     expect(body?.error?.message).not.toMatch(/^Invalid request:/);
-  });
-
-  describe('tool-module sync on approval', () => {
-    const weatherWithMcp: SetupRequest = {
-      skillName: 'weather',
-      description: 'Weather lookups',
-      missingCredentials: [
-        { envName: 'W_KEY', authType: 'api_key', scope: 'agent' },
-      ],
-      unapprovedDomains: ['api.weather.com'],
-      mcpServers: [{ name: 'weather-mcp', url: 'https://weather.example.com/mcp' }],
-    };
-
-    it('calls syncToolModules with (agentId, skillName, mcpServers, userId) when approval enables a skill with MCP servers', async () => {
-      const deps = await mockDeps();
-      seed(deps, [weatherWithMcp]);
-
-      const handler = createAdminHandler(deps);
-      ({ server, port } = await startTestServer(handler));
-
-      const res = await fetchAdmin(port, '/admin/api/skills/setup/approve', {
-        token: 'test-secret-token',
-        method: 'POST',
-        body: {
-          agentId: 'main',
-          skillName: 'weather',
-          credentials: [{ envName: 'W_KEY', value: 's' }],
-          approveDomains: ['api.weather.com'],
-        },
-      });
-
-      expect(res.status).toBe(200);
-      expect(deps.syncToolModulesMock).toHaveBeenCalledTimes(1);
-      expect(deps.syncToolModulesMock).toHaveBeenCalledWith({
-        agentId: 'main',
-        skillName: 'weather',
-        mcpServers: [{ name: 'weather-mcp', url: 'https://weather.example.com/mcp' }],
-        userId: 'admin',
-      });
-    });
-
-    it('does NOT call syncToolModules when the skill declares no MCP servers', async () => {
-      const deps = await mockDeps();
-      seed(deps, [weatherAgentScoped]); // mcpServers: []
-
-      const handler = createAdminHandler(deps);
-      ({ server, port } = await startTestServer(handler));
-
-      const res = await fetchAdmin(port, '/admin/api/skills/setup/approve', {
-        token: 'test-secret-token',
-        method: 'POST',
-        body: {
-          agentId: 'main',
-          skillName: 'weather',
-          credentials: [{ envName: 'W_KEY', value: 's' }],
-          approveDomains: ['api.weather.com'],
-        },
-      });
-
-      expect(res.status).toBe(200);
-      expect(deps.syncToolModulesMock).not.toHaveBeenCalled();
-    });
-
-    it('does NOT call syncToolModules when the approved skill is still pending', async () => {
-      // Two missing credentials — we only supply one. State stays `pending`,
-      // so the tool-sync path must stay silent (it'll fire on the later
-      // approval that finishes the setup, or via explicit admin refresh).
-      const partialPending: SetupRequest = {
-        skillName: 'weather',
-        description: 'Weather lookups',
-        missingCredentials: [
-          { envName: 'W_KEY', authType: 'api_key', scope: 'agent' },
-          { envName: 'W_OTHER', authType: 'api_key', scope: 'agent' },
-        ],
-        unapprovedDomains: [],
-        mcpServers: [{ name: 'weather-mcp', url: 'https://weather.example.com/mcp' }],
-      };
-      const deps = await mockDeps();
-      seed(deps, [partialPending]);
-
-      const handler = createAdminHandler(deps);
-      ({ server, port } = await startTestServer(handler));
-
-      const res = await fetchAdmin(port, '/admin/api/skills/setup/approve', {
-        token: 'test-secret-token',
-        method: 'POST',
-        body: {
-          agentId: 'main',
-          skillName: 'weather',
-          credentials: [{ envName: 'W_KEY', value: 's' }],
-          approveDomains: [],
-        },
-      });
-
-      // The approve flow validates against the card shape (every missing
-      // cred must resolve); W_OTHER is missing from the body AND from any
-      // stored row, so the helper 400s. That's fine — the point here is
-      // that the sync closure is NOT invoked on a card that can't reach
-      // `enabled`.
-      expect(res.status).toBe(400);
-      expect(deps.syncToolModulesMock).not.toHaveBeenCalled();
-    });
-
-    it('audit log includes toolSync.moduleCount + toolSync.toolCount on success', async () => {
-      const deps = await mockDeps();
-      seed(deps, [weatherWithMcp]);
-      deps.syncToolModulesMock.mockResolvedValueOnce({
-        commit: 'deadbeef',
-        changed: true,
-        moduleCount: 4,
-        toolCount: 7,
-      });
-      const auditLog = deps.providers.audit.log as ReturnType<typeof vi.fn>;
-
-      const handler = createAdminHandler(deps);
-      ({ server, port } = await startTestServer(handler));
-
-      const res = await fetchAdmin(port, '/admin/api/skills/setup/approve', {
-        token: 'test-secret-token',
-        method: 'POST',
-        body: {
-          agentId: 'main',
-          skillName: 'weather',
-          credentials: [{ envName: 'W_KEY', value: 's' }],
-          approveDomains: ['api.weather.com'],
-        },
-      });
-
-      expect(res.status).toBe(200);
-      expect(auditLog).toHaveBeenCalledTimes(1);
-      const auditCall = auditLog.mock.calls[0][0] as { action: string; args: Record<string, unknown> };
-      expect(auditCall.action).toBe('skill_approved');
-      expect(auditCall.args).toMatchObject({
-        toolSync: { moduleCount: 4, toolCount: 7, commit: 'deadbeef' },
-      });
-      expect(auditCall.args).not.toHaveProperty('toolSyncError');
-    });
-
-    it('syncToolModules throwing does NOT fail the approval; audit logs toolSyncError', async () => {
-      const deps = await mockDeps();
-      seed(deps, [weatherWithMcp]);
-      deps.syncToolModulesMock.mockRejectedValueOnce(new Error('mcp server unreachable'));
-      const auditLog = deps.providers.audit.log as ReturnType<typeof vi.fn>;
-
-      const handler = createAdminHandler(deps);
-      ({ server, port } = await startTestServer(handler));
-
-      const res = await fetchAdmin(port, '/admin/api/skills/setup/approve', {
-        token: 'test-secret-token',
-        method: 'POST',
-        body: {
-          agentId: 'main',
-          skillName: 'weather',
-          credentials: [{ envName: 'W_KEY', value: 's' }],
-          approveDomains: ['api.weather.com'],
-        },
-      });
-
-      // Approval succeeds — tool generation is best-effort at approve time.
-      expect(res.status).toBe(200);
-      const body = res.body as { ok: boolean; state: { name: string; kind: string } };
-      expect(body.ok).toBe(true);
-      expect(body.state.kind).toBe('enabled');
-
-      expect(auditLog).toHaveBeenCalledTimes(1);
-      const auditCall = auditLog.mock.calls[0][0] as { action: string; args: Record<string, unknown> };
-      expect(auditCall.args).toMatchObject({
-        toolSyncError: 'mcp server unreachable',
-      });
-      expect(auditCall.args).not.toHaveProperty('toolSync');
-    });
-
-    it('threads the authenticated user id into syncToolModules input when BetterAuth is wired', async () => {
-      const deps = await mockDeps();
-      seed(deps, [weatherWithMcp]);
-      deps.resolveAuthenticatedUser = async () => ({ id: 'auth-uuid-123', email: 'a@b.com' });
-
-      const handler = createAdminHandler(deps);
-      ({ server, port } = await startTestServer(handler));
-
-      const res = await fetchAdmin(port, '/admin/api/skills/setup/approve', {
-        token: 'test-secret-token',
-        method: 'POST',
-        body: {
-          agentId: 'main',
-          skillName: 'weather',
-          credentials: [{ envName: 'W_KEY', value: 's' }],
-          approveDomains: ['api.weather.com'],
-        },
-      });
-
-      expect(res.status).toBe(200);
-      expect(deps.syncToolModulesMock).toHaveBeenCalledTimes(1);
-      const args = deps.syncToolModulesMock.mock.calls[0][0] as { userId: string };
-      expect(args.userId).toBe('auth-uuid-123');
-    });
   });
 
   describe('writes to skill_credentials + skill_domain_approvals', () => {
@@ -1421,8 +1353,12 @@ describe('POST /admin/api/skills/setup/approve', () => {
         body: {
           agentId: 'main',
           skillName: 'weather',
-          credentials: [{ envName: 'W_KEY', value: 'the-secret' }],
-          approveDomains: ['api.weather.com'],
+          frontmatter: {
+            credentials: [{ envName: 'W_KEY', authType: 'api_key', scope: 'agent' }],
+            mcpServers: [],
+            domains: ['api.weather.com'],
+          },
+          credentialValues: [{ envName: 'W_KEY', value: 'the-secret' }],
         },
       });
 
@@ -1458,8 +1394,12 @@ describe('POST /admin/api/skills/setup/approve', () => {
         body: {
           agentId: 'main',
           skillName: 'weather',
-          credentials: [{ envName: 'W_KEY', value: 's' }],
-          approveDomains: ['api.weather.com'],
+          frontmatter: {
+            credentials: [{ envName: 'W_KEY', authType: 'api_key', scope: 'user' }],
+            mcpServers: [],
+            domains: ['api.weather.com'],
+          },
+          credentialValues: [{ envName: 'W_KEY', value: 's' }],
           userId: 'alice',
         },
       });
@@ -1487,8 +1427,12 @@ describe('POST /admin/api/skills/setup/approve', () => {
         body: {
           agentId: 'main',
           skillName: 'weather',
-          credentials: [{ envName: 'W_KEY', value: 's' }],
-          approveDomains: ['api.weather.com'],
+          frontmatter: {
+            credentials: [{ envName: 'W_KEY', authType: 'api_key', scope: 'agent' }],
+            mcpServers: [],
+            domains: ['api.weather.com'],
+          },
+          credentialValues: [{ envName: 'W_KEY', value: 's' }],
         },
       });
 
@@ -1530,8 +1474,12 @@ describe('POST /admin/api/skills/setup/approve', () => {
         body: {
           agentId: 'main',
           skillName: 'weather',
-          credentials: [{ envName: 'W_KEY', value: 'real-secret' }],
-          approveDomains: ['api.weather.com'],
+          frontmatter: {
+            credentials: [{ envName: 'W_KEY', authType: 'api_key', scope: 'agent' }],
+            mcpServers: [],
+            domains: ['api.weather.com'],
+          },
+          credentialValues: [{ envName: 'W_KEY', value: 'real-secret' }],
         },
       });
 
@@ -1566,9 +1514,13 @@ describe('POST /admin/api/skills/setup/approve', () => {
 const linearCard: SetupRequest = {
   skillName: 'linear',
   description: 'Linear stuff',
+  credentials: [
+    { envName: 'LINEAR_TOKEN', authType: 'api_key', scope: 'user' },
+  ],
   missingCredentials: [
     { envName: 'LINEAR_TOKEN', authType: 'api_key', scope: 'user' },
   ],
+  domains: [{ domain: 'api.linear.app', approved: false }],
   unapprovedDomains: ['api.linear.app'],
   mcpServers: [],
 };
@@ -1576,9 +1528,13 @@ const linearCard: SetupRequest = {
 const weatherCard: SetupRequest = {
   skillName: 'weather',
   description: 'Weather lookups',
+  credentials: [
+    { envName: 'W_KEY', authType: 'api_key', scope: 'agent' },
+  ],
   missingCredentials: [
     { envName: 'W_KEY', authType: 'api_key', scope: 'agent' },
   ],
+  domains: [{ domain: 'api.weather.com', approved: false }],
   unapprovedDomains: ['api.weather.com'],
   mcpServers: [],
 };

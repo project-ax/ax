@@ -230,10 +230,11 @@ export async function runClaudeCode(config: AgentConfig): Promise<void> {
   const CONTAINER_SANDBOXES = new Set(['docker', 'apple', 'k8s']);
   const useLocalSandbox = CONTAINER_SANDBOXES.has(config.sandboxType ?? '');
   logger.info('sandbox_type_check', { sandboxType: config.sandboxType, useLocalSandbox });
+
   const ipcMcpServer = createIPCMcpServer(client, {
     userId: config.userId,
     filter: toolFilter,
-    ...(useLocalSandbox ? { localSandbox: { client, workspace: config.workspace } } : {}),
+    ...(useLocalSandbox ? { localSandbox: { client, workspace: config.workspace, sessionId: config.sessionId } } : {}),
   });
 
   // Include conversation history in the prompt if available

@@ -17,7 +17,7 @@ const logger = getLogger().child({ component: 'result-persistence' });
 const DEFAULT_THRESHOLD_BYTES = 100_000;   // 100KB per result
 const DEFAULT_TURN_BUDGET_BYTES = 200_000; // 200KB aggregate per turn
 const DEFAULT_PREVIEW_CHARS = 1_500;       // inline preview size
-const DEFAULT_DIR = '/tmp/ax-results';
+const DEFAULT_DIR = '/tmp/ax-tool-results';
 
 export interface ResultPersistenceOptions {
   dir?: string;

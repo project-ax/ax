@@ -462,9 +462,6 @@ describe('Tool Catalog → IPC Handler Completeness', () => {
     }
   });
 
-  // Actions that run agent-local (no IPC round-trip) — no schema or handler on host
-  const agentLocalActions = new Set(['execute_script']);
-
   test('every IPC action in TOOL_CATALOG has an IPC_SCHEMAS entry and a handler', async () => {
     for (const tool of TOOL_CATALOG) {
       // Collect all IPC actions this tool maps to
@@ -476,7 +473,6 @@ describe('Tool Catalog → IPC Handler Completeness', () => {
       }
 
       for (const action of actions) {
-        if (agentLocalActions.has(action)) continue;
         // 1. Schema must exist
         expect(IPC_SCHEMAS, `IPC schema missing for action "${action}" (tool "${tool.name}")`).toHaveProperty(action);
 

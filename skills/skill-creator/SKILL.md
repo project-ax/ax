@@ -39,27 +39,51 @@ That last bit is the whole point: **ask once, works forever after**.
 
 4. **Last resort: raw HTTPS.** If there's no MCP and no decent npx tool, the skill can describe a raw `fetch()` pattern — but this is the worst option. Declare the API hostname in `domains[]` or the proxy will deny it.
 
-5. **Show the proposed frontmatter and wait for confirmation — ALWAYS, no exceptions.** Before writing any SKILL.md, post a compact preview of your draft values and stop for the user to confirm or correct. This is mandatory even when you think you know the vendor — silent mis-guesses on URL or authType are the single most common reason a skill approves as pending and then fails at tool-discovery time with an unhelpful error. One extra turn to confirm beats an admin-side debugging cycle.
+5. **Show the proposed frontmatter and wait for confirmation — ALWAYS, no exceptions.** Before writing any SKILL.md, post a compact preview of every high-risk field and stop for the user to confirm or correct. This is mandatory even for vendors you think you know — every field shown below is one the admin later has to fix in the dashboard if we get it wrong, which is slower than a one-turn confirmation now.
 
    Preview format — bundle everything into one message:
 
    > Here's the draft for the `linear` skill:
-   > - **MCP URL**: `https://mcp.linear.app/sse`
-   > - **Auth**: API key (`LINEAR_API_KEY`, user-scoped)
+   > - **MCP URL**: `https://mcp.linear.app/mcp`
+   > - **Transport**: `http` (Streamable HTTP — matches the `/mcp` path)
+   > - **Credential envName**: `LINEAR_API_KEY`
+   > - **Auth type**: `api_key`
+   > - **Scope**: `user` (each user supplies their own key)
    > - **Extra domains**: none
    >
    > Correct? Or tell me what to change.
+   >
+   > (If any field is wrong, an admin can edit it in the approval dashboard before enabling the skill — but fixing it now saves a round-trip.)
 
-   Three fields are high-risk and MUST appear in the preview:
-   - **MCP URL** — vendor-specific. Vendors often ship both `/sse` (legacy SSE) and `/mcp` (newer Streamable HTTP) endpoints; you may not know which the user wants. Show your pick, let them override.
-   - **`authType`** — OAuth vs `api_key` silently breaks approval if wrong (OAuth needs an `oauth:` block). Guess from the vendor's docs, then confirm.
-   - **Extra `domains[]`** — list any additional hostnames the skill will reach beyond the MCP server. If none, say "none" explicitly.
+   Every field below MUST appear in the preview:
+   - **MCP URL** — vendor-specific, and vendors often ship BOTH `/sse` (legacy) and `/mcp` (newer Streamable HTTP). Pick your best guess from the vendor's docs and let the user override.
+   - **Transport** — `http` for Streamable HTTP (POST-based, the modern default) or `sse` for the legacy SSE transport. AX infers from the URL path (`/sse` → sse, else http) but that inference is only as right as the URL — always show the value explicitly so the user catches a mismatched pick.
+   - **Credential envName** — the `SCREAMING_SNAKE_CASE` variable name. Vendors don't always follow the `<SERVICE>_API_KEY` convention (e.g. `GITHUB_TOKEN`, `NOTION_API_KEY`, `FIGMA_ACCESS_TOKEN`). Guess, then confirm.
+   - **Auth type** — `api_key` or `oauth`. OAuth needs a full `oauth:` block (authorizationUrl, tokenUrl, clientId, scopes); silent mismatches mean the skill approves as pending and then fails at tool-discovery.
+   - **Scope** — `user` (each user supplies their own key) vs `agent` (one shared key across all users). `user` is almost always right for personal-workspace vendors; `agent` fits shared service accounts.
+   - **Extra domains** — any additional hostnames the skill will reach beyond the MCP server. If none, say "none" explicitly.
 
-   Fields you DON'T need to preview (safe defaults): `name` (matches directory), `description` (derive from conversation), `envName` (follow vendor's `<SERVICE>_API_KEY` convention), `scope` (`user` is almost always right), `transport` (AX infers from URL path — `/sse` → sse, else http), or the credential value itself (never ask in chat — the admin dashboard is the only path).
+   Fields you DON'T need to preview (safe defaults): `name` (matches directory), `description` (derive from conversation), or the credential value itself (never ask in chat — the admin dashboard is the only path).
 
-   Do NOT write the SKILL.md until the user responds. If the user corrects a field, show the updated preview once more and wait again. Yes, even for "obvious" vendors like Linear — your confidence has been wrong before.
+   Do NOT write the SKILL.md until the user responds. If the user corrects a field, show the updated preview once more and wait again.
 
-6. **Draft the SKILL.md.** Write it to `.ax/skills/<new-name>/SKILL.md` using the frontmatter schema below. Keep the body under ~300 lines. You do not need to run any git commands — the sidecar handles the commit.
+6. **Author via `skill_write` — NOT `write_file`.** `.ax/skills/<name>/SKILL.md` is the only file shape in the workspace with a strict schema attached. The `skill_write` tool takes the frontmatter fields as structured args (`name`, `description`, `credentials`, `mcpServers`, `domains`, `body`) and runs the host's Zod validator before writing. If you get something wrong (missing description, `authType: apiKey`, nested credential object), the tool returns the specific error AND the received value so you can correct it in the next call. No partial-turn silent failures; no "looks fine until the admin sees it."
+
+   `write_file` and `edit_file` REFUSE the `.ax/skills/*/SKILL.md` path — they'll point you at `skill_write`. Other files under `.ax/skills/<name>/` (scripts, reference docs, deletes) still use normal file tools.
+
+   Example call:
+
+   ```
+   skill_write({
+     name: "linear",
+     description: "Query Linear issues. Triggers on: Linear, tickets, sprints, cycles.",
+     credentials: [{ envName: "LINEAR_API_KEY", authType: "api_key" }],
+     mcpServers: [{ name: "linear", url: "https://mcp.linear.app/mcp", credential: "LINEAR_API_KEY" }],
+     body: "## When to use\n...\n## When pending\n...\n## How to use\n..."
+   })
+   ```
+
+   Keep `body` under ~300 lines. You do not need to run any git commands — the sidecar handles the commit.
 
 7. **Include a "When pending" section in the skill body** (see "Body structure" below). Every skill you draft should tell the next-turn agent what to do when it's still awaiting admin approval — namely, stop and tell the user, don't try the API directly.
 
@@ -120,7 +144,7 @@ If you're unsure, `curl -H "Authorization: Bearer <token>" <url>` the endpoint:
 - Response starts with `event: endpoint\ndata: /sse/message?sessionId=...` → **`sse`**
 - Response is a JSON-RPC envelope or HTTP 405/406 → **`http`**
 
-Getting the transport wrong means tool discovery silently returns zero tools and no `.ax/tools/<skill>/` commit lands. If the skill approves but the tools tree doesn't appear, re-check the transport.
+Getting the transport wrong means tool discovery silently returns zero tools and no catalog entries appear on the next turn. If the skill approves but the tools don't show up in the system prompt, re-check the transport.
 
 ## Body structure
 
@@ -305,6 +329,40 @@ Why this fails:
 Parser error: `mcpServers.0.credential must be a string envName ...`.
 
 `mcpServers[].credential` is a **string reference** pointing at an entry in the top-level `credentials:` array. The credential's definition (envName, authType, scope, oauth block) lives exactly once — in `credentials:` — and every `mcpServers[]` entry that needs to inject that credential cites its envName as a plain string. Common mistake: copying the Claude-Desktop `{env: {...}}` shape into AX.
+
+### WRONG (camelCase authType + missing description — parser rejects both)
+
+    ---
+    name: linear
+    mcpServers:
+      - name: linear
+        url: https://mcp.linear.app/mcp
+    credentials:
+      - envName: LINEAR_API_KEY
+        authType: apiKey        # WRONG — must be snake_case: api_key
+        scope: user
+    ---
+
+Parser errors (both at once):
+- `description: Invalid input: expected string, received undefined` — the top-level `description:` YAML field is missing. The Markdown body doesn't count as the description. It's a required frontmatter key, min 1 char, max 2000.
+- `credentials.0.authType: Invalid option: expected one of "api_key"|"oauth"` — `apiKey` is camelCase; the enum only accepts `api_key` (snake_case) or `oauth`.
+
+Corrected:
+
+    ---
+    name: linear
+    description: |
+      Query Linear issues. Use when the user mentions Linear, tickets, sprints,
+      or cycles — even without saying "Linear" explicitly.
+    mcpServers:
+      - name: linear
+        url: https://mcp.linear.app/mcp
+        credential: LINEAR_API_KEY
+    credentials:
+      - envName: LINEAR_API_KEY
+        authType: api_key
+        scope: user
+    ---
 
 ### WRONG (faking an mcpServers entry for a CLI-only tool — parser rejects with URL or transport errors)
 

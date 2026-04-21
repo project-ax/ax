@@ -154,13 +154,34 @@ export interface SetupCardCredential {
   hasExistingValue?: boolean;
 }
 
-/** A pending skill setup card for a single skill on a single agent. */
+/** A pending skill setup card for a single skill on a single agent.
+ *
+ *  Every field the admin is allowed to edit before enabling is carried here
+ *  so the card UI is the one place the correction happens. The
+ *  `test-&-enable` endpoint takes the full edited frontmatter back, probes
+ *  each MCP server, and — only if every probe passes — rewrites SKILL.md
+ *  in the agent's repo + persists creds + approves domains atomically. */
 export interface SetupCard {
   skillName: string;
   description: string;
+  /** Full credential list from frontmatter (every entry is editable: envName,
+   *  authType, scope). `hasExistingValue` is decorated per-entry. */
+  credentials: SetupCardCredential[];
+  /** Back-compat subset: creds whose value isn't yet stored. */
   missingCredentials: SetupCardCredential[];
+  /** Full declared domain list — `approved` flags what the admin has
+   *  already blessed. The UI renders the full list so the admin can
+   *  uncheck, remove, or add. */
+  domains: Array<{ domain: string; approved: boolean }>;
+  /** Back-compat subset: domains still awaiting approval. */
   unapprovedDomains: string[];
-  mcpServers: Array<{ name: string; url: string }>;
+  /** MCP servers — each is fully editable (url, transport, credential ref). */
+  mcpServers: Array<{
+    name: string;
+    url: string;
+    transport: 'http' | 'sse';
+    credential?: string;
+  }>;
 }
 
 /** Setup cards grouped per agent. */
@@ -175,12 +196,42 @@ export interface SkillSetupResponse {
   agents: AgentSetupGroup[];
 }
 
-/** Body for POST /admin/api/skills/setup/approve. */
+/** Body for POST /admin/api/skills/setup/approve (Test & Enable).
+ *
+ *  The dashboard posts the FULL intended frontmatter shape — every
+ *  editable section, including unedited entries — plus the admin-typed
+ *  credential values. The server probes each MCP server in
+ *  `frontmatter.mcpServers` using the credentials resolved from
+ *  `credentialValues` (falling back to already-stored values); only when
+ *  every probe succeeds does it rewrite SKILL.md, persist creds, and
+ *  approve domains. */
 export interface SkillApproveBody {
   agentId: string;
   skillName: string;
-  credentials: Array<{ envName: string; value: string }>;
-  approveDomains: string[];
+  frontmatter: {
+    credentials: Array<{
+      envName: string;
+      authType: 'api_key' | 'oauth';
+      scope: 'user' | 'agent';
+      oauth?: {
+        provider: string;
+        clientId: string;
+        authorizationUrl: string;
+        tokenUrl: string;
+        scopes: string[];
+      };
+    }>;
+    mcpServers: Array<{
+      name: string;
+      url: string;
+      transport: 'http' | 'sse';
+      credential?: string;
+    }>;
+    domains: string[];
+  };
+  /** Values the admin typed into password inputs. Empty string = reuse
+   *  whatever's already stored for this envName. */
+  credentialValues: Array<{ envName: string; value: string }>;
   userId?: string;
 }
 
@@ -196,10 +247,19 @@ export interface SkillState {
   error?: string;
 }
 
-/** Response from POST /admin/api/skills/setup/approve. */
+/** Per-server probe error returned with 400 when Test-&-Enable fails. */
+export interface SkillProbeFailure {
+  name: string;
+  error: string;
+}
+
+/** Response from POST /admin/api/skills/setup/approve (Test & Enable). */
 export interface SkillApproveResponse {
   ok: boolean;
   state?: SkillState;
+  /** Commit SHA on refs/heads/main after the SKILL.md rewrite. `null` when
+   *  the rewritten bytes exactly matched the existing file (no-op commit). */
+  commit?: string | null;
 }
 
 /** Response from GET /admin/api/agents/:agentId/skills — full list of skills the reconciler knows about for this agent. */
@@ -211,14 +271,4 @@ export interface AgentSkillsResponse {
 export interface StartOAuthResponse {
   authUrl: string;
   state: string;
-}
-
-/** Response from POST /admin/api/agents/:agentId/skills/:skillName/refresh-tools. */
-export interface RefreshToolsResponse {
-  ok: boolean;
-  /** SHA of the new commit, or `null` when the skill declares no MCP servers
-   *  (nothing to generate) or discovery returned zero tools. */
-  commit: string | null;
-  moduleCount: number;
-  toolCount: number;
 }

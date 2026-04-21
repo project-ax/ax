@@ -232,15 +232,11 @@ describe('McpConnectionManager', () => {
   });
 
   it('ensureToolsDiscoveredForHead runs discovery only once per (agent, head)', async () => {
-    // Regression: subprocess-sandbox completions used to rely on
-    // admin refresh-tools to populate the toolServerMap. On pod restart
-    // the in-memory map got wiped, and the turn path had no trigger to
-    // repopulate it — so generated tool stubs compiled fine, but at
-    // call time `resolveServer(agentId, 'get_team')` returned undefined
-    // and the handler emitted "MCP gateway not configured for this tool".
-    // This cache-keyed dedup lets the completion path ask for discovery
-    // every turn while actually running it only once per (agent, HEAD
-    // SHA) — cheap on cache hit, automatic on pod restart.
+    // Regression: subprocess-sandbox completions need the toolServerMap
+    // populated, and the turn path is the only trigger that runs reliably
+    // after a pod restart. This cache-keyed dedup lets the completion path
+    // ask for discovery every turn while actually running it only once per
+    // (agent, HEAD SHA) — cheap on cache hit, automatic on pod restart.
     manager.addServer('_', { name: 'linear', type: 'http', url: 'https://mcp.linear.app/sse' }, { source: 'skill' });
 
     const { vi } = await import('vitest');
@@ -272,9 +268,9 @@ describe('McpConnectionManager', () => {
   });
 
   it('ensureToolsDiscoveredForHead skips cache on force:true', async () => {
-    // Escape hatch for admin refresh-tools: the button click should re-run
-    // discovery even if the HEAD hasn't changed, because the admin may
-    // have tweaked credentials or swapped an MCP server version out.
+    // Escape hatch for callers that know a credential or server-URL change
+    // happened without a HEAD bump — force:true re-runs discovery even
+    // when the cache would otherwise dedupe.
     manager.addServer('_', { name: 'linear', type: 'http', url: 'https://mcp.linear.app/sse' }, { source: 'skill' });
 
     const { vi } = await import('vitest');

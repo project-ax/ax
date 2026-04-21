@@ -312,10 +312,7 @@ export async function mockAgentTabs(page: Page) {
     }),
   );
 
-  // Mock per-agent skills endpoint. Matches only the exact
-  // `/admin/api/agents/:agentId/skills` shape — the more specific
-  // `.../skills/:skillName/refresh-tools` endpoint is registered separately
-  // below so its POST responses win.
+  // Mock per-agent skills endpoint.
   await page.route('**/admin/api/agents/*/skills', (route) => {
     const url = new URL(route.request().url());
     if (!/^\/admin\/api\/agents\/[^/]+\/skills$/.test(url.pathname)) {
@@ -325,22 +322,6 @@ export async function mockAgentTabs(page: Page) {
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify(MOCK_AGENT_SKILLS),
-    });
-  });
-
-  // Mock per-skill refresh-tools endpoint (default success). Tests that need
-  // a failure response register their own route after gotoAuthenticated().
-  await page.route('**/admin/api/agents/*/skills/*/refresh-tools', (route) => {
-    if (route.request().method() !== 'POST') return route.fallback();
-    return route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        ok: true,
-        commit: 'abc123',
-        moduleCount: 2,
-        toolCount: 5,
-      }),
     });
   });
 }
@@ -415,21 +396,40 @@ export const MOCK_SKILL_SETUP = {
         {
           skillName: 'linear-tracker',
           description: 'Read and update Linear issues.',
-          missingCredentials: [
-            {
-              envName: 'LINEAR_TOKEN',
-              authType: 'api_key',
-              scope: 'user',
-            },
+          credentials: [
+            { envName: 'LINEAR_TOKEN', authType: 'api_key', scope: 'user' },
           ],
+          missingCredentials: [
+            { envName: 'LINEAR_TOKEN', authType: 'api_key', scope: 'user' },
+          ],
+          domains: [{ domain: 'api.linear.app', approved: false }],
           unapprovedDomains: ['api.linear.app'],
           mcpServers: [
-            { name: 'linear-mcp', url: 'https://mcp.linear.app/sse' },
+            {
+              name: 'linear-mcp',
+              url: 'https://mcp.linear.app/sse',
+              transport: 'sse',
+              credential: 'LINEAR_TOKEN',
+            },
           ],
         },
         {
           skillName: 'gcal-helper',
           description: 'Schedule things on Google Calendar.',
+          credentials: [
+            {
+              envName: 'GOOGLE_OAUTH',
+              authType: 'oauth',
+              scope: 'user',
+              oauth: {
+                provider: 'google',
+                clientId: 'example-client-id',
+                authorizationUrl: 'https://accounts.google.com/o/oauth2/auth',
+                tokenUrl: 'https://oauth2.googleapis.com/token',
+                scopes: ['https://www.googleapis.com/auth/calendar'],
+              },
+            },
+          ],
           missingCredentials: [
             {
               envName: 'GOOGLE_OAUTH',
@@ -444,6 +444,7 @@ export const MOCK_SKILL_SETUP = {
               },
             },
           ],
+          domains: [],
           unapprovedDomains: [],
           mcpServers: [],
         },
@@ -481,6 +482,20 @@ export const MOCK_SKILL_SETUP_WITH_OAUTH = {
         {
           skillName: 'linear-oauth',
           description: 'Linear via OAuth',
+          credentials: [
+            {
+              envName: 'LINEAR_TOKEN',
+              authType: 'oauth',
+              scope: 'user',
+              oauth: {
+                provider: 'linear',
+                clientId: 'frontmatter-cid',
+                authorizationUrl: 'https://linear.app/oauth/authorize',
+                tokenUrl: 'https://api.linear.app/oauth/token',
+                scopes: ['read', 'write'],
+              },
+            },
+          ],
           missingCredentials: [
             {
               envName: 'LINEAR_TOKEN',
@@ -495,8 +510,16 @@ export const MOCK_SKILL_SETUP_WITH_OAUTH = {
               },
             },
           ],
+          domains: [{ domain: 'api.linear.app', approved: false }],
           unapprovedDomains: ['api.linear.app'],
-          mcpServers: [{ name: 'linear', url: 'https://mcp.linear.app' }],
+          mcpServers: [
+            {
+              name: 'linear',
+              url: 'https://mcp.linear.app',
+              transport: 'http',
+              credential: 'LINEAR_TOKEN',
+            },
+          ],
         },
       ],
     },

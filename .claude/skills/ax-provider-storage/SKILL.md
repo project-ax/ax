@@ -115,7 +115,7 @@ Uses `src/utils/content-serialization.ts`:
 
 ## Tool Stubs (`tool-stubs.ts`)
 
-Shared `ToolStubFile` shape (`{ path, content }`) used by host-side tool-module generation (`src/host/toolgen/`).
+Vestigial `ToolStubFile` shape (`{ path, content }`) — left over from the deleted codegen pipeline (Phase 6 of tool-dispatch-unification). No live consumers. Safe to delete when convenient.
 
 ## Gotchas
 
@@ -133,7 +133,7 @@ Shared `ToolStubFile` shape (`{ path, content }`) used by host-side tool-module 
 - `src/providers/storage/database.ts` — Database-backed implementation (SQLite + PostgreSQL via Kysely)
 - `src/providers/storage/migrations.ts` — Database schema migrations
 - `src/providers/storage/migrate-to-db.ts` — One-time filesystem-to-DocumentStore migration utility
-- `src/providers/storage/tool-stubs.ts` — Shared `ToolStubFile` shape used by host-side tool-module generation
+- `src/providers/storage/tool-stubs.ts` — Vestigial `ToolStubFile` shape (no live consumers; codegen pipeline was deleted in Phase 6 of tool-dispatch-unification)
 - `src/utils/content-serialization.ts` — Content serialization/deserialization helpers
 - `src/utils/migrator.ts` — Shared DB-agnostic migration runner
 - `tests/providers/storage/database.test.ts`

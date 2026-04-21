@@ -86,16 +86,11 @@ export interface AdminSetupOpts {
   adminOAuthProviderStore?: import('./admin-oauth-providers.js').AdminOAuthProviderStore;
   /** Phase 6: admin-initiated OAuth flow module. When absent, /admin/api/skills/oauth/* returns 503. */
   adminOAuthFlow?: import('./admin-oauth-flow.js').AdminOAuthFlow;
-  /** Commits a skill's MCP tool modules into the agent's repo. Threaded from
-   *  HostCore → server.ts → setupAdminHandler → createAdminHandler. */
-  syncToolModules: (
-    input: import('./skills/tool-module-sync.js').ToolModuleSyncInput,
-  ) => Promise<import('./skills/tool-module-sync.js').ToolModuleSyncResult>;
 }
 
 export function setupAdminHandler(opts: AdminSetupOpts) {
-  const { config, providers, eventBus, agentRegistry, startTime, localDevMode, mcpManager, externalAuth, skillCredStore, skillDomainStore, agentSkillsDeps, defaultUserId, resolveAuthenticatedUser, adminOAuthProviderStore, adminOAuthFlow, syncToolModules } = opts;
+  const { config, providers, eventBus, agentRegistry, startTime, localDevMode, mcpManager, externalAuth, skillCredStore, skillDomainStore, agentSkillsDeps, defaultUserId, resolveAuthenticatedUser, adminOAuthProviderStore, adminOAuthFlow } = opts;
   return config.admin?.enabled
-    ? createAdminHandler({ config, providers, eventBus, agentRegistry, startTime, localDevMode, mcpManager, externalAuth, skillCredStore, skillDomainStore, agentSkillsDeps, defaultUserId, resolveAuthenticatedUser, adminOAuthProviderStore, adminOAuthFlow, syncToolModules })
+    ? createAdminHandler({ config, providers, eventBus, agentRegistry, startTime, localDevMode, mcpManager, externalAuth, skillCredStore, skillDomainStore, agentSkillsDeps, defaultUserId, resolveAuthenticatedUser, adminOAuthProviderStore, adminOAuthFlow })
     : null;
 }

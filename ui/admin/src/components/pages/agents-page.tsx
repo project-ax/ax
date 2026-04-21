@@ -469,46 +469,19 @@ function SkillsTab({ agentId }: { agentId: string }) {
         <span className="text-[10px] text-muted-foreground">{skills.length} skill{skills.length === 1 ? '' : 's'}</span>
       </div>
       {skills.map((s) => (
-        <SkillCard key={s.name} agentId={agentId} skill={s} />
+        <SkillCard key={s.name} skill={s} />
       ))}
     </div>
   );
 }
 
-function SkillCard({ agentId, skill: s }: { agentId: string; skill: SkillState }) {
-  const [refreshing, setRefreshing] = useState(false);
-  const [refreshResult, setRefreshResult] = useState<
-    | { kind: 'success'; moduleCount: number; toolCount: number }
-    | { kind: 'error'; message: string }
-    | null
-  >(null);
-
+function SkillCard({ skill: s }: { skill: SkillState }) {
   const stateClasses =
     s.kind === 'enabled'
       ? 'text-emerald bg-emerald/5 border border-emerald/20'
       : s.kind === 'pending'
         ? 'text-amber bg-amber/5 border border-amber/20'
         : 'text-rose bg-rose/5 border border-rose/20';
-
-  async function onRefresh() {
-    setRefreshing(true);
-    setRefreshResult(null);
-    try {
-      const res = await api.refreshTools(agentId, s.name);
-      setRefreshResult({
-        kind: 'success',
-        moduleCount: res.moduleCount,
-        toolCount: res.toolCount,
-      });
-    } catch (err) {
-      setRefreshResult({
-        kind: 'error',
-        message: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setRefreshing(false);
-    }
-  }
 
   return (
     <div
@@ -525,17 +498,6 @@ function SkillCard({ agentId, skill: s }: { agentId: string; skill: SkillState }
             {s.kind}
           </span>
         </div>
-        {s.kind === 'enabled' && (
-          <button
-            onClick={onRefresh}
-            disabled={refreshing}
-            data-testid={`agent-skill-${s.name}-refresh`}
-            className="shrink-0 flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-          >
-            <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
-            {refreshing ? 'Refreshing…' : 'Refresh tools'}
-          </button>
-        )}
       </div>
       {s.description && (
         <p className="mt-1 text-[12px] text-muted-foreground">{s.description}</p>
@@ -549,27 +511,6 @@ function SkillCard({ agentId, skill: s }: { agentId: string; skill: SkillState }
       )}
       {s.kind === 'invalid' && s.error && (
         <p className="mt-1 text-[12px] text-rose/80 font-mono">{s.error}</p>
-      )}
-      {refreshResult?.kind === 'success' && (
-        <div
-          className="mt-2 flex items-center gap-2 p-2 rounded-md bg-emerald/5 border border-emerald/15"
-          data-testid={`agent-skill-${s.name}-refresh-success`}
-        >
-          <CheckCircle size={12} className="text-emerald shrink-0" />
-          <p className="text-[12px] text-emerald">
-            Refreshed: {refreshResult.moduleCount} module{refreshResult.moduleCount === 1 ? '' : 's'},
-            {' '}{refreshResult.toolCount} tool{refreshResult.toolCount === 1 ? '' : 's'}.
-          </p>
-        </div>
-      )}
-      {refreshResult?.kind === 'error' && (
-        <div
-          className="mt-2 flex items-center gap-2 p-2 rounded-md bg-rose/5 border border-rose/15"
-          data-testid={`agent-skill-${s.name}-refresh-error`}
-        >
-          <AlertTriangle size={12} className="text-rose shrink-0" />
-          <p className="text-[12px] text-rose">{refreshResult.message}</p>
-        </div>
       )}
     </div>
   );

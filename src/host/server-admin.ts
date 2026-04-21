@@ -18,11 +18,10 @@ import type { EventBus, StreamEvent } from './event-bus.js';
 import type { AgentRegistry } from './agent-registry.js';
 import type { SetupRequest } from './skills/types.js';
 import { ApproveBodySchema, approveSkillSetup } from './server-admin-skills-helpers.js';
-import { getAgentSetupQueue, getAgentSkills, loadSnapshot } from './skills/get-agent-skills.js';
+import { getAgentSetupQueue, getAgentSkills } from './skills/get-agent-skills.js';
 import { z } from 'zod';
 import { getLogger } from '../logger.js';
 import { configPath as getConfigPath } from '../paths.js';
-import type { ToolModuleSyncInput, ToolModuleSyncResult } from './skills/tool-module-sync.js';
 
 const logger = getLogger().child({ component: 'admin' });
 
@@ -169,13 +168,6 @@ export interface AdminDeps {
   adminOAuthProviderStore?: import('./admin-oauth-providers.js').AdminOAuthProviderStore;
   /** Phase 6: admin-initiated OAuth flow module. When absent, /admin/api/skills/oauth/* returns 503. */
   adminOAuthFlow?: import('./admin-oauth-flow.js').AdminOAuthFlow;
-  /** Commits the enabled skill's MCP tool modules into the agent's repo under
-   *  `.ax/tools/<skillName>/`. Invoked by the skill-approval route when the
-   *  approved skill reaches `kind: 'enabled'` and declares MCP servers.
-   *  Required — wire a stub in test fixtures that don't exercise this path.
-   *  Making this optional would let real hosts construct AdminDeps without
-   *  it and silently drop tool generation; fail-loud is the safer contract. */
-  syncToolModules: (input: ToolModuleSyncInput) => Promise<ToolModuleSyncResult>;
 }
 
 // ── OAuth provider upsert body schema (Phase 6 Task 2) ──
@@ -580,13 +572,27 @@ async function handleAdminAPI(
       ? { ...parsed.data, userId: authedUser.id }
       : parsed.data;
     const result = await approveSkillSetup(
-      { ...deps, skillCredStore, skillDomainStore, agentSkillsDeps },
+      {
+        ...deps,
+        skillCredStore,
+        skillDomainStore,
+        agentSkillsDeps,
+        urlRewrites: deps.config.url_rewrites,
+      },
       approveBody,
     );
     if (result.ok) {
-      sendJSON(res, { ok: true, state: result.state });
+      sendJSON(res, { ok: true, state: result.state, commit: result.commit });
+    } else if (result.probeFailures) {
+      // Test-&-Enable probe failures carry per-server errors that the UI
+      // renders inline next to each MCP server row. Keep the structured
+      // shape out of sendError's envelope so the dashboard can read them.
+      sendJSON(res, {
+        error: result.error,
+        details: result.details,
+        probeFailures: result.probeFailures,
+      }, result.status);
     } else if (result.details) {
-      // sendError wraps as { error: { message, type, code } } — bypass to preserve `details`.
       sendJSON(res, { error: result.error, details: result.details }, result.status);
     } else {
       sendError(res, result.status, result.error);
@@ -620,89 +626,6 @@ async function handleAdminAPI(
       durationMs: 0,
     });
     sendJSON(res, { ok: true, removed: true });
-    return;
-  }
-
-  // POST /admin/api/agents/:agentId/skills/:skillName/refresh-tools —
-  // regenerate the committed `.ax/tools/<skillName>/` tree on demand. Used by
-  // the per-agent Skills tab to pick up tool-set changes after an MCP server
-  // upgrade. Unlike the approval path, sync errors surface as 500 — the admin
-  // clicked the button to see the result.
-  const refreshToolsMatch = pathname.match(
-    /^\/admin\/api\/agents\/([^/]+)\/skills\/([^/]+)\/refresh-tools$/,
-  );
-  if (refreshToolsMatch && method === 'POST') {
-    if (!deps.agentSkillsDeps) { sendError(res, 503, 'Skills not configured'); return; }
-    const agentId = decodeURIComponent(refreshToolsMatch[1]);
-    const skillName = decodeURIComponent(refreshToolsMatch[2]);
-
-    const states = await getAgentSkills(agentId, deps.agentSkillsDeps);
-    const state = states.find(s => s.name === skillName);
-    if (!state || state.kind !== 'enabled') {
-      sendError(res, 404, state ? 'Skill not enabled' : 'Skill not found');
-      return;
-    }
-
-    const snapshot = await loadSnapshot(agentId, deps.agentSkillsDeps);
-    const entry = snapshot.find(e => e.ok && e.name === skillName);
-    // Defensive: getAgentSkills already emitted `enabled` for this name, so
-    // the snapshot entry must exist with ok:true. The narrow here is for the
-    // type system.
-    if (!entry || !entry.ok) { sendError(res, 404, 'Skill not found'); return; }
-
-    // No MCP servers means nothing to generate. Short-circuit with zero
-    // counts and null commit — mirrors the "no tools discovered" shape from
-    // syncToolModulesForSkill so callers have a consistent success response.
-    if (entry.frontmatter.mcpServers.length === 0) {
-      sendJSON(res, { ok: true, commit: null, moduleCount: 0, toolCount: 0 });
-      return;
-    }
-
-    const authedUser = deps.resolveAuthenticatedUser
-      ? await deps.resolveAuthenticatedUser(req)
-      : undefined;
-    const userId = authedUser?.id ?? deps.defaultUserId ?? 'admin';
-
-    try {
-      const result = await deps.syncToolModules({
-        agentId,
-        skillName,
-        mcpServers: entry.frontmatter.mcpServers,
-        userId,
-        reason: 'refresh',
-      });
-      // Audit throws propagate (same as skill_dismissed) — audit is a
-      // security invariant.
-      await providers.audit.log({
-        action: 'skill_tools_refreshed',
-        sessionId: agentId,
-        args: {
-          agentId,
-          skillName,
-          commit: result.commit,
-          moduleCount: result.moduleCount,
-          toolCount: result.toolCount,
-        },
-        result: 'success',
-        durationMs: 0,
-      });
-      sendJSON(res, {
-        ok: true,
-        commit: result.commit,
-        moduleCount: result.moduleCount,
-        toolCount: result.toolCount,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      await providers.audit.log({
-        action: 'skill_tools_refreshed',
-        sessionId: agentId,
-        args: { agentId, skillName, error: message },
-        result: 'error',
-        durationMs: 0,
-      });
-      sendError(res, 500, message);
-    }
     return;
   }
 

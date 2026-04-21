@@ -50,7 +50,7 @@ Standalone stores (outside StorageProvider):
 | `src/migrations/dialect.ts` | Shared SQL dialect helpers (sqlNow, sqlEpoch) |
 | `src/file-store.ts` | File metadata store |
 | `src/job-store.ts` | Scheduler job persistence |
-| `src/providers/storage/tool-stubs.ts` | Tool stub cache (schema hash invalidation) |
+| `src/providers/storage/tool-stubs.ts` | Vestigial `ToolStubFile` shape (no live consumers; codegen pipeline was deleted in Phase 6 of tool-dispatch-unification) |
 | `src/providers/workspace/types.ts` | WorkspaceProvider interface (getRepoUrl, close) |
 | `src/providers/workspace/git-http.ts` | HTTP-based workspace for k8s (creates repos via ax-git Service) |
 | `src/providers/workspace/git-local.ts` | Local bare git repos at ~/.ax/repos/ |

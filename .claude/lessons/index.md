@@ -156,6 +156,8 @@
 
 ### agent
 
+- `!==` checks on string sentinels have an empty-string hole — use `&&`-guarded checks [agent/entries.md](agent/entries.md)
+- Preamble-injected schemas should carry only what the preamble actually validates [agent/entries.md](agent/entries.md)
 - pi-coding-agent does NOT re-export pi-agent-core types [agent/entries.md](agent/entries.md)
 - claude-code.ts should use shared buildSystemPrompt() like other runners [agent/entries.md](agent/entries.md)
 - claude-code runner discards non-text content blocks — must extract and forward via SDKUserMessage [agent/entries.md](agent/entries.md)

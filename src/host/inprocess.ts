@@ -284,9 +284,8 @@ export async function runFastPath(
         : undefined,
       // Resolve Bearer auth for skill-declared MCP servers from the
       // tuple-keyed `skill_credentials` store (not the legacy
-      // `providers.credentials`). Mirrors the `server-init.ts`
-      // toolBatchProvider wiring — same rationale: skill credentials
-      // live in `skill_credentials` after the SSoT migration.
+      // `providers.credentials`). Skill credentials live in
+      // `skill_credentials` after the SSoT migration.
       authForServer: deps.skillCredStore
         ? async (server: { name: string; url: string; agentId: string; userId: string }) =>
             resolveMcpAuthHeaders({

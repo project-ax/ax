@@ -36,7 +36,7 @@ function makeConfig(overrides: Partial<Config['admin']> = {}): Config {
       sandbox: 'docker',
       scheduler: 'none',
     },
-    sandbox: { timeout_sec: 120, memory_mb: 512 },
+    sandbox: { timeout_sec: 120, memory_mb: 512, cpus: 1 },
     scheduler: {
       active_hours: { start: '07:00', end: '23:00', timezone: 'UTC' },
       max_token_budget: 4096,
@@ -103,11 +103,6 @@ async function mockDeps(configOverrides: Partial<Config['admin']> = {}): Promise
     eventBus: createEventBus(),
     agentRegistry: registry,
     startTime: Date.now() - 60_000,
-    // Generic admin tests don't exercise the tool-module sync path; stub with
-    // a fail-loud closure so accidental invocations show up as failures.
-    syncToolModules: async () => {
-      throw new Error('syncToolModules stub — not exercised in these tests');
-    },
   };
 }
 
@@ -548,9 +543,6 @@ describe('tab endpoints handle provider errors gracefully', () => {
       eventBus: createEventBus(),
       agentRegistry: registry,
       startTime: Date.now() - 60_000,
-      syncToolModules: async () => {
-        throw new Error('syncToolModules stub — not exercised in these tests');
-      },
     };
 
     const handler = createAdminHandler(deps);

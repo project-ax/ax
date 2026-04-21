@@ -2,6 +2,14 @@
 
 Journal entries for the admin dashboard implementation.
 
+## [2026-04-20 14:00] — Task 6.3 (admin UI): delete Refresh tools button
+
+**Task:** Phase 6.3 UI cleanup. The per-skill "Refresh tools" button on the per-agent Skills tab called `POST /admin/api/agents/:agentId/skills/:skillName/refresh-tools`, which was deleted in the host-side commit. Shipping a button that calls a 404 endpoint is worse than no button.
+**What I did:** Removed the `refreshTools` method + `RefreshToolsResponse` import from `ui/admin/src/lib/api.ts`. Removed the `RefreshToolsResponse` type from `ui/admin/src/lib/types.ts`. In `agents-page.tsx` — removed `refreshing` + `refreshResult` state from `SkillCard`, the `onRefresh` handler, the button markup, the success + error result panels. Simplified the `SkillCard` props to drop `agentId` (no longer used) + updated the `SkillsTab` call site.
+**Files touched:** `ui/admin/src/lib/api.ts`, `ui/admin/src/lib/types.ts`, `ui/admin/src/components/pages/agents-page.tsx`.
+**Outcome:** Success. `tsc --noEmit` clean. `npm run build` in ui/admin produces a clean bundle (1594 modules, 300 KB minified).
+**Notes:** Kept the `RefreshCw`, `AlertTriangle`, `CheckCircle` lucide icon imports — all three are used elsewhere in the page.
+
 ## [2026-04-06 10:12] — PVC cleanup on agent deletion (Phase 3 PVC lifecycle)
 
 **Task:** Wire up PVC deletion when an agent is deleted via the admin API DELETE endpoint.

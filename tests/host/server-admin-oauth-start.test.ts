@@ -60,7 +60,7 @@ function makeConfig(): Config {
       sandbox: 'docker',
       scheduler: 'none',
     },
-    sandbox: { timeout_sec: 120, memory_mb: 512 },
+    sandbox: { timeout_sec: 120, memory_mb: 512, cpus: 1 },
     scheduler: {
       active_hours: { start: '07:00', end: '23:00', timezone: 'UTC' },
       max_token_budget: 4096,
@@ -207,11 +207,6 @@ async function mockDeps(opts: MockDepsOpts = {}): Promise<MockDepsResult> {
     eventBus: createEventBus(),
     agentRegistry: registry,
     startTime: Date.now() - 60_000,
-    // OAuth-start tests don't exercise the tool-module sync path; stub with
-    // a fail-loud closure so accidental invocations show up as test failures.
-    syncToolModules: async () => {
-      throw new Error('syncToolModules stub — not exercised in these tests');
-    },
   };
   if (opts.defaultUserId !== undefined) {
     deps.defaultUserId = opts.defaultUserId;

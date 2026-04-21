@@ -298,7 +298,6 @@ export async function createServer(
       : undefined,
     adminOAuthProviderStore: core.adminOAuthProviderStore,
     adminOAuthFlow: core.adminOAuthFlow,
-    syncToolModules: core.syncToolModules,
   });
 
   let httpServer: HttpServer | null = null;
@@ -411,6 +410,21 @@ export async function createServer(
       } : undefined,
       ...(agentResponsePromise ? { agentResponsePromise } : {}),
       ...(startAgentResponseTimer ? { startAgentResponseTimer } : {}),
+      // Keep the token's IPC ctx in sync when processCompletion rewrites the
+      // `:_:` placeholder in sessionId. Without this, `/internal/ipc` callers
+      // that don't stamp `_sessionId` read the stale pre-rewrite sessionId and
+      // miss the per-turn catalog/workspace maps keyed on the rewritten form.
+      ...(isK8s ? {
+        updateTurnCtx: (updates: { sessionId?: string; agentId?: string }) => {
+          const entry = activeTokens.get(turnToken);
+          if (!entry) return;
+          entry.ctx = {
+            ...entry.ctx,
+            ...(updates.sessionId !== undefined ? { sessionId: updates.sessionId } : {}),
+            ...(updates.agentId !== undefined ? { agentId: updates.agentId } : {}),
+          };
+        },
+      } : {}),
     };
 
     const sessionStartTime = Date.now();

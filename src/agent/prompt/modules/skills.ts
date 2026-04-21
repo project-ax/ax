@@ -25,7 +25,7 @@ export class SkillsModule extends BasePromptModule {
       const anyInvalid = ctx.skills.some((s) => s.kind === 'invalid');
       if (anyPending || anyInvalid) {
         lines.push(
-          'A skill is usable ONLY when its state is `[ENABLED]`. A `[PENDING]` skill\'s MCP tools are NOT registered and its declared hostnames are NOT on the proxy allowlist — the tools will be missing from your catalog and any direct `fetch()` to its hosts will be denied. Do NOT try `execute_script`, raw `fetch()`, or `npx` workarounds for pending skills. Tell the user the skill is awaiting admin approval and end your turn. A `[INVALID]` skill has a malformed SKILL.md; rewrite it using `skill-creator`.',
+          'A skill is usable ONLY when its state is `[ENABLED]`. A `[PENDING]` skill\'s MCP tools are NOT registered and its declared hostnames are NOT on the proxy allowlist — the tools will be missing from your catalog and any direct `fetch()` to its hosts will be denied. Do NOT try raw `fetch()` or `npx` workarounds for pending skills. Tell the user the skill is awaiting admin approval and end your turn. A `[INVALID]` skill has a malformed SKILL.md; rewrite it using `skill-creator`.',
           '',
         );
       }

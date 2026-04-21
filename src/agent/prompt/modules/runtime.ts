@@ -59,15 +59,6 @@ export class RuntimeModule extends BasePromptModule {
       `  - Use /tmp for temporary files that should not persist`,
       ...(ctx.hasWorkspace ? [
         `  - /workspace/.ax/skills/<name>/SKILL.md \u2014 installed skills (read on demand)`,
-        ...(ctx.toolModuleIndex ? [
-          `  - /workspace/.ax/tools/ \u2014 MCP tool wrapper modules (committed to git per skill)`,
-          `    Use execute_script to run multi-step scripts that import these modules.`,
-          `    Available modules:`,
-          ctx.toolModuleIndex,
-          `    Read /workspace/.ax/tools/<skill>/index.js for full function signatures.`,
-          `    Note: MCP servers often wrap list results in an object keyed by the plural resource name (e.g. \`listIssues(...)\` returns \`{ issues: [...], pageInfo: {...} }\`, NOT a bare array). If \`.map\` throws, \`console.log(JSON.stringify(result))\` to inspect the shape.`,
-          `    Only stdout from execute_script enters your context \u2014 intermediate results stay local.`,
-        ] : []),
         `  - /workspace/artifacts/ \u2014 output files (uploaded for chat UI)`,
       ] : []),
       `**Current Time**: ${cacheStableTime()}`,
