@@ -90,7 +90,7 @@ Every chat turn produces EXACTLY ONE canonical line for operator triage — `cha
 kubectl logs ax-host | grep "chat_complete\|chat_terminated"
 ```
 
-`logChatComplete(reqLogger, { sessionId, agentId?, durationMs, phases?, sandboxId?, tokens? })` from `src/host/chat-termination.ts` is the success-side helper. It's emitted automatically by the `attach` wrapper inside `processCompletion` — every successful return path goes through `attach`, so a future contributor adding a new return path can't forget the event. The wrapper guards against double-emission and against firing after `chat_terminated` already fired (via a `chatTerminated` flag set by `markTerminated()` at every termination site).
+`logChatComplete(reqLogger, { sessionId, agentId?, durationMs, phases?, sandboxId? })` from `src/host/chat-termination.ts` is the success-side helper. It's emitted automatically by the `attach` wrapper inside `processCompletion` — every successful return path goes through `attach`, so a future contributor adding a new return path can't forget the event. The wrapper gates its emit on a single `chatTerminated` flag set by `markTerminated()` at every termination site, so a chat that already logged `chat_terminated` (including from the outer catch in `processCompletion`) doesn't also emit `chat_complete`.
 
 **Phase timing** (`phases: { scan, dispatch, agent, persist }`): coarse wall-clock buckets that let an operator see at a glance whether a slow chat was slow because of LLM latency vs storage vs catalog setup. Sub-second accuracy is fine — this is triage telemetry, not a benchmark.
 
@@ -101,9 +101,7 @@ kubectl logs ax-host | grep "chat_complete\|chat_terminated"
 
 **Wiring requirements when adding a new chat-termination site:**
 1. Call `logChatTermination(reqLogger, {...})` (or `tracker.emitTerminal(...)`) AND immediately call `markTerminated()` so the success-side `chat_complete` doesn't fire on top of it.
-2. If your termination site `throw`s rather than `return`s, set the flag BEFORE the throw — the outer catch flows into `attach` which would otherwise emit `chat_complete`.
-
-**Tokens field**: not currently surfaced from the agent response at the chat_complete call site (tokens are nested in the agent's stdout protocol). Wire when needed — a missing field is better than a wrong one.
+2. If your termination site `throw`s rather than `return`s, set the flag BEFORE the throw — but the outer catch in `processCompletion` is also wired (gated `logChatTermination` + `markTerminated`) so an unhandled throw is still recorded as exactly-one canonical event.
 
 **Audited duplicates (Task 5, 2026-04-22):**
 - `fast_path_error` log: REMOVED — `chat_terminated` carries the same `error` plus phase/reason. Operators grep `chat_terminated` and filter on `reason: 'fast_path_error'`.

@@ -28,6 +28,7 @@ import { CredentialPlaceholderMap } from './credential-placeholders.js';
 import { getOrCreateCA, type CAKeyPair } from './proxy-ca.js';
 import { connectIPCBridge } from './ipc-server.js';
 import { logChatTermination, logChatComplete, createWaitFailureTracker } from './chat-termination.js';
+import type { SandboxProcess } from '../providers/sandbox/types.js';
 import { diagnoseError } from '../errors.js';
 import { ensureOAuthTokenFreshViaProvider, ensureOAuthTokenFresh, refreshOAuthTokenFromEnv, forceRefreshOAuthViaProvider } from '../dotenv.js';
 import { runnerPath as resolveRunnerPath, tsxLoader, isDevMode, templatesDir as resolveTemplatesDir, seedSkillsDir as resolveSeedSkillsDir } from '../utils/assets.js';
@@ -761,21 +762,22 @@ export async function processCompletion(
   // failure event. Otherwise an operator would see both lines for the
   // same turn and have to decide which one is canonical.
   let chatTerminated = false;
-  // `chatCompleteEmitted` guards against double-emission: if a return path
-  // is somehow taken twice (defensive — current code shouldn't, but
-  // attach is on every return so a refactor could regress), we still emit
-  // exactly one chat_complete per turn.
-  let chatCompleteEmitted = false;
   const markTerminated = (): void => { chatTerminated = true; };
 
   // Snapshot of values that may not exist at every return path — `attach`
-  // closes over these refs so the chat_complete emit picks up whatever
-  // the function knows by the time it returns. `agentId` and `sandboxId`
-  // are populated as the function progresses (provisioner resolution,
-  // sandbox spawn); a return that fires before they're set produces a
-  // chat_complete without them, which is correct.
+  // closes over this ref so the chat_complete emit picks up whatever
+  // the function knows by the time it returns. `agentId` is populated as
+  // the function progresses (provisioner resolution); a return that fires
+  // before it's set produces a chat_complete without it, which is correct.
+  // `sandboxId` is read directly from `proc?.podName` at emit time — `proc`
+  // is hoisted to outer scope (declared just below) and is undefined on
+  // early-return paths (fast path, queued, scan-blocked) so `proc?.podName`
+  // cleanly evaluates to undefined.
   let resolvedAgentIdForComplete: string | undefined;
-  let resolvedSandboxIdForComplete: string | undefined;
+  // `proc` is hoisted here (rather than scoped inside the retry loop) so
+  // both `attach` (success) and the outer catch (failure) can read
+  // `proc?.podName` for the sandboxId without a parallel snapshot variable.
+  let proc: SandboxProcess | undefined;
 
   // `attach` stamps the turn's diagnostic snapshot onto every
   // `CompletionResult` at the return site, AND emits the canonical
@@ -791,17 +793,13 @@ export async function processCompletion(
   const attach = <T extends { responseContent: string; finishReason: 'stop' | 'content_filter' }>(
     result: T,
   ): T & { diagnostics: readonly import('./diagnostics.js').Diagnostic[] } => {
-    if (!chatTerminated && !chatCompleteEmitted) {
-      chatCompleteEmitted = true;
+    if (!chatTerminated) {
       logChatComplete(reqLogger, {
         sessionId,
         ...(resolvedAgentIdForComplete !== undefined ? { agentId: resolvedAgentIdForComplete } : {}),
         durationMs: Date.now() - startedAt,
         ...(Object.keys(phases).length > 0 ? { phases } : {}),
-        ...(resolvedSandboxIdForComplete !== undefined ? { sandboxId: resolvedSandboxIdForComplete } : {}),
-        // tokens: not currently surfaced from the agent response at this
-        // call site (they're nested inside the agent's stdout protocol).
-        // Wire when needed; missing field is better than wrong field.
+        ...(proc?.podName !== undefined ? { sandboxId: proc.podName } : {}),
       });
     }
     return { ...result, diagnostics: diagnostics.list() };
@@ -1932,7 +1930,6 @@ export async function processCompletion(
       // Session-long sandboxes: reuse existing sandbox if available (k8s only).
       // Apple Container / Docker: fresh container each turn, workspace reuse via git.
       const existingSession = deps.sessionManager?.get(sessionId);
-      let proc: Awaited<ReturnType<typeof agentSandbox.spawn>>;
 
       if (existingSession && deps.agentResponsePromise) {
         // K8s: reuse existing pod — skip spawn, just queue work
@@ -1967,13 +1964,10 @@ export async function processCompletion(
         }
         try {
           proc = await agentSandbox.spawn(sandboxConfig);
-          // Surface sandboxId on chat_complete (attach reads at emit time).
-          // proc.podName is the pod / container name when the sandbox
-          // exposes one (k8s, docker, apple); subprocess sandbox leaves it
-          // undefined and the field is omitted from chat_complete.
-          if (proc.podName) {
-            resolvedSandboxIdForComplete = proc.podName;
-          }
+          // `proc.podName` (when set — k8s, docker, apple) is read by
+          // `attach` at chat_complete emit time via the hoisted `proc` ref.
+          // Subprocess sandbox leaves podName undefined and the field is
+          // omitted from chat_complete.
         } catch (err) {
           // Emit the unified chat_terminated event before re-throwing so the
           // existing outer error handling continues unchanged. Spawn failures
@@ -2453,12 +2447,24 @@ export async function processCompletion(
     // Clean up canary token on error — without this, every failed completion
     // permanently leaks an entry in sessionCanaries, eventually causing OOM.
     sessionCanaries.delete(queued.session_id);
+    // Canonical termination event: any unhandled throw that propagated to
+    // the outer catch killed the chat. Emit `chat_terminated` (gated on
+    // !chatTerminated to stay exactly-once when an inner site already
+    // fired — e.g. spawn-throw at line ~1969) and call `markTerminated`
+    // so `attach` below suppresses the success-side `chat_complete`.
+    // Without this, the success-side emit would falsely report a chat
+    // that just hit `completion_error` as `chat_complete`.
+    if (!chatTerminated) {
+      logChatTermination(reqLogger, {
+        phase: 'dispatch',
+        reason: 'completion_error',
+        ...(proc?.podName ? { sandboxId: proc.podName } : {}),
+        details: { error: (err as Error).message },
+      });
+    }
+    markTerminated();
     // Close whichever phase was open when we caught — operator sees the
-    // outer catch as part of the phase that was running. (No
-    // chat_terminated emit here: the catch block doesn't currently fire
-    // one, so attach will emit chat_complete for these too. That's a
-    // pre-existing gap from the Task 4/5 audit, surfaced as an open
-    // question for follow-up rather than expanded into Task 6 scope.)
+    // outer catch as part of the phase that was running.
     endAgent?.();
     endPersist?.();
     return attach({ responseContent: 'Internal processing error', finishReason: 'stop' });

@@ -1,5 +1,11 @@
 # Host
 
+### Outer catch in a long async function MUST also fire the canonical termination event
+**Date:** 2026-04-22
+**Context:** Task 6 review caught that the outer catch in `processCompletion` (server-completions.ts) flowed `completion_error` (error level) → `attach` → `chat_complete` (info level), so an operator running `grep "chat_complete\|chat_terminated"` would see `chat_complete` and conclude the chat succeeded. The original implementer's inline comment called this "a pre-existing gap" — but `chat_complete` was brand new in Task 6, so the gap was newly created by adding the wrapper without teaching the outer catch about it.
+**Lesson:** When a structural wrapper (like `attach`) emits a success event on every return, every catch site that returns through the wrapper MUST first call the corresponding termination event + flag. Pattern: `if (!chatTerminated) logChatTermination(...); markTerminated();` before `return attach(...)`. Gate the emit on `!chatTerminated` so a more-specific inner site (e.g. spawn-throw that already emitted `phase: 'spawn'`) wins over the generic outer-catch fallback (`phase: 'dispatch', reason: 'completion_error'`). The `markTerminated()` is unconditional — its job is to suppress the success-side emit, not to dedupe terminations. Also: when adding the wrapper, audit every catch block in the function body, not just the return statements.
+**Tags:** chat-termination, outer-catch, exactly-once, attach-pattern, code-review
+
 ### Pair every error-level "ended badly" event with an info-level "ended well" event of the same shape
 **Date:** 2026-04-22
 **Context:** Task 6 of the chat-correlation rollout added `logChatComplete` alongside `logChatTermination`. Without the success-side counterpart, operators scanning a slow or noisy log could only see the failure cases — they had no way to confirm "this chat finished, here's how long it took." Adding chat_complete with the SAME field shape (sessionId, agentId, durationMs, phases, sandboxId) means a single `grep "chat_complete\|chat_terminated"` covers every chat outcome with timing.

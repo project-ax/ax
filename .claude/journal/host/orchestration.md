@@ -2,6 +2,19 @@
 
 Agent orchestration system: supervisor, directory, agent-loop, event store, heartbeat, policy tags.
 
+## [2026-04-22 11:20] — chat-correlation Task 6 review fixes
+
+**Task:** Address one critical + three important code-review findings on commit 8dabeaf0 (Task 6, chat_complete event).
+**What I did:**
+- Critical (outer-catch fires `chat_complete` on errored chats): added gated `logChatTermination(phase: 'dispatch', reason: 'completion_error')` + `markTerminated()` in the `processCompletion` outer catch, so an unhandled throw produces `chat_terminated` (error) and suppresses the success-side emit. Gated on `!chatTerminated` so the spawn-throw site (which already emits `chat_terminated` before re-throwing) doesn't double-fire.
+- Important #1: removed dead `chatCompleteEmitted` defensive flag; the single `chatTerminated` flag now suffices.
+- Important #2: removed YAGNI `tokens` field from `ChatCompleteParams` + `logChatComplete`. Updated test (removed `tokens` from passthrough test) and removed the SKILL.md "Tokens field" callout.
+- Important #3: removed redundant `resolvedSandboxIdForComplete` snapshot — hoisted `proc` to outer scope and read `proc?.podName` directly in `attach` (and in the new outer-catch termination emit).
+- Added regression test in `tests/host/chat-termination.test.ts`: "contract: when termination has fired, chat_complete must not also fire on the same return". Models the mark-then-emit ordering the outer catch now uses.
+**Files touched:** `src/host/chat-termination.ts`, `src/host/server-completions.ts`, `tests/host/chat-termination.test.ts`, `.claude/skills/ax-logging-errors/SKILL.md`.
+**Outcome:** Success — build clean, 18/18 tests pass in `chat-termination.test.ts` + `chat-termination-retry.test.ts`. Pre-existing macOS socket-path EINVAL failures unchanged.
+**Notes:** Hoisted `proc` from inner-loop scope to the outer try-block scope so it's in closure scope of both `attach` (success) and the outer catch (failure). Required adding `import type { SandboxProcess }`. Cleanest way to drop the parallel snapshot variable.
+
 ## [2026-04-22 11:05] — chat-correlation Task 6: canonical chat_complete + phase timings
 
 **Task:** Pair every `chat_terminated` (failure, error level) with a `chat_complete` (success, info level) so an operator sees exactly one canonical line per chat regardless of outcome. Same field shape: sessionId, agentId, durationMs, phases, sandboxId. Operator workflow becomes `kubectl logs ax-host | grep "chat_complete\|chat_terminated"` — one line per chat with timing + outcome.

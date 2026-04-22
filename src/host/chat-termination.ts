@@ -78,9 +78,7 @@ export function logChatTermination(reqLogger: Logger, params: ChatTerminationPar
  * Only `sessionId` + `durationMs` are required; everything else is
  * best-effort. `phases` (ms per phase: scan / dispatch / agent / persist)
  * lets an operator see at a glance whether a slow chat was slow because
- * the LLM was slow or because storage was slow. `tokens` is included when
- * the call site has them; not every site does, and a missing field is
- * better than a wrong one.
+ * the LLM was slow or because storage was slow.
  */
 export interface ChatCompleteParams {
   /** Session this chat turn belonged to. */
@@ -93,8 +91,6 @@ export interface ChatCompleteParams {
   phases?: Record<string, number>;
   /** Pod / container name when known, for cross-log correlation. */
   sandboxId?: string;
-  /** LLM token usage when extractable from the agent response. */
-  tokens?: { input: number; output: number };
 }
 
 /**
@@ -115,7 +111,6 @@ export function logChatComplete(reqLogger: Logger, params: ChatCompleteParams): 
   if (params.agentId !== undefined) payload.agentId = params.agentId;
   if (params.phases !== undefined) payload.phases = params.phases;
   if (params.sandboxId !== undefined) payload.sandboxId = params.sandboxId;
-  if (params.tokens !== undefined) payload.tokens = params.tokens;
   reqLogger.info('chat_complete', payload);
 }
 

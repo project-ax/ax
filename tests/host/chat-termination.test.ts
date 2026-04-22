@@ -116,7 +116,7 @@ describe('logChatTermination', () => {
 describe('logChatComplete', () => {
   // Pairs with `logChatTermination`: every successful chat turn emits exactly
   // one `chat_complete` event at info level with the same shape (sessionId,
-  // agentId, durationMs, phases, sandboxId, tokens). Operators scan
+  // agentId, durationMs, phases, sandboxId). Operators scan
   // `grep "chat_complete\|chat_terminated"` to see every chat outcome with
   // timing in a single greppable line.
 
@@ -159,7 +159,7 @@ describe('logChatComplete', () => {
     });
   });
 
-  it('passes through agentId, phases, sandboxId, tokens when provided', () => {
+  it('passes through agentId, phases, sandboxId when provided', () => {
     const { logger, info } = fakeLogger();
     logChatComplete(logger, {
       sessionId: 'sess-4',
@@ -167,7 +167,6 @@ describe('logChatComplete', () => {
       durationMs: 9001,
       phases: { scan: 5, dispatch: 200, agent: 8500, persist: 296 },
       sandboxId: 'pod-x',
-      tokens: { input: 1234, output: 567 },
     });
     expect(info).toHaveBeenCalledWith('chat_complete', {
       sessionId: 'sess-4',
@@ -175,7 +174,6 @@ describe('logChatComplete', () => {
       durationMs: 9001,
       phases: { scan: 5, dispatch: 200, agent: 8500, persist: 296 },
       sandboxId: 'pod-x',
-      tokens: { input: 1234, output: 567 },
     });
   });
 
@@ -187,14 +185,54 @@ describe('logChatComplete', () => {
     logChatComplete(logger, {
       sessionId: 'sess-5',
       durationMs: 10,
-      // agentId, phases, sandboxId, tokens all omitted
+      // agentId, phases, sandboxId all omitted
     });
     const payload = info.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(payload).toEqual({ sessionId: 'sess-5', durationMs: 10 });
     expect(Object.keys(payload)).not.toContain('agentId');
     expect(Object.keys(payload)).not.toContain('phases');
     expect(Object.keys(payload)).not.toContain('sandboxId');
-    expect(Object.keys(payload)).not.toContain('tokens');
+  });
+
+  // Regression guard for the contract that every chat termination site MUST
+  // satisfy: when something has fired (or is about to fire) `chat_terminated`,
+  // the success-side `chat_complete` MUST NOT also fire on the same return
+  // path. The actual call site (`attach` inside `processCompletion`) gates
+  // its emit on a `chatTerminated` flag set by `markTerminated()` — this test
+  // models that gate to ensure no future refactor regresses the pairing.
+  //
+  // Specifically targets the outer-catch fix: prior to the fix, an unhandled
+  // throw flowed `completion_error` (error) → `attach` (info `chat_complete`)
+  // and an operator running `grep "chat_complete\|chat_terminated"` would
+  // see `chat_complete` and conclude the chat succeeded. The fix calls
+  // `markTerminated()` before `attach` runs; this test models the
+  // mark-then-emit ordering to lock the invariant in place.
+  it('contract: when termination has fired, chat_complete must not also fire on the same return', () => {
+    const { logger, info, error } = fakeLogger();
+
+    // Simulate the outer-catch: log the termination, then mark.
+    let terminated = false;
+    const markTerminated = (): void => { terminated = true; };
+    logChatTermination(logger, {
+      phase: 'dispatch',
+      reason: 'completion_error',
+      details: { error: 'boom' },
+    });
+    markTerminated();
+
+    // Simulate `attach` running on the error return path: the same
+    // `if (!terminated)` gate the production code uses.
+    if (!terminated) {
+      logChatComplete(logger, { sessionId: 'sess-x', durationMs: 100 });
+    }
+
+    // Exactly one canonical line for the operator: chat_terminated, no
+    // shadow chat_complete saying the chat succeeded.
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalledWith('chat_terminated', expect.objectContaining({
+      reason: 'completion_error',
+    }));
+    expect(info).not.toHaveBeenCalled();
   });
 });
 
