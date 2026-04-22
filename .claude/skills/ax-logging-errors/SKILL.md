@@ -19,12 +19,44 @@ AX uses a custom structured logger with dual transports (console + file) and an 
 ### Initialization
 
 ```typescript
-initLogger({ level?: LogLevel, pretty?: boolean });
+initLogger({ level?: LogLevel, pretty?: boolean, component?: string });
 ```
 
 - **level**: `'debug' | 'info' | 'warn' | 'error' | 'fatal'` (default: `'info'`, overrideable via `LOG_LEVEL` env)
 - **pretty**: Color-coded compact output if `true` (default: auto-detect TTY)
+- **component**: Optional subsystem name. When set, the logger checks `LOG_LEVEL_<COMPONENT>` (uppercased, hyphens → underscores) before falling back to `LOG_LEVEL`. The name is also bound as a default field on every emitted line.
 - **AX_VERBOSE**: Set `AX_VERBOSE=1` to enable verbose (debug-level) logging. This is the unified verbose flag — replaces various per-component debug flags. Used in `src/cli/index.ts` to set log level to debug at startup.
+
+### Per-component log levels (`LOG_LEVEL_*`)
+
+When one subsystem is misbehaving, an operator should be able to crank up its verbosity without drowning the rest of the host. Set `LOG_LEVEL_<COMPONENT>` to override the default `LOG_LEVEL` for a single component:
+
+```bash
+LOG_LEVEL=info LOG_LEVEL_SANDBOX_K8S=debug ax serve
+```
+
+**Convention:** uppercase + replace `-` with `_`, prefix with `LOG_LEVEL_`. So `sandbox-k8s` → `LOG_LEVEL_SANDBOX_K8S`. The mapping happens automatically — no allowlist, no registration.
+
+**Resolution priority** (most specific wins):
+1. Explicit `level` option in `createLogger({ level })` — caller intent always wins.
+2. `LOG_LEVEL_<COMPONENT>` env var — operator override for one subsystem.
+3. `LOG_LEVEL` env var — global default.
+4. `'info'` — built-in fallback.
+
+The override applies to every logger created via `createLogger({ component: 'foo-bar' })` AND every child logger created via `getLogger().child({ component: 'foo-bar' })`. The codebase uses the `child()` form ubiquitously — see `src/host/orchestrator.ts`, `src/host/server-completions.ts`, `src/providers/sandbox/k8s.ts`, etc.
+
+### Logging hygiene philosophy (Task 7, 2026-04-22)
+
+The user complaint pre-Task 7 was "extremely unreliable... so much logging that useful signal gets lost." The new philosophy:
+
+- **One canonical line per chat** at info or error: `chat_complete` (success) or `chat_terminated` (failure). What operators scan.
+- **Step-level events at debug.** Useful when bumping verbosity for one component; otherwise noise.
+- **Recoverable failures (chat continues with degraded behavior) → info, not warn.** Examples: `host_git_sync_failed`, `host_identity_fetch_failed`, `memory_recall_error`. The chat still proceeds; the failure is informational.
+- **Per-attempt failures inside retry loops → info, not warn.** Examples: `agent_response_error`. The chat may still succeed after retry — only the terminal `chat_terminated` is chat-fatal.
+- **Chat-fatal events at the sandbox layer → error.** Examples: `pod_failed`, `pod_watch_error`, `pod_timeout`, `pod_create_failed`. The host's retry loop may mask these with a successful retry; the sandbox-side error log is the per-attempt record.
+- **Cleanup/operational warnings stay warn.** Examples: `pod_cleanup_failed` (real cleanup failures, not 404), `sandbox_state_unavailable_fallback`, `tcp_bind_failed`.
+
+When in doubt: would an operator paged at 3 AM care? If yes → error or warn. If only useful when debugging one specific chat → debug.
 
 ### Transports
 
@@ -105,9 +137,15 @@ kubectl logs ax-host | grep "chat_complete\|chat_terminated"
 
 **Audited duplicates (Task 5, 2026-04-22):**
 - `fast_path_error` log: REMOVED — `chat_terminated` carries the same `error` plus phase/reason. Operators grep `chat_terminated` and filter on `reason: 'fast_path_error'`.
-- `agent_response_error` warn log: KEPT — per-attempt visibility distinct from chat termination (warn level vs error level). Useful for diagnosing chats that succeed after retry.
+- `agent_response_error` log: KEPT (now at info per Task 7) — per-attempt visibility distinct from chat termination. Useful for diagnosing chats that succeed after retry. Demoted from warn → info because per-attempt failures are not chat-fatal.
 - `agent_response_timeout` chat_terminated emit at server.ts safety-timer: REMOVED — the timer's rejection flows into the retry loop's catch, where the tracker records the cause; the single emit at the terminal `agent_failed` branch names it. Avoids stale terminal events when timeout fires but a retry succeeds.
-- `pod_failed` warn log (k8s.ts): KEPT — sandbox-side visibility, distinct subsystem. Operators correlate via `sandboxId` / `podName`.
+- `pod_failed` log (k8s.ts): KEPT (now at error per Task 7) — sandbox-side visibility, distinct subsystem. Promoted from warn → error because pod death is chat-fatal at the sandbox layer (even if the host retry masks it). Operators correlate via `sandboxId` / `podName`.
+
+**Level reclassifications (Task 7, 2026-04-22):**
+- Demoted to debug (happy-path step events): `completion_start`, `scan_inbound` (clean), `inbound_clean`, `dequeue_failed`, `workspace_reuse`, `agent_response_received`, `agent_spawn`. (Most were already at debug pre-Task 7 — Task 7 just confirmed.)
+- Demoted warn → info (recoverable, chat continues): `host_git_sync_failed`, `host_identity_fetch_failed`, `memory_recall_error`, `agent_response_error`.
+- Promoted warn → error (chat-fatal at sandbox layer): `pod_failed`, `pod_watch_error`, `pod_timeout`. (`pod_create_failed` was already at error.)
+- Kept at warn: `pod_cleanup_failed` (real cleanup failures, not 404), `sandbox_state_unavailable_fallback`, `scan_inbound` (status: blocked).
 
 ## Common Tasks
 

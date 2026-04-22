@@ -71,6 +71,8 @@
 
 ### architecture
 
+- Per-component log levels: env-var convention + child() honors override [architecture/entries.md](architecture/entries.md)
+- Logging hygiene: warn/info/error level semantics tied to chat lifecycle [architecture/entries.md](architecture/entries.md)
 - Chat UI prose classes require @tailwindcss/typography plugin — silently no-ops without it [architecture/entries.md](architecture/entries.md)
 - Transport text part IDs must be unique across tool-call boundaries [architecture/entries.md](architecture/entries.md)
 - Chat UI requires custom ChatTransport for OpenAI SSE — DefaultChatTransport uses AI SDK data stream format [architecture/entries.md](architecture/entries.md)

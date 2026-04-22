@@ -1125,7 +1125,11 @@ export async function processCompletion(
           hostManagedGit = true;
           hostOwnsGitCommit = true;
         } catch (err) {
-          reqLogger.warn('host_git_sync_failed', { error: (err as Error).message });
+          // Recoverable: chat continues with degraded behavior (no host-side
+          // git sync). Operators see this in the per-chat triage flow if
+          // chat_terminated fires later; otherwise it's just background noise
+          // at info level (Task 7).
+          reqLogger.info('host_git_sync_failed', { error: (err as Error).message });
         }
       } else {
         // http:// — fetch identity, seed if repo is empty
@@ -1149,7 +1153,10 @@ export async function processCompletion(
           hostManagedGit = true;
           hostOwnsGitCommit = false;
         } catch (err) {
-          reqLogger.warn('host_identity_fetch_failed', { error: (err as Error).message });
+          // Recoverable: identity falls back to empty defaults; chat still
+          // proceeds. Demoted to info per the Task 7 logging philosophy
+          // (recoverable failures are not warnings).
+          reqLogger.info('host_identity_fetch_failed', { error: (err as Error).message });
         }
       }
     } else if (!hostManagedGit && persistentSessionId) {
@@ -1166,7 +1173,8 @@ export async function processCompletion(
         hostManagedGit = true;
         hostOwnsGitCommit = true;
       } catch (err) {
-        reqLogger.warn('host_git_sync_failed', { error: (err as Error).message });
+        // Recoverable: chat continues without persistent git state (Task 7).
+        reqLogger.info('host_git_sync_failed', { error: (err as Error).message });
       }
     }
 
@@ -1258,7 +1266,8 @@ export async function processCompletion(
           history.unshift(...recallTurns);
         }
       } catch (err) {
-        reqLogger.warn('memory_recall_error', { error: (err as Error).message });
+        // Recoverable: chat continues without recalled memories (Task 7).
+        reqLogger.info('memory_recall_error', { error: (err as Error).message });
       }
     }
 
@@ -2131,9 +2140,11 @@ export async function processCompletion(
           agentResponseReceived = true;
           reqLogger.debug('agent_response_received', { responseLength: response.length });
         } catch (err) {
-          // Per-attempt warn — kept (operators can grep agent_response_error
-          // for attempt-level visibility distinct from chat termination).
-          reqLogger.warn('agent_response_error', { error: (err as Error).message, attempt });
+          // Per-attempt: NOT chat-fatal (a retry may succeed). Demoted to
+          // info (Task 7) — chat-fatal escalation is the terminal
+          // chat_terminated event below. Operators can still grep
+          // agent_response_error for attempt-level visibility.
+          reqLogger.info('agent_response_error', { error: (err as Error).message, attempt });
           // Record the cause; the terminal chat_terminated emit at the
           // `agent_failed` branch (below) decides whether to fire it. This
           // collapses N per-attempt emits into ONE event per truly-terminated

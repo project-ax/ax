@@ -2,6 +2,22 @@
 
 Agent orchestration system: supervisor, directory, agent-loop, event store, heartbeat, policy tags.
 
+## [2026-04-22 11:30] — chat-correlation Task 7: per-component log levels + hygiene pass
+
+**Task:** Final task of the chat-correlation rollout. Drop happy-path noise to debug, promote terminal events to error, downgrade recoverable warnings to info, and add `LOG_LEVEL_<COMPONENT>` env support so an operator can crank one component without drowning in everything.
+**What I did:**
+- Added `resolveLevelForComponent(component)` to `src/logger.ts`: maps `sandbox-k8s` → `LOG_LEVEL_SANDBOX_K8S` (uppercase + hyphens-to-underscores). New `component` option on `LoggerOptions` triggers per-component env lookup AND binds `component` as a default field on every emitted line. Resolution order: explicit `level` opt → `LOG_LEVEL_<COMPONENT>` → `LOG_LEVEL` → `'info'`.
+- Extended `wrapPino.child` so a `getLogger().child({ component: 'foo' })` call ALSO honors the env override (this is the codebase's dominant pattern). Added a `bindComponent` helper that uses pino's child directly (bypassing the env override) for `createLogger`-supplied components — preserves the "explicit level wins" rule.
+- Reclassifications in `src/host/server-completions.ts` (warn → info, recoverable, chat continues): `host_git_sync_failed` (×2 sites), `host_identity_fetch_failed`, `memory_recall_error`, `agent_response_error`. The per-attempt `agent_response_error` was previously kept at warn (Task 5) for visibility — Task 7's philosophy says per-attempt failures inside retry loops are info because retries may succeed; the terminal `chat_terminated` is the only chat-fatal escalation.
+- Reclassifications in `src/providers/sandbox/k8s.ts` (warn → error, chat-fatal at sandbox layer): `pod_failed`, `pod_watch_error`, `pod_timeout`. (`pod_create_failed` was already at error.) Kept `pod_cleanup_failed` at warn — operational issue, not chat-fatal.
+- Server.ts `agent_response timeout` site: NO log change needed — already correctly silent, the rejection downstream-flows into the retry loop's tracker which fires the single chat_terminated.
+- 5 new tests in `tests/logger-component-levels.test.ts`: env override raises, default applies when no override, hyphen→underscore mapping, explicit level wins over env, child() binding triggers env override. All 5 pass; 13/13 existing logger tests still pass.
+- Updated `.claude/skills/ax-logging-errors/SKILL.md` with: per-component env var section, logging hygiene philosophy, Task 7 reclassification table.
+- Fixed stale comment in `tests/providers/sandbox/k8s-correlation.test.ts` (pod_failed is now error, not warn).
+**Files touched:** `src/logger.ts` (new `resolveLevelForComponent` + `component` option + child env override + bindComponent helper), `src/host/server-completions.ts` (5 level changes), `src/providers/sandbox/k8s.ts` (3 level changes), `tests/logger-component-levels.test.ts` (new, 5 tests), `tests/providers/sandbox/k8s-correlation.test.ts` (comment fix), `.claude/skills/ax-logging-errors/SKILL.md`.
+**Outcome:** Success — 93/93 tests pass in modified-file scope (logger + sandbox + chat-termination + retry). Build clean. Full-suite numbers identical to baseline (33 pre-existing macOS Unix-socket EINVAL failures). Skipped local kind-cluster smoke per the plan's fallback (no live cluster running).
+**Notes:** The child-with-env-override behavior means `getLogger().child({component})` now resolves env lookups at child-creation time. Side effect: changing `LOG_LEVEL_*` env vars after process start has no effect (the children were already constructed). Acceptable — operators set these at deploy time, not at runtime. Documented as part of the resolution-priority section.
+
 ## [2026-04-22 11:20] — chat-correlation Task 6 review fixes
 
 **Task:** Address one critical + three important code-review findings on commit 8dabeaf0 (Task 6, chat_complete event).

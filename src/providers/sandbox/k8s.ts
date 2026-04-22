@@ -286,7 +286,13 @@ export async function create(_config: Config): Promise<SandboxProvider> {
             // 'DeadlineExceeded' (activeDeadlineSeconds) or 'Evicted'. This is
             // the *useful* one when containerReason is the ambiguous 'Error'.
             const podReason = obj?.status?.reason;
-            podLog.warn('pod_failed', {
+            // Chat-fatal at the sandbox layer: this pod's chat is dead.
+            // The host's retry loop may still mask this with a successful
+            // retry (in which case chat_terminated does NOT fire), so this
+            // is the sandbox-side per-attempt record. Promoted to error
+            // (Task 7) so operators grepping "level=50" don't miss pod
+            // deaths just because the chat eventually succeeded.
+            podLog.error('pod_failed', {
               exitCode: code,
               containerReason,
               podReason,
@@ -301,7 +307,9 @@ export async function create(_config: Config): Promise<SandboxProvider> {
           if (!resolved) {
             resolved = true;
             activePods.delete(pid);
-            podLog.warn('pod_watch_error', { lastPhase, error: err?.message });
+            // Watch failed — we lose visibility on the pod and resolve as
+          // failure. Chat-fatal at the sandbox layer (Task 7).
+          podLog.error('pod_watch_error', { lastPhase, error: err?.message });
             cleanup();
             resolve(1);
           }
@@ -314,7 +322,9 @@ export async function create(_config: Config): Promise<SandboxProvider> {
         if (!resolved) {
           resolved = true;
           activePods.delete(pid);
-          podLog.warn('pod_timeout', { timeoutMs, lastPhase, elapsedMs: Date.now() - watchStartTime });
+          // Safety timeout fired — pod is presumed dead. Chat-fatal at the
+          // sandbox layer (Task 7).
+          podLog.error('pod_timeout', { timeoutMs, lastPhase, elapsedMs: Date.now() - watchStartTime });
           try { watchReq?.abort(); } catch { /* best-effort */ }
           resolve(1);
         }

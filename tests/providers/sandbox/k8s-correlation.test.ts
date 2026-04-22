@@ -139,7 +139,7 @@ describe('k8s sandbox correlation', () => {
       expect(e.pid as number).toBeGreaterThanOrEqual(100_000);
     }
 
-    // At least one of: creating_pod (info), pod_failed (warn) must be present.
+    // At least one of: creating_pod (info), pod_failed (error) must be present.
     const events = podScoped.map(e => e.msg);
     expect(events).toContain('creating_pod');
     expect(events).toContain('pod_failed');
