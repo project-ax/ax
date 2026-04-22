@@ -2,6 +2,26 @@
 
 End-to-end test framework, simulated providers, scenario coverage.
 
+## [2026-04-21 18:05] — Task 7.5: Petstore 2-call flow through OpenAPI indirect dispatch
+
+**Task:** Phase 7 final task of tool-dispatch-unification — prove the unified indirect-dispatch pipeline handles an OpenAPI-sourced tool chain end-to-end (parallel to Task 4.4's Linear/MCP proof). Must validate: catalog populated from `openapi[]` frontmatter via spec fetch, 2 chained `call_tool` invocations land on a real HTTP server, url_rewrites applied at BOTH spec-fetch and dispatch time.
+**What I did:**
+  - **Verified url_rewrite coverage first**: `src/host/skills/openapi-spec-fetcher.ts:163` applies `urlRewrites` to the spec URL before SwaggerParser fetches; `src/host/ipc-handlers/openapi-dispatcher.ts:271` applies it to the composed baseUrl+path before the fetch call. Both paths honor `config.url_rewrites` — no blocker.
+  - **Fixture skill** at `tests/e2e/fixtures/skills/petstore/SKILL.md` with `openapi: [{spec: https://mock-target.test/openapi/petstore.json, baseUrl: https://mock-target.test/api/v1}]`. No `auth:` block — unit tests already cover all 4 auth schemes; e2e stays focused on dispatch mechanics.
+  - **Mock Petstore handler** (`tests/e2e/mock-server/petstore.ts`, ~170 LOC): parallels `mcp.ts` structure. Serves `GET /openapi/petstore.json` by loading `tests/fixtures/openapi/petstore-minimal.json` and injecting `servers: [{url: https://mock-target.test/api/v1}]`. Implements listPets/createPet/getPetByID/deletePet with in-memory state + per-op counters + `/petstore/_stats` + `/petstore/_reset` hooks. Determinism: createPet with `name='Rex'` always returns `id=42`.
+  - **Read-back sentinel**: getPetByID attaches `_readback: true` to the response. Disambiguates the scripted chain — Turn 2 and Turn 3 return shape-identical payloads otherwise, and the mock OpenRouter's first-match-wins iteration would make Turn 2 re-fire on its own output.
+  - **Router wiring** (`tests/e2e/mock-server/index.ts`): routes `/openapi/petstore.json`, `/api/v1/pets`, `/petstore/*` to `handlePetstore`; calls `resetPetstore()` from `resetAll()`.
+  - **Scripted turns** (`tests/e2e/scripts/petstore-flow.ts`): 3 turns — opening user message triggers `call_tool(api_petstore_create_pet, {body:{name:'Rex'}})`, chain on `/"id":42.*"name":"Rex"/` → `api_petstore_get_pet_by_id({id:42})`, chain on `/"_readback":true/` → final content "Created pet Rex with id 42." Tool names verified against adapter's `toSnakeCase`: `getPetByID` → `get_pet_by_id` (trailing-acronym case).
+  - **Seed script extension** (`tests/e2e/global-setup.ts`): previously only hashed `linear_mcp/SKILL.md`; now hashes both fixtures and builds a single `.ax/skills/` tree containing `linear_mcp/` + `petstore/`. Single commit keeps the catalog snapshot coherent.
+  - **Regression test 19** in `regression.test.ts`: resets petstore stats, sends "Create a pet named Rex and tell me its id.", asserts response contains Rex+42, and asserts `stats.createPet === 1`, `stats.getPetById === 1`, `stats.listPets === 0`, `stats.deletePet === 0`.
+**Files touched:** `tests/e2e/fixtures/skills/petstore/SKILL.md` (new), `tests/e2e/mock-server/petstore.ts` (new), `tests/e2e/mock-server/index.ts`, `tests/e2e/scripts/petstore-flow.ts` (new), `tests/e2e/scripts/index.ts`, `tests/e2e/regression.test.ts`, `tests/e2e/global-setup.ts`, `.claude/journal/testing/e2e.md`.
+**Outcome:** Success on implementation. `npm run build` clean. `npm test -- tests/host/tool-catalog/` 43/43 pass. `npm test -- tests/host/ipc-handlers/` 162/162 pass. `npm test -- tests/host/skills/` 197/197 pass. Fixture frontmatter parses cleanly through `SkillFrontmatterSchema.strict()`. Full `npm run test:e2e` requires a kind cluster rebuild — deferred to post-deploy verification per the plan's Step 10.
+**Notes:**
+  - The vendored spec at `tests/fixtures/openapi/petstore-minimal.json` uses `operationId: getPetByID` (all-caps ID). The adapter's `toSnakeCase` regex handles the trailing-acronym case → `get_pet_by_id`. Kept the original casing to exercise the branch rather than renaming to `getPetById`.
+  - The `_readback: true` sentinel is the cleanest way to disambiguate turns when both chained tool responses share the same JSON shape. An alternative (counter-based turn routing in the mock OpenRouter) would have been more invasive.
+  - Seeding both fixtures in a single commit avoids ordering-surprise bugs where the second-seeded skill would clobber the first if we naively re-ran the update-ref step.
+  - Pre-existing test failures in `tests/host/server*.test.ts` + `tests/integration/smoke.test.ts` (21 + 12) are unrelated — reproduced on `main` before my changes. They fail on `ipc-server.ts` socket bind, not on OpenAPI code.
+
 ## [2026-04-21 14:30] — Task 13: tool CLI shim regression for Linear 3-step pipeline
 
 **Task:** Add an e2e regression test proving the Linear 3-step pipeline (get_team → list_cycles → list_issues) completes in ≤4 tool calls via `bash` + `tool` CLI shims — the replacement for the `execute_script`-thrashing scenario the live kind trace (`chatcmpl-c155550e`) caught.

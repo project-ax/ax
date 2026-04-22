@@ -7,9 +7,13 @@
  *   2. Extracts the optional `_select` jq projection from args. The selector
  *      is kept off the dispatch payload; the cleaned args are forwarded to
  *      the server.
- *   3. Dispatches by `dispatch.kind`. MCP is the only implemented kind at
- *      this stage; OpenAPI dispatch arrives in a later phase.
- *   4. On a successful MCP result, if a selector was captured, runs
+ *   3. Dispatches by `dispatch.kind`:
+ *        - `mcp`     — routed to `mcpProvider.callToolOnServer`.
+ *        - `openapi` — routed to `openApiProvider.dispatchOperation`
+ *                      (Task 7.4). The dispatcher resolves creds, builds
+ *                      the HTTP request (path substitution + query +
+ *                      header + auth + body), and returns parsed JSON.
+ *   4. On a successful result, if a selector was captured, runs
  *      `applyJq(result, selector)` and returns the projection. A bad
  *      selector yields `select_failed` — dispatch already succeeded, so
  *      this is a distinct failure mode from `dispatch_failed`.
@@ -22,8 +26,8 @@
  *
  * Structured errors (never throw across the IPC boundary):
  *   - `unknown_tool` — name not in the current turn's catalog
- *   - `unsupported_dispatch` — dispatch.kind we do not handle yet (openapi)
- *   - `dispatch_failed` — MCP provider threw / returned an isError
+ *   - `unsupported_dispatch` — dispatch.kind not recognized (forward-compat)
+ *   - `dispatch_failed` — dispatcher threw / returned an error
  *   - `select_failed` — dispatch succeeded but the jq projection blew up
  *
  * Catalog access mirrors `describe-tools.ts` — either a direct
@@ -70,6 +74,43 @@ export interface CallToolMcpDispatcher {
   }): Promise<unknown>;
 }
 
+/**
+ * OpenAPI dispatcher surface the handler needs (Task 7.4).
+ *
+ * The handler has already:
+ *   - Resolved the catalog tool (so `operationId`, `method`, `path`,
+ *     `baseUrl`, and `params` are trusted + fully typed).
+ *   - Stripped `_select` from `args`.
+ *
+ * The dispatcher's job: resolve credentials, substitute `{name}` path
+ * tokens, route query/header params per `params[].in`, serialize `body`
+ * as JSON when present, inject auth per `authScheme`, apply
+ * `config.url_rewrites` to `baseUrl`, fire the HTTP request, and return
+ * the parsed-JSON response body. Throws on transport errors or non-2xx
+ * responses — the handler wraps into `{error, kind: 'dispatch_failed'}`.
+ */
+export interface CallToolOpenApiDispatcher {
+  dispatchOperation(call: {
+    baseUrl: string;
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+    /** Path template with `{name}` tokens preserved, e.g. `/pets/{id}`. */
+    path: string;
+    operationId: string;
+    /** envName from skill frontmatter auth.credential, or undefined when
+     *  no auth is configured. */
+    credential?: string;
+    authScheme?: 'bearer' | 'basic' | 'api_key_header' | 'api_key_query';
+    /** Parameter locations preserved from the OpenAPI spec so the
+     *  dispatcher can route each arg correctly. `body` is NEVER an entry
+     *  here — it's handled separately via the reserved `args.body` key. */
+    params: Array<{ name: string; in: 'path' | 'query' | 'header' }>;
+    /** Combined params + optional `body` key, per the catalog tool's
+     *  inputSchema. Same `_select`-stripped args the handler received. */
+    args: Record<string, unknown>;
+    ctx: { agentId: string; userId: string };
+  }): Promise<unknown>;
+}
+
 export interface CallToolDeps {
   /** Direct catalog — unit-test form. */
   catalog?: CatalogReader;
@@ -77,6 +118,11 @@ export interface CallToolDeps {
   resolveCatalog?: (ctx: IPCContext) => CatalogReader | undefined;
   /** MCP dispatcher. Required — every catalog tool at this stage is MCP. */
   mcpProvider: CallToolMcpDispatcher;
+  /** OpenAPI dispatcher. Required — parallels `mcpProvider` so a host
+   *  with any openapi-source skill has a concrete dispatcher wired in.
+   *  Compile-time safety over a runtime "unsupported_dispatch" fallback,
+   *  same tightening we did for `fetchOpenApiSpec` in 7.3. */
+  openApiProvider: CallToolOpenApiDispatcher;
   /**
    * Auto-spill threshold in UTF-8 bytes. When the stringified
    * post-projection result exceeds this, the handler returns a
@@ -274,6 +320,9 @@ export function createCallToolHandler(deps: CallToolDeps) {
   if (!deps.mcpProvider) {
     throw new Error('createCallToolHandler: `mcpProvider` is required');
   }
+  if (!deps.openApiProvider) {
+    throw new Error('createCallToolHandler: `openApiProvider` is required');
+  }
 
   const spillThresholdBytes =
     deps.spillThresholdBytes ?? DEFAULT_TOOL_DISPATCH_SPILL_THRESHOLD_BYTES;
@@ -331,6 +380,33 @@ export function createCallToolHandler(deps: CallToolDeps) {
 
     const { cleanedArgs, selector } = extractSelect(req.args ?? {});
 
+    /**
+     * Shared post-dispatch projection + envelope. Both MCP and OpenAPI
+     * flow through this so `_select` + auto-spill behave identically
+     * regardless of dispatch kind. The selector is the turn-time value
+     * captured above.
+     */
+    async function projectAndEnvelope(result: unknown): Promise<CallToolResult> {
+      if (selector !== undefined) {
+        try {
+          const projected = await applyJq(result, selector);
+          return envelope(projected);
+        } catch (err) {
+          const msg = errorMessage(err);
+          logger.debug('call_tool_select_failed', {
+            tool: req.tool,
+            selector,
+            error: msg,
+          });
+          return {
+            error: `_select projection failed: ${msg}`,
+            kind: 'select_failed',
+          };
+        }
+      }
+      return envelope(result);
+    }
+
     if (tool.dispatch.kind === 'mcp') {
       let result: unknown;
       try {
@@ -351,38 +427,50 @@ export function createCallToolHandler(deps: CallToolDeps) {
         const msg = errorMessage(err);
         logger.debug('call_tool_dispatch_failed', {
           tool: req.tool,
+          kind: 'mcp',
           server: tool.dispatch.server,
           error: msg,
         });
         return { error: msg, kind: 'dispatch_failed' };
       }
 
-      // Projection only runs when dispatch succeeded. A broken selector is
-      // distinct from a dispatch failure — the agent may want to retry with
-      // a corrected jq rather than give up on the tool call entirely.
-      if (selector !== undefined) {
-        try {
-          const projected = await applyJq(result, selector);
-          return envelope(projected);
-        } catch (err) {
-          const msg = errorMessage(err);
-          logger.debug('call_tool_select_failed', {
-            tool: req.tool,
-            selector,
-            error: msg,
-          });
-          return {
-            error: `_select projection failed: ${msg}`,
-            kind: 'select_failed',
-          };
-        }
-      }
-
-      return envelope(result);
+      return projectAndEnvelope(result);
     }
 
-    // openapi dispatch lands in a later phase — return a typed error rather
-    // than silently succeeding or throwing.
+    if (tool.dispatch.kind === 'openapi') {
+      let result: unknown;
+      try {
+        result = await deps.openApiProvider.dispatchOperation({
+          baseUrl: tool.dispatch.baseUrl,
+          method: tool.dispatch.method,
+          path: tool.dispatch.path,
+          operationId: tool.dispatch.operationId,
+          credential: tool.dispatch.credential,
+          authScheme: tool.dispatch.authScheme,
+          params: tool.dispatch.params,
+          args: cleanedArgs,
+          ctx: {
+            agentId: ctx?.agentId ?? '',
+            userId: ctx?.userId ?? '',
+          },
+        });
+      } catch (err) {
+        const msg = errorMessage(err);
+        logger.debug('call_tool_dispatch_failed', {
+          tool: req.tool,
+          kind: 'openapi',
+          operationId: tool.dispatch.operationId,
+          error: msg,
+        });
+        return { error: msg, kind: 'dispatch_failed' };
+      }
+
+      return projectAndEnvelope(result);
+    }
+
+    // Forward-compat safety net — an unrecognized discriminated union kind
+    // is a compile-time error; this branch only triggers if a new dispatch
+    // kind slips into runtime data without a matching handler.
     return {
       error: `unsupported dispatch kind for tool ${req.tool}: ${(tool.dispatch as { kind: string }).kind}`,
       kind: 'unsupported_dispatch',

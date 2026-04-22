@@ -15,6 +15,7 @@ import { handleGCS, resetGCS } from './gcs.js';
 import { handleOpenRouter, resetOpenRouter } from './openrouter.js';
 import { handleLinear, resetLinear } from './linear.js';
 import { handleMcp, resetMcp } from './mcp.js';
+import { handlePetstore, resetPetstore } from './petstore.js';
 
 let server: Server | null = null;
 
@@ -55,6 +56,7 @@ export function resetAll(): void {
   resetOpenRouter();
   resetLinear();
   resetMcp();
+  resetPetstore();
 }
 
 function routeRequest(req: IncomingMessage, res: ServerResponse): void {
@@ -95,6 +97,18 @@ function routeRequest(req: IncomingMessage, res: ServerResponse): void {
   // MCP — /mcp/* (Task 4.4 e2e: mock Linear MCP server + /_stats hook)
   if (url.startsWith('/mcp/') || url === '/mcp') {
     handleMcp(req, res);
+    return;
+  }
+
+  // Petstore — /openapi/petstore.json, /api/v1/pets[/], /petstore/_stats,
+  // /petstore/_reset (Task 7.5 e2e: mock OpenAPI backend + /_stats hook).
+  // Matches pathname OR pathname-plus-query, so trailing query strings route.
+  if (
+    url === '/openapi/petstore.json' ||
+    url.startsWith('/api/v1/pets') ||
+    url.startsWith('/petstore/')
+  ) {
+    handlePetstore(req, res);
     return;
   }
 

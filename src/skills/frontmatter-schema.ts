@@ -119,6 +119,35 @@ const SourceSchema = z
   })
   .strict();
 
+/** One OpenAPI-backed tool source. The adapter fetches `spec` (URL or
+ *  workspace-relative path), converts every operation into a CatalogTool
+ *  with `dispatch.kind = 'openapi'`, and at call-time issues HTTPS requests
+ *  to `baseUrl + path`, injecting the optional `auth` credential the way
+ *  the scheme dictates (Bearer header, Basic auth, `X-API-Key` header, or
+ *  `?api_key=` query param). `include`/`exclude` are minimatch globs over
+ *  operationId, mirroring the `mcpServers[]` convention so skill authors
+ *  can pin the surface to known-safe ops (e.g. `include: ['list_*', 'get_*']`
+ *  to keep mutations out). `baseUrl` is pinned to https:// — we're at the
+ *  same trust boundary as `mcpServers[].url` (host-side credential injection
+ *  against a skill-author-supplied URL). */
+const OpenApiSourceSchema = z
+  .object({
+    spec: z.string().min(1),
+    baseUrl: z.string().url().startsWith('https://'),
+    auth: z
+      .object({
+        scheme: z.enum(['bearer', 'basic', 'api_key_header', 'api_key_query']),
+        // String reference to an envName in the top-level credentials[] array.
+        // Constrained to ENV_NAME for consistency with mcpServers[].credential.
+        credential: z.string().regex(ENV_NAME),
+      })
+      .strict()
+      .optional(),
+    include: z.array(z.string().min(1)).optional(),
+    exclude: z.array(z.string().min(1)).optional(),
+  })
+  .strict();
+
 export const SkillFrontmatterSchema = z
   .object({
     name: z.string().min(1).max(100),
@@ -126,6 +155,7 @@ export const SkillFrontmatterSchema = z
     source: SourceSchema.optional(),
     credentials: z.array(CredentialSchema).default([]),
     mcpServers: z.array(McpServerSchema).default([]),
+    openapi: z.array(OpenApiSourceSchema).default([]),
     domains: z.array(Hostname).default([]),
   })
   .strict();
@@ -133,3 +163,4 @@ export const SkillFrontmatterSchema = z
 export type SkillFrontmatter = z.infer<typeof SkillFrontmatterSchema>;
 export type SkillCredential = z.infer<typeof CredentialSchema>;
 export type SkillMcpServer = z.infer<typeof McpServerSchema>;
+export type SkillOpenApiSource = z.infer<typeof OpenApiSourceSchema>;

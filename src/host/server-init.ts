@@ -27,6 +27,7 @@ import { AgentProvisioner } from './agent-provisioner.js';
 import type { Server as NetServer } from 'node:net';
 import { callToolOnServer } from '../plugins/mcp-client.js';
 import { parseMcpTextResult } from './ipc-handlers/call-tool.js';
+import { makeDefaultOpenApiDispatcher } from './ipc-handlers/openapi-dispatcher.js';
 import { applyUrlRewrite } from '../plugins/url-rewrite.js';
 import { loadDatabaseMcpServers } from '../plugins/startup.js';
 import type { AdminContext } from './server-admin-helpers.js';
@@ -470,6 +471,19 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
             return parseMcpTextResult(result.content);
           },
         }
+      : undefined,
+    // OpenAPI dispatcher for `call_tool` (Task 7.4). Parallel to the MCP
+    // dispatcher above: closes over `skillCredStore` for credential
+    // resolution and `config.url_rewrites` for e2e mock-server redirection.
+    // Only wired when `skillCredStore` exists — credential resolution has
+    // nothing to hit without it, and skipping the wire keeps openapi-kind
+    // tools routing through the fallback path instead of silently failing
+    // at dispatch time.
+    callToolOpenApiDispatcher: skillCredStore
+      ? makeDefaultOpenApiDispatcher({
+          skillCredStore,
+          urlRewrites: config.url_rewrites,
+        })
       : undefined,
     // Auto-spill threshold for `call_tool` responses. `tool_dispatch`
     // is non-optional on Config and the Zod schema fills the default —

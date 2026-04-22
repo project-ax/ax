@@ -13,7 +13,7 @@
 // 6. Factory guards on missing deps.
 
 import { describe, it, expect, vi } from 'vitest';
-import { createCallToolHandler, parseMcpTextResult, pickClosestNames } from '../../../src/host/ipc-handlers/call-tool.js';
+import { createCallToolHandler, parseMcpTextResult, pickClosestNames, type CallToolOpenApiDispatcher } from '../../../src/host/ipc-handlers/call-tool.js';
 import { ToolCatalog } from '../../../src/host/tool-catalog/registry.js';
 import { catalogReaderFromTools } from '../../../src/host/ipc-handlers/describe-tools.js';
 import type { CatalogTool } from '../../../src/types/catalog.js';
@@ -33,6 +33,20 @@ function makeTool(overrides: Partial<CatalogTool> = {}): CatalogTool {
   } as CatalogTool;
 }
 
+/**
+ * Throwing stub for `openApiProvider` — MCP-focused tests never dispatch
+ * an openapi tool, so the stub should never fire. If a regression routes
+ * an MCP tool through the openapi branch, this surfaces loudly instead
+ * of silently succeeding with stale data.
+ */
+const unusedOpenApiProvider: CallToolOpenApiDispatcher = {
+  dispatchOperation: async () => {
+    throw new Error(
+      'openApiProvider.dispatchOperation called from an MCP-only test — did the dispatch kind change?',
+    );
+  },
+};
+
 const ctx: IPCContext = { sessionId: 's1', agentId: 'main', userId: 'alice' };
 
 describe('call_tool handler', () => {
@@ -43,7 +57,7 @@ describe('call_tool handler', () => {
     const catalog = new ToolCatalog();
     catalog.register(makeTool());
 
-    const handler = createCallToolHandler({ catalog, mcpProvider });
+    const handler = createCallToolHandler({ catalog, mcpProvider, openApiProvider: unusedOpenApiProvider });
     const result = await handler(
       { tool: 'mcp_linear_list_issues', args: { team: 'p' } },
       ctx,
@@ -64,7 +78,7 @@ describe('call_tool handler', () => {
     };
     const catalog = new ToolCatalog();
     catalog.register(makeTool());
-    const handler = createCallToolHandler({ catalog, mcpProvider });
+    const handler = createCallToolHandler({ catalog, mcpProvider, openApiProvider: unusedOpenApiProvider });
 
     // First call — userId = alice
     await handler(
@@ -93,7 +107,7 @@ describe('call_tool handler', () => {
     };
     const catalog = new ToolCatalog();
     catalog.register(makeTool());
-    const handler = createCallToolHandler({ catalog, mcpProvider });
+    const handler = createCallToolHandler({ catalog, mcpProvider, openApiProvider: unusedOpenApiProvider });
 
     await handler(
       { tool: 'mcp_linear_list_issues', args: {} },
@@ -108,7 +122,7 @@ describe('call_tool handler', () => {
 
   it('returns structured error for unknown tool', async () => {
     const mcpProvider = { callToolOnServer: vi.fn() };
-    const handler = createCallToolHandler({ catalog: new ToolCatalog(), mcpProvider });
+    const handler = createCallToolHandler({ catalog: new ToolCatalog(), mcpProvider, openApiProvider: unusedOpenApiProvider });
     const result = await handler({ tool: 'mcp_bogus', args: {} });
 
     expect(result).toMatchObject({ kind: 'unknown_tool' });
@@ -123,7 +137,7 @@ describe('call_tool handler', () => {
     const catalog = new ToolCatalog();
     catalog.register(makeTool({ name: 'mcp_linear_x', dispatch: { kind: 'mcp', server: 'linear', toolName: 'x' } }));
 
-    const handler = createCallToolHandler({ catalog, mcpProvider });
+    const handler = createCallToolHandler({ catalog, mcpProvider, openApiProvider: unusedOpenApiProvider });
     const result = await handler({ tool: 'mcp_linear_x', args: {} });
 
     expect(result).toMatchObject({ kind: 'dispatch_failed' });
@@ -137,7 +151,7 @@ describe('call_tool handler', () => {
     const catalog = new ToolCatalog();
     catalog.register(makeTool());
 
-    const handler = createCallToolHandler({ catalog, mcpProvider });
+    const handler = createCallToolHandler({ catalog, mcpProvider, openApiProvider: unusedOpenApiProvider });
     await handler({
       tool: 'mcp_linear_list_issues',
       args: { team: 'p', _select: '.team' },
@@ -155,7 +169,7 @@ describe('call_tool handler', () => {
     const catalog = new ToolCatalog();
     catalog.register(makeTool());
 
-    const handler = createCallToolHandler({ catalog, mcpProvider });
+    const handler = createCallToolHandler({ catalog, mcpProvider, openApiProvider: unusedOpenApiProvider });
     const result = await handler({
       tool: 'mcp_linear_list_issues',
       args: { _select: '.issues | length' },
@@ -171,7 +185,7 @@ describe('call_tool handler', () => {
     const catalog = new ToolCatalog();
     catalog.register(makeTool());
 
-    const handler = createCallToolHandler({ catalog, mcpProvider });
+    const handler = createCallToolHandler({ catalog, mcpProvider, openApiProvider: unusedOpenApiProvider });
     const result = await handler({
       tool: 'mcp_linear_list_issues',
       args: { _select: '.[' },
@@ -188,7 +202,7 @@ describe('call_tool handler', () => {
     const catalog = new ToolCatalog();
     catalog.register(makeTool());
 
-    const handler = createCallToolHandler({ catalog, mcpProvider });
+    const handler = createCallToolHandler({ catalog, mcpProvider, openApiProvider: unusedOpenApiProvider });
     // empty string, number, object — all ignored
     for (const bad of ['', 123, { nested: true }]) {
       const result = await handler({
@@ -213,6 +227,7 @@ describe('call_tool handler', () => {
         return reader;
       },
       mcpProvider,
+      openApiProvider: unusedOpenApiProvider,
     });
 
     const result = await handler({ tool: 'mcp_linear_list_issues', args: {} }, ctx);
@@ -225,6 +240,7 @@ describe('call_tool handler', () => {
     const handler = createCallToolHandler({
       resolveCatalog: () => undefined,
       mcpProvider,
+      openApiProvider: unusedOpenApiProvider,
     });
 
     const result = await handler({ tool: 'mcp_linear_list_issues', args: {} }, ctx);
@@ -232,8 +248,11 @@ describe('call_tool handler', () => {
     expect(mcpProvider.callToolOnServer).not.toHaveBeenCalled();
   });
 
-  it('returns unsupported_dispatch for non-MCP kinds (openapi lands later)', async () => {
+  it('routes openapi dispatch kinds through openApiProvider (Task 7.4)', async () => {
     const mcpProvider = { callToolOnServer: vi.fn() };
+    const openApiProvider = {
+      dispatchOperation: vi.fn().mockResolvedValue({ id: '5', name: 'Rex' }),
+    };
     const catalog = new ToolCatalog();
     catalog.register({
       name: 'api_foo_bar',
@@ -244,25 +263,51 @@ describe('call_tool handler', () => {
         kind: 'openapi',
         baseUrl: 'https://example.com',
         method: 'GET',
-        path: '/x',
+        path: '/x/{id}',
         operationId: 'getX',
+        params: [{ name: 'id', in: 'path' }],
       },
     } as CatalogTool);
 
-    const handler = createCallToolHandler({ catalog, mcpProvider });
-    const result = await handler({ tool: 'api_foo_bar', args: {} });
+    const handler = createCallToolHandler({ catalog, mcpProvider, openApiProvider });
+    const result = await handler({ tool: 'api_foo_bar', args: { id: '5' } }, ctx);
 
-    expect(result).toMatchObject({ kind: 'unsupported_dispatch' });
+    expect(result).toEqual({ result: { id: '5', name: 'Rex' } });
     expect(mcpProvider.callToolOnServer).not.toHaveBeenCalled();
+    expect(openApiProvider.dispatchOperation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseUrl: 'https://example.com',
+        method: 'GET',
+        path: '/x/{id}',
+        operationId: 'getX',
+        params: [{ name: 'id', in: 'path' }],
+        args: { id: '5' },
+        ctx: { agentId: 'main', userId: 'alice' },
+      }),
+    );
   });
 
   it('throws at factory time if neither `catalog` nor `resolveCatalog` is provided', () => {
     const mcpProvider = { callToolOnServer: vi.fn() };
-    expect(() => createCallToolHandler({ mcpProvider } as never)).toThrow(/catalog/);
+    expect(() =>
+      createCallToolHandler({ mcpProvider, openApiProvider: unusedOpenApiProvider } as never),
+    ).toThrow(/catalog/);
   });
 
   it('throws at factory time if `mcpProvider` is missing', () => {
-    expect(() => createCallToolHandler({ catalog: new ToolCatalog() } as never)).toThrow(/mcpProvider/);
+    expect(() =>
+      createCallToolHandler({
+        catalog: new ToolCatalog(),
+        openApiProvider: unusedOpenApiProvider,
+      } as never),
+    ).toThrow(/mcpProvider/);
+  });
+
+  it('throws at factory time if `openApiProvider` is missing', () => {
+    const mcpProvider = { callToolOnServer: vi.fn() };
+    expect(() =>
+      createCallToolHandler({ catalog: new ToolCatalog(), mcpProvider } as never),
+    ).toThrow(/openApiProvider/);
   });
 
   it('coerces non-Error thrown values to a string (no info loss)', async () => {
@@ -272,7 +317,7 @@ describe('call_tool handler', () => {
     const catalog = new ToolCatalog();
     catalog.register(makeTool());
 
-    const handler = createCallToolHandler({ catalog, mcpProvider });
+    const handler = createCallToolHandler({ catalog, mcpProvider, openApiProvider: unusedOpenApiProvider });
     const result = await handler({ tool: 'mcp_linear_list_issues', args: {} });
 
     expect(result).toMatchObject({ kind: 'dispatch_failed' });
@@ -296,6 +341,7 @@ describe('call_tool handler', () => {
     const handler = createCallToolHandler({
       catalog,
       mcpProvider,
+      openApiProvider: unusedOpenApiProvider,
       spillThresholdBytes: 20_480,
     });
     const result = await handler({ tool: 'mcp_linear_list_issues', args: {} });
@@ -316,6 +362,7 @@ describe('call_tool handler', () => {
     const handler = createCallToolHandler({
       catalog,
       mcpProvider,
+      openApiProvider: unusedOpenApiProvider,
       spillThresholdBytes: 20_480,
     });
     const result = await handler({ tool: 'mcp_linear_list_issues', args: {} });
@@ -332,7 +379,7 @@ describe('call_tool handler', () => {
     const catalog = new ToolCatalog();
     catalog.register(makeTool());
 
-    const handler = createCallToolHandler({ catalog, mcpProvider });
+    const handler = createCallToolHandler({ catalog, mcpProvider, openApiProvider: unusedOpenApiProvider });
     const result = await handler({ tool: 'mcp_linear_list_issues', args: {} });
 
     expect(result).toMatchObject({ truncated: true });
@@ -355,6 +402,7 @@ describe('call_tool handler', () => {
     const handler = createCallToolHandler({
       catalog,
       mcpProvider,
+      openApiProvider: unusedOpenApiProvider,
       spillThresholdBytes: 20_480,
     });
     const result = await handler({
@@ -375,6 +423,7 @@ describe('call_tool handler', () => {
     const handler = createCallToolHandler({
       catalog,
       mcpProvider,
+      openApiProvider: unusedOpenApiProvider,
       spillThresholdBytes: 20_480,
     });
     const result = await handler({ tool: 'mcp_linear_list_issues', args: {} });
@@ -449,7 +498,7 @@ describe('call_tool handler', () => {
       catalog.register(makeTool({ name: 'mcp_github_list_repos', skill: 'github', dispatch: { kind: 'mcp', server: 'github', toolName: 'list_repos' } }));
 
       const mcpProvider = { callToolOnServer: vi.fn() };
-      const handler = createCallToolHandler({ catalog, mcpProvider });
+      const handler = createCallToolHandler({ catalog, mcpProvider, openApiProvider: unusedOpenApiProvider });
       const result = await handler({ tool: 'mcp_linear_get_team', args: {} });
 
       expect(result).toMatchObject({ kind: 'unknown_tool' });
@@ -465,7 +514,7 @@ describe('call_tool handler', () => {
       const catalog = new ToolCatalog();
       catalog.register(makeTool({ name: 'mcp_slack_post_message', skill: 'slack', dispatch: { kind: 'mcp', server: 'slack', toolName: 'post_message' } }));
 
-      const handler = createCallToolHandler({ catalog, mcpProvider: { callToolOnServer: vi.fn() } });
+      const handler = createCallToolHandler({ catalog, mcpProvider: { callToolOnServer: vi.fn() }, openApiProvider: unusedOpenApiProvider });
       const result = await handler({ tool: 'completely_unrelated_xyz', args: {} });
       const err = (result as { error: string }).error;
       expect(err).toContain('ax.describeTool([])');
@@ -477,6 +526,7 @@ describe('call_tool handler', () => {
       const handler = createCallToolHandler({
         catalog: new ToolCatalog(),
         mcpProvider: { callToolOnServer: vi.fn() },
+        openApiProvider: unusedOpenApiProvider,
       });
       const result = await handler({ tool: 'anything', args: {} });
       expect((result as { error: string }).error).toContain('catalog is empty');

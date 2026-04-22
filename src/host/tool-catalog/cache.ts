@@ -65,10 +65,11 @@ export interface GetOrBuildCatalogInput {
    *  needs a rebuild. */
   headSha: string;
   /** Invoked only on cache miss. Return `{tools, partial}` — when
-   *  `partial: true` (one or more MCP servers failed `listTools`), the
-   *  helper returns the tools to this turn's caller but skips the cache
-   *  write so the next turn retries the flaky server. Without this, a
-   *  single transient 401 sticks as "no tools" until HEAD changes. */
+   *  `partial: true` (one or more MCP servers failed `listTools`, OR one
+   *  or more OpenAPI sources failed to fetch/parse), the helper returns
+   *  the tools to this turn's caller but skips the cache write so the
+   *  next turn retries the flaky source. Without this, a single transient
+   *  401 or DNS hiccup sticks as "no tools" until HEAD changes. */
   build(): Promise<BuildResult>;
 }
 

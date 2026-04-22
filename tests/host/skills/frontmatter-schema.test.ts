@@ -287,4 +287,223 @@ describe('SkillFrontmatterSchema', () => {
     });
     expect(parsed.domains).toEqual(['api.example.co.uk', 'mcp.linear.app']);
   });
+
+  // ---- openapi[] sources (Phase 7) ----
+
+  it('defaults openapi to [] when absent', () => {
+    const parsed = SkillFrontmatterSchema.parse({
+      name: 'x',
+      description: 'y',
+    });
+    expect(parsed.openapi).toEqual([]);
+  });
+
+  it('accepts a minimal openapi entry (spec + baseUrl only)', () => {
+    const parsed = SkillFrontmatterSchema.parse({
+      name: 'x',
+      description: 'y',
+      openapi: [
+        { spec: 'https://example.com/openapi.json', baseUrl: 'https://api.example.com' },
+      ],
+    });
+    expect(parsed.openapi).toHaveLength(1);
+    expect(parsed.openapi[0].spec).toBe('https://example.com/openapi.json');
+    expect(parsed.openapi[0].baseUrl).toBe('https://api.example.com');
+    expect(parsed.openapi[0].auth).toBeUndefined();
+    expect(parsed.openapi[0].include).toBeUndefined();
+    expect(parsed.openapi[0].exclude).toBeUndefined();
+  });
+
+  it('accepts an openapi entry with all fields populated', () => {
+    const parsed = SkillFrontmatterSchema.parse({
+      name: 'x',
+      description: 'y',
+      credentials: [{ envName: 'GITHUB_TOKEN' }],
+      openapi: [
+        {
+          spec: './openapi.yaml',
+          baseUrl: 'https://api.github.com',
+          auth: { scheme: 'bearer', credential: 'GITHUB_TOKEN' },
+          include: ['repos/*', 'issues/*'],
+          exclude: ['repos/delete_*'],
+        },
+      ],
+    });
+    expect(parsed.openapi[0].spec).toBe('./openapi.yaml');
+    expect(parsed.openapi[0].auth).toEqual({ scheme: 'bearer', credential: 'GITHUB_TOKEN' });
+    expect(parsed.openapi[0].include).toEqual(['repos/*', 'issues/*']);
+    expect(parsed.openapi[0].exclude).toEqual(['repos/delete_*']);
+  });
+
+  it('accepts multiple openapi entries in the array', () => {
+    const parsed = SkillFrontmatterSchema.parse({
+      name: 'x',
+      description: 'y',
+      openapi: [
+        { spec: 'https://a.example/openapi.json', baseUrl: 'https://a.example' },
+        { spec: 'https://b.example/openapi.json', baseUrl: 'https://b.example' },
+      ],
+    });
+    expect(parsed.openapi).toHaveLength(2);
+    expect(parsed.openapi[1].baseUrl).toBe('https://b.example');
+  });
+
+  it('accepts all four openapi auth schemes', () => {
+    for (const scheme of ['bearer', 'basic', 'api_key_header', 'api_key_query'] as const) {
+      const parsed = SkillFrontmatterSchema.parse({
+        name: 'x',
+        description: 'y',
+        openapi: [
+          {
+            spec: 'https://example.com/openapi.json',
+            baseUrl: 'https://api.example.com',
+            auth: { scheme, credential: 'SOME_TOKEN' },
+          },
+        ],
+      });
+      expect(parsed.openapi[0].auth?.scheme).toBe(scheme);
+    }
+  });
+
+  it('rejects openapi entry missing spec', () => {
+    expect(() =>
+      SkillFrontmatterSchema.parse({
+        name: 'x',
+        description: 'y',
+        openapi: [{ baseUrl: 'https://api.example.com' }],
+      }),
+    ).toThrow();
+  });
+
+  it('rejects openapi entry missing baseUrl', () => {
+    expect(() =>
+      SkillFrontmatterSchema.parse({
+        name: 'x',
+        description: 'y',
+        openapi: [{ spec: 'https://example.com/openapi.json' }],
+      }),
+    ).toThrow();
+  });
+
+  it('rejects openapi entry with empty spec', () => {
+    expect(() =>
+      SkillFrontmatterSchema.parse({
+        name: 'x',
+        description: 'y',
+        openapi: [{ spec: '', baseUrl: 'https://api.example.com' }],
+      }),
+    ).toThrow();
+  });
+
+  it('rejects openapi entry with invalid baseUrl (not a URL)', () => {
+    expect(() =>
+      SkillFrontmatterSchema.parse({
+        name: 'x',
+        description: 'y',
+        openapi: [{ spec: 'https://example.com/openapi.json', baseUrl: 'not-a-url' }],
+      }),
+    ).toThrow();
+  });
+
+  it('rejects openapi entry with non-https baseUrl', () => {
+    // Same trust boundary as mcpServers[].url — host-side credential
+    // injection against a skill-author-supplied URL must not travel over
+    // cleartext http:// where a coffee-shop attacker could sniff the token.
+    expect(() =>
+      SkillFrontmatterSchema.parse({
+        name: 'x',
+        description: 'y',
+        openapi: [
+          { spec: 'https://example.com/openapi.json', baseUrl: 'http://api.example.com' },
+        ],
+      }),
+    ).toThrow();
+    // Also rejects other schemes.
+    expect(() =>
+      SkillFrontmatterSchema.parse({
+        name: 'x',
+        description: 'y',
+        openapi: [
+          { spec: 'https://example.com/openapi.json', baseUrl: 'ftp://api.example.com' },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it('rejects openapi entry with unknown auth scheme', () => {
+    expect(() =>
+      SkillFrontmatterSchema.parse({
+        name: 'x',
+        description: 'y',
+        openapi: [
+          {
+            spec: 'https://example.com/openapi.json',
+            baseUrl: 'https://api.example.com',
+            auth: { scheme: 'digest', credential: 'TOKEN' },
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it('rejects unknown keys inside an openapi entry (strict)', () => {
+    expect(() =>
+      SkillFrontmatterSchema.parse({
+        name: 'x',
+        description: 'y',
+        openapi: [
+          {
+            spec: 'https://example.com/openapi.json',
+            baseUrl: 'https://api.example.com',
+            extraField: true,
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it('rejects openapi.auth.credential that is not SCREAMING_SNAKE_CASE', () => {
+    expect(() =>
+      SkillFrontmatterSchema.parse({
+        name: 'x',
+        description: 'y',
+        openapi: [
+          {
+            spec: 'https://example.com/openapi.json',
+            baseUrl: 'https://api.example.com',
+            auth: { scheme: 'bearer', credential: 'lowercase' },
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it('rejects openapi.auth missing scheme or credential', () => {
+    expect(() =>
+      SkillFrontmatterSchema.parse({
+        name: 'x',
+        description: 'y',
+        openapi: [
+          {
+            spec: 'https://example.com/openapi.json',
+            baseUrl: 'https://api.example.com',
+            auth: { scheme: 'bearer' },
+          },
+        ],
+      }),
+    ).toThrow();
+    expect(() =>
+      SkillFrontmatterSchema.parse({
+        name: 'x',
+        description: 'y',
+        openapi: [
+          {
+            spec: 'https://example.com/openapi.json',
+            baseUrl: 'https://api.example.com',
+            auth: { credential: 'TOKEN' },
+          },
+        ],
+      }),
+    ).toThrow();
+  });
 });

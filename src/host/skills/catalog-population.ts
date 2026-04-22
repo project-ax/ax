@@ -21,10 +21,12 @@
  * `McpConnectionManager.discoverAllTools` which also runs best-effort.
  */
 
+import type { OpenAPIV3 } from 'openapi-types';
 import { getLogger } from '../../logger.js';
 import { buildMcpCatalogTools } from '../tool-catalog/adapters/mcp.js';
+import { buildOpenApiCatalogTools } from '../tool-catalog/adapters/openapi.js';
 import type { ToolCatalog } from '../tool-catalog/registry.js';
-import type { SkillMcpServer } from '../../skills/frontmatter-schema.js';
+import type { SkillMcpServer, SkillOpenApiSource } from '../../skills/frontmatter-schema.js';
 import type { SkillSnapshotEntry } from './types.js';
 
 const logger = getLogger().child({ component: 'catalog-population' });
@@ -44,6 +46,23 @@ export interface PopulateCatalogFromSkillsInput {
   /** Factory that returns a listTools-capable MCP client for the given
    *  (skill, serverName). Called once per declared server. */
   getMcpClient(skillName: string, serverName: string): CatalogMcpClient;
+  /** Factory that fetches + dereferences an OpenAPI v3 spec. Returns the
+   *  resolved document; throws on fetch/parse failure or unsupported spec
+   *  version (v2). Called once per declared `openapi[]` source. Real wiring
+   *  in `server-completions.ts` passes a closure built by
+   *  `makeDefaultFetchOpenApiSpec` (see `openapi-spec-fetcher.ts`); unit
+   *  tests pass a `vi.fn()` with a pre-built `OpenAPIV3.Document`.
+   *
+   *  Required — symmetry with `getMcpClient`. A missing factory on a skill
+   *  with `openapi[]` would surface as a silent runtime failure (every
+   *  openapi-declaring skill produces zero tools + one log line); the
+   *  compile-time guarantee is worth more than the test-fixture cost. For
+   *  tests that don't exercise the openapi path, pass a throwing stub —
+   *  the type-checker keeps the wiring honest, the stub never fires. */
+  fetchOpenApiSpec(
+    skillName: string,
+    source: SkillOpenApiSource,
+  ): Promise<OpenAPIV3.Document>;
   /** Destination catalog. Mutated in place. Not frozen by this function — the
    *  caller (session bootstrap) is responsible for `catalog.freeze()`. */
   catalog: ToolCatalog;
@@ -61,6 +80,14 @@ export interface PopulateCatalogResult {
   /** Number of servers whose `listTools` threw. `catalog_populate_server_failed`
    *  fired once per. */
   serverFailures: number;
+  /** Number of `openapi[]` sources whose fetch/parse/dereference threw
+   *  (including v2 rejection). `catalog_populate_openapi_parse_failed`
+   *  fired once per. Same cache-safety story as `serverFailures`: a
+   *  partial build must NOT be cached, or a transient network hiccup
+   *  sticks as "no tools" until HEAD changes. Counted separately from
+   *  `serverFailures` because MCP and OpenAPI have distinct debugging
+   *  paths and mixing the counters makes partial-build logs less useful. */
+  openApiSourceFailures: number;
   /** Number of individual tools that failed `catalog.register` (duplicate
    *  names across skills). Separate counter because "some tools skipped
    *  due to dupes" is a deterministic, cache-safe outcome — we've picked
@@ -71,16 +98,21 @@ export interface PopulateCatalogResult {
 export async function populateCatalogFromSkills(
   input: PopulateCatalogFromSkillsInput,
 ): Promise<PopulateCatalogResult> {
-  const { skills, getMcpClient, catalog } = input;
+  const { skills, getMcpClient, fetchOpenApiSpec, catalog } = input;
   let serverFailures = 0;
+  let openApiSourceFailures = 0;
   let toolRegisterFailures = 0;
 
   for (const entry of skills) {
     // Skip parse-failure entries (`ok: false`); entries with `ok: true` or
     // an absent `ok` field (test fixtures) both have a frontmatter object.
     if (entry.ok === false) continue;
-    const frontmatter = (entry as { frontmatter?: { mcpServers?: SkillMcpServer[] } }).frontmatter;
+    const frontmatter = (entry as {
+      frontmatter?: { mcpServers?: SkillMcpServer[]; openapi?: SkillOpenApiSource[] };
+    }).frontmatter;
     const servers = frontmatter?.mcpServers ?? [];
+    const sources = frontmatter?.openapi ?? [];
+
     for (const server of servers) {
       try {
         const client = getMcpClient(entry.name, server.name);
@@ -121,7 +153,52 @@ export async function populateCatalogFromSkills(
         });
       }
     }
+
+    // ── OpenAPI sources ── parallel to the MCP loop. Each source's fetch
+    // and parse is isolated: a bad spec (network timeout, v2 rejection,
+    // traversal attempt on a workspace-relative path) counts as one
+    // `openApiSourceFailures` and does NOT abort the rest of the skill's
+    // sources or the rest of the snapshot. Duplicate tool names (two
+    // sources that both produce `api_<skill>_<op>`) count as
+    // `toolRegisterFailures`, same cache-safety story as the MCP loop.
+    for (const source of sources) {
+      try {
+        const spec = await fetchOpenApiSpec(entry.name, source);
+        const catalogTools = buildOpenApiCatalogTools({
+          skill: entry.name,
+          spec,
+          baseUrl: source.baseUrl,
+          auth: source.auth,
+          include: source.include,
+          exclude: source.exclude,
+        });
+        for (const tool of catalogTools) {
+          try {
+            catalog.register(tool);
+          } catch (err) {
+            toolRegisterFailures += 1;
+            logger.warn('catalog_register_failed', {
+              skill: entry.name,
+              source: source.spec,
+              tool: tool.name,
+              error: (err as Error).message,
+            });
+          }
+        }
+      } catch (err) {
+        // Fetch/parse/dereference threw, or the adapter rejected v2.
+        // Skill authors need the spec pointer + error message to
+        // diagnose from logs alone; hence the specific event name.
+        openApiSourceFailures += 1;
+        logger.warn('catalog_populate_openapi_parse_failed', {
+          skill: entry.name,
+          source: source.spec,
+          baseUrl: source.baseUrl,
+          error: (err as Error).message,
+        });
+      }
+    }
   }
 
-  return { serverFailures, toolRegisterFailures };
+  return { serverFailures, openApiSourceFailures, toolRegisterFailures };
 }

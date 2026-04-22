@@ -17,7 +17,7 @@ import { createPluginHandlers } from './ipc-handlers/plugin.js';
 import { createOrchestrationHandlers } from './ipc-handlers/orchestration.js';
 import { createSandboxToolHandlers } from './ipc-handlers/sandbox-tools.js';
 import { createDescribeToolsHandler, type CatalogReader } from './ipc-handlers/describe-tools.js';
-import { createCallToolHandler, type CallToolMcpDispatcher } from './ipc-handlers/call-tool.js';
+import { createCallToolHandler, type CallToolMcpDispatcher, type CallToolOpenApiDispatcher } from './ipc-handlers/call-tool.js';
 import { validateCommit } from './validate-commit.js';
 import type { Orchestrator } from './orchestration/orchestrator.js';
 
@@ -98,6 +98,12 @@ export interface IPCHandlerOptions {
    *  not registered, requests fall through to the default "No handler"
    *  path (correct failure mode for hosts not in unified-dispatch mode). */
   callToolMcpDispatcher?: CallToolMcpDispatcher;
+  /** OpenAPI dispatcher for the `call_tool` handler. Parallel to
+   *  `callToolMcpDispatcher` — both must be present for `call_tool` to be
+   *  registered so any openapi-kind catalog entry has a concrete dispatch
+   *  path. Production wires this via `makeDefaultOpenApiDispatcher`
+   *  (server-init.ts); tests pass a throwing stub or a mock. */
+  callToolOpenApiDispatcher?: CallToolOpenApiDispatcher;
   /** Spill threshold (UTF-8 bytes) for `call_tool` responses. Sourced
    *  from `config.tool_dispatch.spill_threshold_bytes`. When omitted, the
    *  `call_tool` handler falls back to the default constant — keeps
@@ -137,13 +143,17 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
     // unified-dispatch mode yet.
     ...(opts?.resolveCatalog ? { describe_tools: createDescribeToolsHandler({ resolveCatalog: opts.resolveCatalog }) } : {}),
     // call_tool — single-tool dispatch by catalog lookup. Same catalog
-    // plumbing as describe_tools; also needs an MCP dispatcher to route
-    // MCP-kind catalog entries. Absent either → action falls through.
-    ...(opts?.resolveCatalog && opts?.callToolMcpDispatcher
+    // plumbing as describe_tools; also needs concrete dispatchers for
+    // every supported `dispatch.kind`. Absent any of the three required
+    // wires (catalog / MCP / OpenAPI) → action falls through to the
+    // generic "No handler" path, which is the right failure mode for a
+    // host that isn't in unified-dispatch mode yet.
+    ...(opts?.resolveCatalog && opts?.callToolMcpDispatcher && opts?.callToolOpenApiDispatcher
       ? {
           call_tool: createCallToolHandler({
             resolveCatalog: opts.resolveCatalog,
             mcpProvider: opts.callToolMcpDispatcher,
+            openApiProvider: opts.callToolOpenApiDispatcher,
             spillThresholdBytes: opts.spillThresholdBytes,
           }),
         }

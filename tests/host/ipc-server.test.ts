@@ -845,6 +845,11 @@ describe('IPC Handler spill threshold plumbing (Task 4.3)', () => {
       agentId: 'test-agent',
       resolveCatalog: () => reader,
       callToolMcpDispatcher: mcpDispatcher,
+      callToolOpenApiDispatcher: {
+        dispatchOperation: async () => {
+          throw new Error('openapi dispatcher should not fire in MCP-only plumbing test');
+        },
+      },
       spillThresholdBytes: 100,
     });
 
@@ -881,6 +886,11 @@ describe('IPC Handler spill threshold plumbing (Task 4.3)', () => {
       agentId: 'test-agent',
       resolveCatalog: () => reader,
       callToolMcpDispatcher: mcpDispatcher,
+      callToolOpenApiDispatcher: {
+        dispatchOperation: async () => {
+          throw new Error('openapi dispatcher should not fire in MCP-only plumbing test');
+        },
+      },
       // spillThresholdBytes intentionally omitted — handler must apply the default
     });
 

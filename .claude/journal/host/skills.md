@@ -4,6 +4,42 @@ Git-native skills rollout: snapshot builder, state store, reconcile orchestrator
 
 ## Entries
 
+## [2026-04-21 16:55] — Phase 7 Task 7.1 follow-up: rename base_url → baseUrl, pin to https://
+
+**Task:** Code-quality review flagged two items on commit 369e38a: (1) `base_url` was a faithful copy of the plan literal but the surrounding file uses camelCase throughout (`clientId`, `authType`, `envName`, `mcpServers`) — renaming now is cheap, after Task 7.2 ships it's expensive; (2) `baseUrl` should be pinned to `https://` like `mcpServers[].url` since it's the same trust boundary (host-side credential injection against a skill-author-supplied URL).
+
+**What I did:**
+- Renamed `base_url` → `baseUrl` in `OpenApiSourceSchema` and the JSDoc above it.
+- Added `.startsWith('https://')` to the `baseUrl` field — identical to `mcpServers[].url` (line 71) and the OAuth URL fields.
+- Updated all existing openapi[] test cases to use `baseUrl` (Edit replace_all for the bulk rename; fixed one straggler assertion `parsed.openapi[1].base_url` → `.baseUrl`; updated test description strings).
+- Added one new test `rejects openapi entry with non-https baseUrl` covering `http://` and `ftp://` — explicitly asserts the https-pinning guard works.
+
+**Files touched:**
+- Modified: `src/skills/frontmatter-schema.ts`
+- Modified: `tests/host/skills/frontmatter-schema.test.ts`
+
+**Outcome:** 37/37 tests green (prior 36 + 1 new https-guard). `npm run build` clean. No other callers of the schema exist yet (Task 7.2+ not landed), so the rename ripple was contained to this file + its tests.
+
+**Notes:** Scope was deliberately narrow — only these two fixes. The plan doc (`docs/plans/2026-04-19-tool-dispatch-unification-plan.md:1192`) still uses `base_url` in its literal schema snippet; that's fine, the plan is a design document, and matching file convention takes precedence per the original task's "follow the file's convention, not the plan literal" guidance. If a future reader of the plan is confused, that's a one-line update to the plan doc, not a schema rework.
+
+## [2026-04-21 16:50] — Phase 7 Task 7.1: extend SKILL.md frontmatter with `openapi:` array
+
+**Task:** First slice of the Phase 7 OpenAPI adapter rollout (see `docs/plans/2026-04-19-tool-dispatch-unification-plan.md`). Let skill authors declare OpenAPI-backed tool sources in frontmatter alongside `mcpServers[]` — parallel shape, parallel conventions. No adapter / population / dispatch yet (those are 7.2-7.5).
+
+**What I did:**
+- Added `OpenApiSourceSchema` (strict Zod object) in `src/skills/frontmatter-schema.ts` with `spec` (URL or workspace-relative path), `base_url` (z.string().url()), optional `auth: { scheme, credential }` where scheme is one of `bearer | basic | api_key_header | api_key_query` and credential is a string envName reference (constrained to the same `ENV_NAME = /^[A-Z][A-Z0-9_]{1,63}$/` regex as `mcpServers[].credential`), and optional `include` / `exclude` string-glob arrays mirroring the MCP convention.
+- Added `openapi: z.array(OpenApiSourceSchema).default([])` to `SkillFrontmatterSchema` — following the file's `.default([])` convention for array fields rather than the plan's literal `.optional()`, so downstream iteration doesn't need `?? []`.
+- Exported `SkillOpenApiSource` type alongside the existing `SkillMcpServer` / `SkillCredential` exports.
+- Wrote 13 new TDD tests in `tests/host/skills/frontmatter-schema.test.ts`: default-to-[], minimal entry, all-fields entry, multiple entries, all four auth schemes, rejections for missing spec / missing base_url / empty spec / invalid base_url / unknown scheme / strict unknown keys / lowercase credential envName / partial auth block.
+
+**Files touched:**
+- Modified: `src/skills/frontmatter-schema.ts`
+- Modified: `tests/host/skills/frontmatter-schema.test.ts`
+
+**Outcome:** 36/36 frontmatter-schema tests green (13 new + 23 existing). `npm run build` clean — no other callers broke from the new required-but-defaulted field because the zod `.default([])` means existing call sites that only read `mcpServers` / `credentials` / `domains` continue to compile.
+
+**Notes:** Judgment call on the plan deviation: the task doc's literal schema used `.optional()`, but the surrounding file uses `.default([])` for every other array field. Chose consistency-with-file over literal-match since the plan prompt explicitly flagged this ("follow the file's convention, not the plan literal"). Also chose to constrain `auth.credential` to `ENV_NAME` regex — same as `mcpServers[].credential` — which the plan didn't strictly mandate but the prompt called out as desirable for symmetry. Catalog types in `src/types/catalog.ts` already have `OpenApiDispatch` defined for Task 7.2; no changes there.
+
 ## [2026-04-21 05:52] — Block SKILL.md frontmatter mutations from non-interactive sessions
 
 **Task:** After the sidebar-fix landed, the deeper issue remained: heartbeat/cron turns were rewriting SKILL.md frontmatter to "fix" pending skills — commonly flipping envName, credential ref, or transport — breaking admin-approved state and flipping the skill PENDING. Symptom was intermittent `invalid_token` errors that resolved after an admin re-approved via Test-&-Enable, then recurred next heartbeat.

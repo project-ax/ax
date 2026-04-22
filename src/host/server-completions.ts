@@ -48,6 +48,7 @@ import { ToolCatalog } from './tool-catalog/registry.js';
 import { getOrBuildCatalog } from './tool-catalog/cache.js';
 import { populateCatalogFromSkills } from './skills/catalog-population.js';
 import { buildTurnMcpClientFactory } from './skills/mcp-client-factory.js';
+import { makeDefaultFetchOpenApiSpec } from './skills/openapi-spec-fetcher.js';
 import type { CatalogTool } from '../types/catalog.js';
 import { catalogReaderFromTools } from './ipc-handlers/describe-tools.js';
 
@@ -1576,24 +1577,37 @@ export async function processCompletion(
                 // redirects to the mock server's dynamic port.
                 urlRewrites: config.url_rewrites,
               }),
+              // OpenAPI spec fetcher — http:// URLs go direct to
+              // SwaggerParser; workspace-relative paths resolve against
+              // the agent's bare skills repo via git-show. Same
+              // url_rewrites hook as MCP for e2e mock redirection.
+              fetchOpenApiSpec: makeDefaultFetchOpenApiSpec({
+                getBareRepoPath: () => deps.agentSkillsDeps.getBareRepoPath(agentId),
+                urlRewrites: config.url_rewrites,
+              }),
               catalog: toolCatalog,
             });
             toolCatalog.freeze();
-            // Flag the build partial when ANY MCP server failed listTools.
-            // `getOrBuildCatalog` skips its cache write on partial so the
-            // next turn retries the flaky server instead of serving empty
-            // tools until HEAD changes. Dupe-name register failures don't
-            // count — those are deterministic outcomes of frontmatter shape.
-            if (buildResult.serverFailures > 0) {
+            // Flag the build partial when ANY MCP server failed listTools
+            // OR any openapi source failed to fetch/parse. `getOrBuildCatalog`
+            // skips its cache write on partial so the next turn retries the
+            // flaky source instead of serving empty tools until HEAD changes.
+            // Dupe-name register failures don't count — those are
+            // deterministic outcomes of frontmatter shape.
+            const partial =
+              buildResult.serverFailures > 0 ||
+              buildResult.openApiSourceFailures > 0;
+            if (partial) {
               reqLogger.warn('catalog_partial_build', {
                 agentId,
                 serverFailures: buildResult.serverFailures,
+                openApiSourceFailures: buildResult.openApiSourceFailures,
                 catalogSize: toolCatalog.list().length,
               });
             }
             return {
               tools: toolCatalog.list(),
-              partial: buildResult.serverFailures > 0,
+              partial,
             };
           },
         });

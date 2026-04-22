@@ -366,4 +366,64 @@ describe('regression test sequence', () => {
     expect(stats.list_issues).toBe(1);
   }, 240_000);
 
+  // ──────────────────────────────────────────────────────────────────────
+  // 19. PETSTORE 2-CALL FLOW — catalog → call_tool → OpenAPI → chained calls
+  // ──────────────────────────────────────────────────────────────────────
+  //
+  // Task 7.5: prove the unified indirect-dispatch pipeline handles an
+  // OpenAPI-sourced chain end-to-end (Phase 7 parallel to Task 4.4's
+  // Linear/MCP chain).
+  //
+  //   1. User asks: "Create a pet named Rex and tell me its id."
+  //   2. The `petstore` fixture skill's `openapi[]` frontmatter populates
+  //      the per-turn catalog with 4 tools fetched from the mock spec at
+  //      https://mock-target.test/openapi/petstore.json (url_rewrites
+  //      redirect to the e2e mock server on a dynamic port).
+  //   3. LLM emits call_tool(api_petstore_create_pet, {body:{name:'Rex'}})
+  //      — scripted. Host dispatches via OpenAPI → mock returns
+  //      {id:42, name:'Rex'} (deterministic: name='Rex' → id=42).
+  //   4. LLM emits call_tool(api_petstore_get_pet_by_id, {id:42}) —
+  //      scripted via matchToolResult pinning both id=42 and name="Rex".
+  //   5. Mock returns {id:42, name:'Rex', _readback:true}.
+  //   6. LLM emits final content summary naming the id.
+  //
+  // Evidence: the mock tracks per-operation hit counters; we assert
+  // createPet=1 + getPetByID=1 + listPets=0 + deletePet=0. That proves
+  // (a) the OpenAPI adapter populated the catalog, (b) both dispatches
+  // actually landed on the server with the right path/method/body, and
+  // (c) nothing extraneous fired (no retries, no accidental listPets).
+  test('19. Petstore 2-call flow through OpenAPI indirect dispatch', async () => {
+    const mockPort = process.env.MOCK_SERVER_PORT;
+    if (!mockPort) {
+      throw new Error('MOCK_SERVER_PORT env var not set — global setup skipped?');
+    }
+    const mockBase = `http://127.0.0.1:${mockPort}`;
+    await fetch(`${mockBase}/petstore/_reset`, { method: 'POST' });
+
+    const sessionId = `${SESSION_PREFIX}:petstore-flow`;
+    const res = await client.sendMessage(
+      'Create a pet named Rex and tell me its id.',
+      { sessionId, user: 'testuser', timeoutMs: 180_000 },
+    );
+
+    expect(res.status).toBe(200);
+    // Final answer must reference both "Rex" and "42" — proves the full
+    // chain executed and Turn 3's summary fired from the read-back.
+    expect(res.content).toMatch(/rex.*42|42.*rex/i);
+
+    // Verify each OpenAPI op was hit the expected number of times — the
+    // core evidence that the 2-call chain actually landed on the server
+    // with no retries and no accidental dispatches.
+    const stats = await fetch(`${mockBase}/petstore/_stats`).then((r) => r.json()) as {
+      listPets: number;
+      createPet: number;
+      getPetById: number;
+      deletePet: number;
+    };
+    expect(stats.createPet).toBe(1);
+    expect(stats.getPetById).toBe(1);
+    expect(stats.listPets).toBe(0);
+    expect(stats.deletePet).toBe(0);
+  }, 240_000);
+
 });

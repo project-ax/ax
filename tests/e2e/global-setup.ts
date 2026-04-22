@@ -198,7 +198,7 @@ export async function setup(): Promise<void> {
   console.log(`[setup] Waiting for rollout...`);
   run('kubectl', ['rollout', 'status', 'deployment/ax-host', '-n', 'ax-e2e', '--timeout=300s'], { timeout: 600_000 });
 
-  // 10a. Seed the `ax` agent's bare repo with the linear_mcp fixture skill.
+  // 10a. Seed the `ax` agent's bare repo with fixture skills.
   //
   // Why this is needed: the `git-local` workspace provider creates an
   // empty bare repo at ~/.ax/repos/ax/ on first use, but nothing actually
@@ -206,28 +206,32 @@ export async function setup(): Promise<void> {
   // which doesn't happen in k8s-sandbox mode because the sandbox pod owns
   // the workspace writes, not the host. So the catalog-building code path
   // (`buildSnapshotFromBareRepo` → git ls-tree) sees an empty repo and
-  // yields an empty catalog, and `mcp_linear_mcp_get_team` never lands in
-  // the catalog.
+  // yields an empty catalog, and e.g. `mcp_linear_mcp_get_team` never
+  // lands in the catalog.
   //
-  // Rather than reshape the k8s seeding pipeline (out of scope for Task
-  // 4.4), we pre-seed the fixture skill directly into the bare repo via
+  // Rather than reshape the k8s seeding pipeline (out of scope for these
+  // tasks), we pre-seed fixture skills directly into the bare repo via
   // kubectl exec. Production gets the usual seed-on-first-turn flow;
   // e2e's kind cluster gets this explicit pre-commit.
-  console.log(`[setup] Seeding linear_mcp fixture skill into agent bare repo...`);
+  //
+  // Fixtures seeded: `linear_mcp` (Task 4.4) and `petstore` (Task 7.5).
+  // Both share a single seed commit so the catalog snapshot sees both
+  // skills under `.ax/skills/` in one tree.
+  console.log(`[setup] Seeding fixture skills into agent bare repo...`);
   const podName = run('kubectl', [
     'get', 'pod', '-n', 'ax-e2e', '-l', 'app.kubernetes.io/name=ax-host',
     '-o', 'jsonpath={.items[0].metadata.name}',
   ]);
   // Build the seed script that runs inside the pod. It:
-  //   1. Reads the fixture SKILL.md from /opt/ax/fixtures/skills/linear_mcp/
+  //   1. Reads each fixture SKILL.md from /opt/ax/fixtures/skills/<skill>/
   //      (baked into the image by container/agent/Dockerfile).
-  //   2. Uses git plumbing (hash-object, update-index, commit-tree,
-  //      update-ref) directly against the bare repo so we don't need a
-  //      working tree.
+  //   2. Uses git plumbing (hash-object, mktree, commit-tree, update-ref)
+  //      directly against the bare repo so we don't need a working tree.
   //   3. Idempotent — skips if refs/heads/main already exists.
   const seedScript = `set -eu
 REPO=/home/ax/.ax/repos/ax
-SKILL_SRC=/opt/ax/fixtures/skills/linear_mcp/SKILL.md
+LINEAR_SRC=/opt/ax/fixtures/skills/linear_mcp/SKILL.md
+PETSTORE_SRC=/opt/ax/fixtures/skills/petstore/SKILL.md
 
 # Wait for the repo to appear (the host process creates it lazily on
 # first workspace request; on a fresh pod it may not exist yet).
@@ -253,17 +257,21 @@ export GIT_AUTHOR_EMAIL="e2e-setup@ax.local"
 export GIT_COMMITTER_NAME="e2e-setup"
 export GIT_COMMITTER_EMAIL="e2e-setup@ax.local"
 
-# Hash SKILL.md as a blob in the bare repo.
-BLOB=$(git -C "$REPO" hash-object -w "$SKILL_SRC")
+# Hash each SKILL.md as a blob in the bare repo.
+LINEAR_BLOB=$(git -C "$REPO" hash-object -w "$LINEAR_SRC")
+PETSTORE_BLOB=$(git -C "$REPO" hash-object -w "$PETSTORE_SRC")
 
-# Build tree: .ax/skills/linear_mcp/SKILL.md -> BLOB.
-INNER=$(printf "100644 blob $BLOB\\tSKILL.md\\n" | git -C "$REPO" mktree)
-SKILLS=$(printf "040000 tree $INNER\\tlinear_mcp\\n" | git -C "$REPO" mktree)
+# Build the nested tree:
+#   .ax/skills/linear_mcp/SKILL.md -> LINEAR_BLOB
+#   .ax/skills/petstore/SKILL.md   -> PETSTORE_BLOB
+LINEAR_INNER=$(printf "100644 blob $LINEAR_BLOB\\tSKILL.md\\n" | git -C "$REPO" mktree)
+PETSTORE_INNER=$(printf "100644 blob $PETSTORE_BLOB\\tSKILL.md\\n" | git -C "$REPO" mktree)
+SKILLS=$(printf "040000 tree $LINEAR_INNER\\tlinear_mcp\\n040000 tree $PETSTORE_INNER\\tpetstore\\n" | git -C "$REPO" mktree)
 AX=$(printf "040000 tree $SKILLS\\tskills\\n" | git -C "$REPO" mktree)
 ROOT=$(printf "040000 tree $AX\\t.ax\\n" | git -C "$REPO" mktree)
 
 # Commit and point main at it.
-COMMIT=$(git -C "$REPO" commit-tree "$ROOT" -m "e2e: seed linear_mcp fixture skill")
+COMMIT=$(git -C "$REPO" commit-tree "$ROOT" -m "e2e: seed fixture skills (linear_mcp, petstore)")
 git -C "$REPO" update-ref refs/heads/main "$COMMIT"
 echo "seeded: $COMMIT"
 `;

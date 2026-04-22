@@ -26,6 +26,26 @@ const OpenApiDispatch = z.object({
   operationId: z.string().min(1),
   credential: z.string().optional(),
   authScheme: z.enum(['bearer', 'basic', 'api_key_header', 'api_key_query']).optional(),
+  /**
+   * Parameter locations preserved from the OpenAPI spec so the call-time
+   * dispatcher can route each arg correctly: path params get substituted
+   * into the URL template (`{name}`), query params get appended to the
+   * query string, header params become request headers. Cookie params are
+   * dropped upstream by the adapter with a warning — we don't carry them
+   * here. The `body` key in `args` is NOT a parameter entry; it's a
+   * dispatch-time reserved key handled separately.
+   *
+   * Defaults to `[]` for operations with no parameters (legal per spec)
+   * so the field is always safe to iterate.
+   */
+  params: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        in: z.enum(['path', 'query', 'header']),
+      }),
+    )
+    .default([]),
 });
 
 export const CatalogToolSchema = z.object({

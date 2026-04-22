@@ -2,6 +2,12 @@
 
 ## Lessons
 
+### Shape-identical tool responses need a sentinel for scripted-turn disambiguation
+**Date:** 2026-04-21
+**Context:** Task 7.5 e2e petstore flow. Turn 2 dispatches `createPet({name:'Rex'})` → `{id:42, name:'Rex'}`. Turn 3 dispatches `getPetByID({id:42})` → `{id:42, name:'Rex'}` (identical shape). The mock OpenRouter's `matchToolResult` scanner iterates `ALL_TURNS` from index 0 on each pass and returns the FIRST match, so a regex like `/"id":42.*"name":"Rex"/` on Turn 2 would re-fire when Turn 3's tool result comes back — infinite-looping the create call. No payload-level discriminator exists if the real handler returns the same data shape on both calls.
+**Lesson:** When chaining scripted turns whose tool responses have overlapping shapes, attach a handler-side sentinel (e.g. `_readback: true`) to the second response and use it as the second turn's `matchToolResult` discriminator. It's a 1-line handler change + a tight regex, and it's more robust than trying to pin ordering differences in the JSON output that `JSON.stringify` could reorder. Keeps the scripted turns' `matchToolResult` patterns pairwise-disjoint across the full `ALL_TURNS` array.
+**Tags:** e2e, mock-server, matchToolResult, scripted-turns, sentinel, first-match-wins
+
 ### execFileSync blocks the event loop — same-thread HTTP server can't answer the child
 **Date:** 2026-04-20
 **Context:** Task 6.1 fake `/internal/ipc` server for `executeScript()` tests. First draft created an `http.createServer()` on the main thread, then called `executeScript()` which uses `execFileSync('node', ...)`. Child's fetch hung for 30s and timed out (`spawnSync node ETIMEDOUT`) — the parent's event loop was frozen inside `execFileSync`, so the listening socket never accepted the child's connection even though `listen()` returned.

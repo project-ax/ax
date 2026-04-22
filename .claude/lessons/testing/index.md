@@ -4,6 +4,7 @@ Lessons about test patterns, infrastructure, mocking strategies, and test enviro
 
 ## Entries
 
+- Assert on structured log payloads via `vi.doMock('src/logger.js')` + `vi.resetModules` + dynamic import, NOT a pino stream swap [patterns.md](patterns.md)
 - Sandbox providers use source-level test assertions (read source, check patterns) [patterns.md](patterns.md)
 - Regex tests on source code are fragile — prefer semantic assertions [patterns.md](patterns.md)
 - Retry tests with real backoff delays need careful design [patterns.md](patterns.md)
