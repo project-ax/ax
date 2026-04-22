@@ -41,9 +41,13 @@ The host subsystem is the trusted half of AX. It runs the HTTP server (OpenAI-co
 | `src/host/skills/hook-endpoint.ts` | HMAC-verified post-receive hook. On a signed push, invalidates the agent's cached snapshots so the next live read is fresh. No other side effects |
 | `src/host/ipc-handlers/web.ts` | Web fetch/search IPC handlers |
 | `src/host/ipc-handlers/workspace.ts` | Workspace read/write/list IPC handlers |
-| `src/host/ipc-handlers/tool-batch.ts` | Tool batch IPC handler with `__batchRef` pipelining for Cap'n Web |
-| `src/host/toolgen/codegen.ts` | TypeScript tool stub generation with Proxy-based batching |
-| `src/host/toolgen/generate-and-cache.ts` | DB caching for generated tool stubs with schema hash invalidation |
+| `src/host/ipc-handlers/describe-tools.ts` | `describe_tools` meta-tool handler — schema lookup by catalog name; `names: []` returns the full directory |
+| `src/host/ipc-handlers/call-tool.ts` | `call_tool` meta-tool handler — dispatches MCP or OpenAPI by catalog entry, handles `_select` jq projection + auto-spill, returns structured `{error, kind}` on failure |
+| `src/host/ipc-handlers/openapi-dispatcher.ts` | Default HTTP dispatcher used by `call_tool` for `dispatch.kind === 'openapi'`. Path/query/header/body routing, 4 auth schemes (bearer/basic/api_key_header/api_key_query), URL rewrites, credential redaction in failure logs |
+| `src/host/tool-catalog/` | Session-scoped tool catalog: registry, MCP adapter, OpenAPI adapter (pure, takes dereferenced spec), jq projection, per-(agentId,HEAD-sha) cache |
+| `src/host/skills/catalog-population.ts` | Walks the skill snapshot, builds the catalog from `mcpServers[]` + `openapi[]`, pushes `Diagnostic` entries on failures and wide-surface advisories |
+| `src/host/skills/openapi-spec-fetcher.ts` | Default `fetchOpenApiSpec` factory — HTTPS URLs go direct to `@apidevtools/swagger-parser`, workspace-relative paths resolve through the bare git repo with traversal guards |
+| `src/host/diagnostics.ts` | Per-turn ring-buffered `DiagnosticCollector` — populate failures and wide-surface advisories emitted as `event: diagnostic` SSE frames at end-of-turn |
 | `src/plugins/mcp-manager.ts` | `McpConnectionManager` — unified MCP tool discovery and routing across all MCP sources |
 | `src/host/inprocess.ts` | In-process fast path — runs LLM orchestration loop directly in host process (no pods, no IPC, no proxy). Uses `FastPathDeps` (including `McpConnectionManager`), `FastPathRequest`, `FastPathResult`. AsyncLocalStorage for per-turn context isolation |
 | `src/host/tool-router.ts` | Tool router for in-process fast path — routes tool calls to MCP providers (unified via McpConnectionManager), lazy file I/O, or sandbox escalation. Unified MCP methods: `resolveServer()`, `mcpCallTool()`, `resolveHeaders()`. Per-turn limits (`FAST_PATH_LIMITS`). Exports `routeToolCall()`, `ToolRouterContext`, `ToolResult` |

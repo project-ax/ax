@@ -95,7 +95,8 @@ This interface enables transport-agnostic IPC usage in runners and tools (e.g. `
 | Sandbox Audit | `sandbox_result`     | `operation` (bash/read/write/edit), `command?`, `path?`, `success?`, `output?`, `error?`, `exitCode?` | `ok` |
 | Plugin      | `plugin_list`          | (none)                                                    | `plugins`                     |
 | Plugin      | `plugin_status`        | `packageName`                                             | (status result)               |
-| Tool Batch  | `tool_batch`           | `calls` (array with `__batchRef` pipelining)              | `results`                     |
+| Tool Dispatch | `describe_tools`     | `names` (string[], empty = full directory)                | `tools` (schemas)             |
+| Tool Dispatch | `call_tool`          | `tool` (catalog name), `args` (incl. optional `_select` jq)| `result` or truncated envelope |
 | Session     | `session_expiring`     | `sessionId`, `remainingSec`                               | `ok`                          |
 
 All responses are wrapped: `{ "ok": true, ...fields }` on success, `{ "ok": false, "error": "..." }` on failure.
