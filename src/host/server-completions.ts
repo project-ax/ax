@@ -197,6 +197,22 @@ export function toSkillSummary(s: SkillState): SkillSummary {
   };
 }
 
+/** Filter a skill snapshot to only enabled skills with parsed frontmatter.
+ *  Used at the start of every turn to gate which skills drive MCP tool-route
+ *  discovery AND the per-turn `ToolCatalog` build. Pending skills (missing
+ *  credentials, unapproved domains) and invalid skills (frontmatter parse
+ *  failure) are excluded so the agent never gets `call_tool` entries that
+ *  are guaranteed to fail at dispatch with 401/403.
+ *
+ *  Exported for unit tests; all production callers pass `enabledNames`
+ *  computed from `getAgentSkills(...)` filtered on `kind === 'enabled'`. */
+export function filterSnapshotToEnabled<T extends { ok?: boolean; name: string }>(
+  snapshot: readonly T[],
+  enabledNames: ReadonlySet<string>,
+): T[] {
+  return snapshot.filter((entry) => entry.ok !== false && enabledNames.has(entry.name));
+}
+
 /** Build a short, stable fingerprint for a credential value — the first 8
  *  hex chars of its SHA-256. Logged alongside resolution events so ops can
  *  tell whether two candidate rows hold the same secret or different ones
@@ -1545,9 +1561,18 @@ export async function processCompletion(
     // user has stored their own credential (or an agent-scope value
     // exists) — another user's stored row must not flip the skill to
     // enabled on Bob's turn (PR #185 review, issue #6).
-    const skillsPayload: SkillSummary[] = (
-      await getAgentSkills(agentId, deps.agentSkillsDeps, currentUserId)
-    ).map(toSkillSummary);
+    const skillStates = await getAgentSkills(agentId, deps.agentSkillsDeps, currentUserId);
+    const skillsPayload: SkillSummary[] = skillStates.map(toSkillSummary);
+    // Only ENABLED skills drive tool population. `loadSnapshot` also
+    // returns `pending` (missing creds, unapproved domains) and
+    // `invalid` (frontmatter parse failure) skills — surfacing those in
+    // the catalog or tool-route map gives the LLM dispatch targets that
+    // will fail at call time with auth errors or 403s. Issue #5 in PR
+    // #185 review. Computed once here and used for both the tool-route
+    // discovery AND the catalog build below so they stay in lockstep.
+    const enabledSkillNames = new Set(
+      skillStates.filter((s) => s.kind === 'enabled').map((s) => s.name),
+    );
 
     // ── Populate per-agent tool routes for skill-declared MCP servers ──
     // The subprocess sandbox path relies on `mcpManager.toolServerMap` to
@@ -1571,6 +1596,9 @@ export async function processCompletion(
         const skillNameByServerName = new Map<string, string>();
         for (const entry of snapshot) {
           if (!entry.ok) continue;
+          // Skip servers from pending/invalid skills — only enabled skills
+          // should have their MCP servers discovered for this turn.
+          if (!enabledSkillNames.has(entry.name)) continue;
           for (const s of entry.frontmatter.mcpServers) {
             skillServerNames.add(s.name);
             skillNameByServerName.set(s.name, entry.name);
@@ -1636,7 +1664,15 @@ export async function processCompletion(
           userId: currentUserId,
           headSha,
           build: async () => {
-            const snapshotForCatalog = await loadSnapshot(agentId, deps.agentSkillsDeps);
+            // Filter to ENABLED skills only — pending/invalid skills
+            // shouldn't produce call_tool entries that the agent will
+            // just hit auth/403 on. Matches the tool-route discovery
+            // filter above so the two stay in lockstep. Issue #5 in PR
+            // #185 review.
+            const snapshotForCatalog = filterSnapshotToEnabled(
+              await loadSnapshot(agentId, deps.agentSkillsDeps),
+              enabledSkillNames,
+            );
             const toolCatalog = new ToolCatalog();
             const buildResult = await populateCatalogFromSkills({
               skills: snapshotForCatalog,
