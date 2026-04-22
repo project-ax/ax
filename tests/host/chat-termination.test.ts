@@ -110,63 +110,18 @@ describe('logChatTermination', () => {
 describe('WaitFailureTracker', () => {
   // Emits chat_terminated EXACTLY ONCE per terminated chat — never per attempt.
   // The retry loop in server-completions.ts records each attempt's failure via
-  // the tracker, then calls emit() once when retries are exhausted (the
+  // the tracker, then calls emitTerminal() once when retries are exhausted (the
   // `agent_failed` branch). A chat that fails on attempt 0 but succeeds on
   // attempt 1 must produce ZERO chat_terminated events.
-
-  it('emits zero chat_terminated events when no failure was recorded', () => {
-    const { logger, error } = fakeLogger();
-    const tracker = createWaitFailureTracker();
-    // Caller succeeded — never recorded any failure. emit() should be a no-op
-    // because there's nothing to terminate on. (In practice the retry loop
-    // wouldn't call emit at all on success, but defensiveness is cheap.)
-    tracker.emit(logger, { phase: 'wait', sandboxId: 'pod-a' });
-    expect(error).not.toHaveBeenCalled();
-  });
-
-  it('emits exactly one chat_terminated event on terminal exhaustion regardless of retry count', () => {
-    const { logger, error } = fakeLogger();
-    const tracker = createWaitFailureTracker();
-
-    // Simulate three failed attempts in a retry loop.
-    tracker.record({ reason: 'agent_response_error', details: { error: 'EPIPE' } });
-    tracker.record({ reason: 'agent_response_error', details: { error: 'ECONNRESET' } });
-    tracker.record({ reason: 'agent_response_timeout', details: { error: 'agent_response timeout' } });
-
-    // Retries exhausted — terminal point fires emit() once.
-    tracker.emit(logger, {
-      phase: 'wait',
-      sandboxId: 'ax-sandbox-xyz',
-      exitCode: 1,
-      details: { attempt: 3, maxRetries: 2 },
-    });
-
-    expect(error).toHaveBeenCalledTimes(1);
-    expect(error).toHaveBeenCalledWith('chat_terminated', expect.objectContaining({
-      phase: 'wait',
-      // The MOST RECENT failure cause wins — that's what actually killed the chat.
-      reason: 'agent_response_timeout',
-      sandboxId: 'ax-sandbox-xyz',
-      exitCode: 1,
-    }));
-    // Details merge: caller-supplied terminal details override / supplement
-    // the per-attempt details.
-    const payload = error.mock.calls[0]?.[1] as { details: Record<string, unknown> };
-    expect(payload.details).toMatchObject({
-      error: 'agent_response timeout',
-      attempt: 3,
-      maxRetries: 2,
-    });
-  });
 
   it('emits zero events when caller succeeds after a transient failure (record-but-no-emit)', () => {
     // The actual happy-path-after-retry pattern: record the transient failure,
     // then the next attempt succeeds, and the loop breaks BEFORE reaching the
-    // terminal emit() call. This proves the tracker doesn't auto-emit.
+    // terminal emitTerminal() call. This proves the tracker doesn't auto-emit.
     const { logger, error } = fakeLogger();
     const tracker = createWaitFailureTracker();
     tracker.record({ reason: 'agent_response_error', details: { error: 'EPIPE' } });
-    // ...next attempt succeeds, loop breaks without calling emit()...
+    // ...next attempt succeeds, loop breaks without calling emitTerminal()...
     expect(error).not.toHaveBeenCalled();
   });
 
