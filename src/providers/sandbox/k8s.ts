@@ -165,6 +165,10 @@ function buildPodSpec(
               .map(([name, value]) => ({ name, value })),
             ...Object.entries(config.extraEnv ?? {})
               .map(([name, value]) => ({ name, value })),
+            // Chat-turn correlation ID — runner reads this and binds `reqId`
+            // on its top-level logger so agent logs join the host + sandbox
+            // provider lifecycle on a single grep.
+            ...(config.requestId ? [{ name: 'AX_REQUEST_ID', value: config.requestId }] : []),
             { name: 'POD_NAME', valueFrom: { fieldRef: { fieldPath: 'metadata.name' } } },
             // Sidecar port — agent POSTs to localhost:PORT/turn-complete when turn ends
             ...(config.extraEnv?.WORKSPACE_REPO_URL ? [{ name: 'AX_GIT_SIDECAR_PORT', value: '9099' }] : []),

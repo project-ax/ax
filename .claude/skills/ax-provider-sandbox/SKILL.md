@@ -70,6 +70,8 @@ Identity files are sent via stdin payload from git. Skills live in `.ax/skills/`
 - `npm_config_cache`, `XDG_CACHE_HOME` -- redirected to `/tmp`
 - `AX_HOME` -- `/tmp/.ax-agent`
 
+Each provider also injects `AX_REQUEST_ID` (from `SandboxConfig.requestId`) when present. The agent runner reads it at module load and binds the last 8 chars as `reqId` on its top-level logger so a single `grep <reqId>` joins host + sandbox provider + agent runner logs. Injected by docker/apple/k8s providers alongside their `-e`/env list construction (NOT via `canonicalEnv`, which doesn't see `requestId`).
+
 ### Symlink Fallback
 
 `createCanonicalSymlinks(config)` is retained for backward compatibility but is now a no-op -- returns the workspace path and an empty cleanup function.

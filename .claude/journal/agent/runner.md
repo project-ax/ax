@@ -2,6 +2,14 @@
 
 Agent runner implementations, process management, dev/production mode split.
 
+## [2026-04-22 09:45] — Bind `reqId` on runner's top-level logger from `AX_REQUEST_ID`
+
+**Task:** Task 2 of the chat-correlation-id plan — propagate the chat turn's correlation ID through the sandbox env and into the agent runner's logger so a single `grep <reqId>` reconstructs the chain across host -> sandbox provider -> agent runner.
+**What I did:** At runner.ts module load, read `process.env.AX_REQUEST_ID?.slice(-8)` and (if present) initialize the top-level `logger` as a child with `{ component: 'runner', reqId }` instead of the bare `{ component: 'runner' }`. No call-site changes — every existing `logger.*` call now carries `reqId` automatically. Plumbed `AX_REQUEST_ID` from `SandboxConfig.requestId` into the container env in all three sandbox providers (k8s.ts pod env list, docker.ts/-e flags, apple.ts /-e flags). TDD test (`tests/agent/runner-correlation.test.ts`) drives `run()` with an invalid agent type to trigger `unknown_agent` log, then asserts every `component: 'runner'` JSON entry has `reqId === requestId.slice(-8)`. Negative case verifies `reqId` is omitted when `AX_REQUEST_ID` unset. Updated `.claude/skills/ax-agent/SKILL.md` (gotcha bullet) and `.claude/skills/ax-provider-sandbox/SKILL.md` (env var section) to document the propagation.
+**Files touched:** `src/agent/runner.ts`, `src/providers/sandbox/k8s.ts`, `src/providers/sandbox/docker.ts`, `src/providers/sandbox/apple.ts`, `tests/agent/runner-correlation.test.ts` (new), `.claude/skills/ax-agent/SKILL.md`, `.claude/skills/ax-provider-sandbox/SKILL.md`
+**Outcome:** Success — new test (2 cases) passes; full agent + sandbox suites (51 files, 455 tests) green; `npm run build` clean. Same pre-existing macOS Unix-socket-path failures in `tests/host/server*.test.ts` and `tests/integration/smoke*.test.ts` (33 cases) reproduce on baseline — unrelated to this change.
+**Notes:** No `subprocess.ts` provider exists in this tree (only docker/apple/k8s) — skipped per plan instructions. Used vi.resetModules() in the test's beforeEach so runner.ts re-evaluates its top-level logger init against the freshly init'd singleton + current env. Stubbed `process.exit` in the test so the dispatch error path doesn't terminate vitest.
+
 ## [2026-04-18 14:30] — Remove orphaned imports in runner.ts (Task 5 follow-up)
 
 **Task:** Code reviewer flagged 4 named imports with zero remaining usages after Task 5's deletion of per-turn tool-module generation: `mkdirSync`, `rmSync` from `node:fs`, and `dirname`, `resolve` from `node:path`. TypeScript didn't catch them because `noUnusedLocals` is off. Violated CLAUDE.md "no dead code."

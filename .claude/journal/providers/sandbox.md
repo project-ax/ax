@@ -2,6 +2,14 @@
 
 Sandbox providers, canonical paths, workspace tiers.
 
+## [2026-04-22 09:45] — Inject `AX_REQUEST_ID` into container env (k8s/docker/apple)
+
+**Task:** Task 2 of the chat-correlation-id plan, sandbox-provider half. After Task 1 added `requestId` to `SandboxConfig` and bound it into the per-pod logger, the agent runner inside the sandbox still didn't see it — its logs had no `reqId` so `grep <reqId>` stopped at the pod boundary.
+**What I did:** All three sandbox providers now inject `AX_REQUEST_ID=<config.requestId>` into the container env when `requestId` is set. Kept the conditional spread pattern (`...(config.requestId ? [...] : [])`) so the env entry is omitted entirely when unset (matches existing per-turn env conventions). For k8s.ts, added it to the pod-spec `env: [...]` list alongside `LOG_LEVEL` / `POD_NAME`. For docker.ts and apple.ts, added it to the `containerArgs`/`-e` flag list. Did NOT add to `canonicalEnv()` because `canonicalEnv` doesn't see `requestId` (it's a top-level `SandboxConfig` field, not a sub-config) and threading it through would clutter that helper's signature for one usage. Updated `ax-provider-sandbox/SKILL.md` env-vars section to document the per-provider injection point.
+**Files touched:** `src/providers/sandbox/k8s.ts`, `src/providers/sandbox/docker.ts`, `src/providers/sandbox/apple.ts`, `.claude/skills/ax-provider-sandbox/SKILL.md`
+**Outcome:** Success — full sandbox + agent suites (51 files, 455 tests) green, `npm run build` clean.
+**Notes:** No `subprocess.ts` sandbox provider exists in this tree — plan said to skip if missing.
+
 ## [2026-04-22 09:30] — Carry per-pod logger through `kill()` path in k8s sandbox
 
 **Task:** Code-review fix for the prior Task 1 entry. The previous note slightly overstated coverage: it claimed "only per-pod call sites now use `podLog`", but the host-initiated `provider.kill(pid)` path was still emitting `pod_killed` / `pod_kill_failed` from the module-level `logger`, which has no `reqId`/`podName`/`pid` bindings. Those are arguably the most informative termination events, so a `grep <reqId>` was missing them.
