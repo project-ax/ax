@@ -70,7 +70,9 @@ export interface ToolRouterContext {
     args: Record<string, unknown>,
     opts?: { headers?: Record<string, string>; transport?: 'http' | 'sse' },
   ) => Promise<{ content: string | Record<string, unknown>; isError?: boolean }>;
-  /** Get server metadata (name, headers, transport) for credential resolution by server URL */
+  /** Get server metadata (name, headers, transport, declaring skill)
+   *  for credential resolution by server URL. `skillName` is present
+   *  when the server was registered from a skill's frontmatter. */
   getServerMetaByUrl?: (
     agentId: string,
     serverUrl: string,
@@ -79,17 +81,21 @@ export interface ToolRouterContext {
     source?: string;
     headers?: Record<string, string>;
     transport?: 'http' | 'sse';
+    skillName?: string;
   } | undefined;
   /** Resolve credential placeholders in headers */
   resolveHeaders?: (headers: Record<string, string>) => Promise<Record<string, string>>;
   /** Provide auth headers for servers without explicit headers (credential
-   *  auto-discovery). Receives the per-request agentId + userId so the
-   *  implementation can look up tuple-keyed skill credentials. */
+   *  auto-discovery). Receives the per-request agentId + userId plus the
+   *  declaring skill name (when known) so the implementation can filter
+   *  `skill_credentials` rows by `(skillName, envName)` rather than by
+   *  envName alone — closes cross-skill credential bleed. */
   authForServer?: (server: {
     name: string;
     url: string;
     agentId: string;
     userId: string;
+    skillName?: string;
   }) => Promise<Record<string, string> | undefined>;
 
   /** @deprecated Use resolveServer instead */
@@ -171,11 +177,13 @@ async function handleMcpToolCall(
       let headers: Record<string, string> | undefined;
       let serverName: string | undefined;
       let transport: 'http' | 'sse' | undefined;
+      let skillName: string | undefined;
       try {
         if (ctx.getServerMetaByUrl) {
           const meta = ctx.getServerMetaByUrl(ctx.agentId, serverUrl);
           serverName = meta?.name;
           transport = meta?.transport;
+          skillName = meta?.skillName;
           if (meta?.headers) {
             headers = ctx.resolveHeaders
               ? await ctx.resolveHeaders(meta.headers)
@@ -189,6 +197,7 @@ async function handleMcpToolCall(
             url: serverUrl,
             agentId: ctx.agentId,
             userId: ctx.userId,
+            ...(skillName ? { skillName } : {}),
           });
         }
       } catch {

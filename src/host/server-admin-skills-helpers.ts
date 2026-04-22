@@ -254,16 +254,28 @@ export async function approveSkillSetup(
   const valueByEnv = new Map(body.credentialValues.map((c) => [c.envName, c.value]));
 
   // Resolve a value for a given envName: prefer admin-typed, else look in
-  // skill_credentials (any skill on this agent, prefer user-scoped).
+  // skill_credentials for a row owned by the SAME skill and the current
+  // admin user (or the agent-scope sentinel).
+  //
+  // We filter by `(skillName, envName)` — NOT envName alone — so a
+  // prior skill's stored row can't silently satisfy the new skill's
+  // setup. Value reuse across skills is an explicit admin action
+  // (typing the value into the new card), not a silent fallback that
+  // could leak one skill's credential into another.
+  //
+  // And we ONLY return `user` or `agent` — never `matching[0]`. That
+  // prevents borrowing another user's row on a multi-admin host.
   async function resolveValue(envName: string): Promise<string | undefined> {
     const typed = valueByEnv.get(envName);
     if (typed && typed.length > 0) return typed;
     const rows = await deps.skillCredStore.listForAgent(body.agentId);
-    const matching = rows.filter((r) => r.envName === envName);
+    const matching = rows.filter(
+      (r) => r.skillName === body.skillName && r.envName === envName,
+    );
     if (matching.length === 0) return undefined;
     const user = matching.find((r) => r.userId === userId);
     const agent = matching.find((r) => r.userId === '');
-    return user?.value ?? agent?.value ?? matching[0].value;
+    return user?.value ?? agent?.value;
   }
 
   const probeInputs: ProbeMcpServerInput[] = [];
@@ -353,7 +365,10 @@ export async function approveSkillSetup(
   }
 
   // 8. Return state. Fetch fresh since the repo + stores just changed.
-  const states = await getAgentSkills(body.agentId, deps.agentSkillsDeps);
+  //    Pass the admin's userId so a user-scoped row they just stored
+  //    attributes to the correct perspective, same filter as the
+  //    approval-time resolveValue() above.
+  const states = await getAgentSkills(body.agentId, deps.agentSkillsDeps, userId);
   const state = states.find((s) => s.name === body.skillName);
 
   // 9. Audit — never log credential values. Include probe count for

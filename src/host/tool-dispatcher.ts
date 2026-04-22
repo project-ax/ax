@@ -42,19 +42,23 @@ export interface ToolDispatcherOptions {
     args: Record<string, unknown>,
     opts?: { headers?: Record<string, string> },
   ) => Promise<{ content: string | Record<string, unknown>; isError?: boolean }>;
-  /** Get server metadata for credential resolution. */
+  /** Get server metadata for credential resolution. `skillName` is
+   *  threaded through so `authForServer` can filter `skill_credentials`
+   *  rows by `(skillName, envName)`. */
   getServerMeta?: (agentId: string, serverUrl: string) =>
-    { name?: string; headers?: Record<string, string> } | undefined;
+    { name?: string; headers?: Record<string, string>; skillName?: string } | undefined;
   /** Resolve credential placeholders in headers. */
   resolveHeaders?: (headers: Record<string, string>) => Promise<Record<string, string>>;
   /** Auto-discover auth for servers without explicit headers. Receives the
-   *  per-request agentId + userId so the implementation can look up
-   *  tuple-keyed skill credentials. */
+   *  per-request agentId + userId and (when known) the declaring skill
+   *  so the implementation can filter `skill_credentials` rows by
+   *  `(skillName, envName)` — prevents cross-skill credential bleed. */
   authForServer?: (server: {
     name: string;
     url: string;
     agentId: string;
     userId: string;
+    skillName?: string;
   }) => Promise<Record<string, string> | undefined>;
 }
 
@@ -86,6 +90,7 @@ export class ToolDispatcher {
             url: serverUrl,
             agentId: ctx.agentId,
             userId: ctx.userId,
+            ...(meta.skillName ? { skillName: meta.skillName } : {}),
           });
         }
       }

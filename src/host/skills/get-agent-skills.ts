@@ -80,12 +80,26 @@ export async function loadSnapshot(
  * - `approvedDomains` — `${skillName}/${normalizedDomain}` keys.
  *   `{approvedDomains}` input to `computeSkillStates` / `computeSetupQueue`.
  * - `storedCredentials` — `${skillName}/${envName}@${scope}` keys where
- *   scope ∈ {'agent', 'user'}. The empty user_id sentinel is the agent-scope
- *   row; any non-empty user_id contributes `${skillName}/${envName}@user`.
+ *   scope ∈ {'agent', 'user'}.
+ *     - When `userId` is provided (per-user runtime state derivation), a
+ *       row contributes `@user` only when `row.userId === userId`. Without
+ *       this, Alice's user-scoped row would satisfy Bob's skill state
+ *       ("skill looks enabled for everyone"), which is the PR #185 review
+ *       issue #6.
+ *     - When `userId` is undefined (admin-wide aggregate views), ANY
+ *       non-empty `row.userId` contributes `@user` — matches the prior
+ *       behavior and preserves the dashboard's "at least one user has
+ *       stored a value" semantics.
+ *     - The empty user_id sentinel always contributes `@agent`.
  */
 export async function loadAgentProjection(
   agentId: string,
   deps: Pick<GetAgentSkillsDeps, 'skillDomainStore' | 'skillCredStore'>,
+  /** The user whose perspective this projection serves. When provided,
+   *  user-scoped rows for a DIFFERENT user are not counted — their
+   *  existence doesn't satisfy the caller's skill-state requirements.
+   *  Omit for admin aggregate views. */
+  userId?: string,
 ): Promise<{
   approvalsBySkill: Map<string, Set<string>>;
   approvedDomains: Set<string>;
@@ -111,8 +125,21 @@ export async function loadAgentProjection(
 
   const storedCredentials = new Set<string>();
   for (const row of credRows) {
-    const scope = row.userId === '' ? 'agent' : 'user';
-    storedCredentials.add(`${row.skillName}/${row.envName}@${scope}`);
+    if (row.userId === '') {
+      // Agent-scope row — always contributes regardless of viewer.
+      storedCredentials.add(`${row.skillName}/${row.envName}@agent`);
+      continue;
+    }
+    // Non-empty userId — a user-scoped row.
+    if (userId === undefined) {
+      // Aggregate view: any user's row surfaces @user (prior behavior).
+      storedCredentials.add(`${row.skillName}/${row.envName}@user`);
+    } else if (row.userId === userId) {
+      // Per-user view: only THIS user's row counts as satisfied.
+      storedCredentials.add(`${row.skillName}/${row.envName}@user`);
+    }
+    // else: row belongs to a different user — do not satisfy the
+    // current viewer's state.
   }
 
   return { approvalsBySkill, approvedDomains, storedCredentials };
@@ -164,10 +191,15 @@ export async function sweepOrphanedRows(
 export async function getAgentSkills(
   agentId: string,
   deps: GetAgentSkillsDeps,
+  /** Perspective user for credential scoping. When provided, user-scoped
+   *  rows stored by a different user do NOT count as satisfying skill
+   *  requirements for the current caller. Omit for admin aggregate
+   *  views (dashboard) where any-user presence is the intended signal. */
+  userId?: string,
 ): Promise<SkillState[]> {
   const snapshot = await loadSnapshot(agentId, deps);
   await sweepOrphanedRows(agentId, snapshot, deps);
-  const projection = await loadAgentProjection(agentId, deps);
+  const projection = await loadAgentProjection(agentId, deps, userId);
   return computeSkillStates(snapshot, {
     approvedDomains: projection.approvedDomains,
     storedCredentials: projection.storedCredentials,
@@ -183,10 +215,13 @@ export async function getAgentSkills(
 export async function getAgentSetupQueue(
   agentId: string,
   deps: GetAgentSkillsDeps,
+  /** See `getAgentSkills`. Admin setup-card aggregates keep the prior
+   *  "any-user satisfies" behavior by leaving this undefined. */
+  userId?: string,
 ): Promise<SetupRequest[]> {
   const snapshot = await loadSnapshot(agentId, deps);
   await sweepOrphanedRows(agentId, snapshot, deps);
-  const projection = await loadAgentProjection(agentId, deps);
+  const projection = await loadAgentProjection(agentId, deps, userId);
   return computeSetupQueue(snapshot, {
     approvedDomains: projection.approvedDomains,
     storedCredentials: projection.storedCredentials,

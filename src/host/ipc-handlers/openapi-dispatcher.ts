@@ -179,6 +179,7 @@ export function makeDefaultOpenApiDispatcher(
         method,
         path,
         operationId,
+        skillName,
         credential,
         authScheme,
         ctx,
@@ -327,6 +328,7 @@ export function makeDefaultOpenApiDispatcher(
       // ── 6. Auth injection ────────────────────────────────────────────
       if (credential && authScheme) {
         const value = await resolveCredentialValueByEnvName({
+          skillName,
           envName: credential,
           agentId: ctx.agentId,
           userId: ctx.userId,

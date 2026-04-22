@@ -1087,6 +1087,100 @@ describe('POST /admin/api/skills/setup/approve', () => {
   // Removed: endpoint no longer cross-checks cred envName against the card — admin can rename envNames.
   // Removed: endpoint no longer cross-checks domains against the card — admin can add any hostname.
 
+  it('approval refuses to reuse another SKILL\'s stored row as a free credential (PR #185 issue #3)', async () => {
+    // Regression: when an admin submits `credentialValues: []` (no typed
+    // value), the approve endpoint's `resolveValue` used to return ANY
+    // matching envName row on the agent, regardless of skill. That
+    // silently promoted another skill's credential into the new skill's
+    // SKILL.md + probe request. With the `(skillName, envName)` filter
+    // the endpoint now refuses, forcing the admin to make a deliberate
+    // choice.
+    const deps = await mockDeps();
+    seed(deps, [weatherAgentScoped]);
+    // Pre-seed: a different skill ('other-skill') already holds a row
+    // for the same envName the admin is about to set up for 'weather'.
+    deps.skillCredStoreMem.rows.push({
+      agentId: 'main',
+      skillName: 'other-skill',
+      envName: 'W_KEY',
+      userId: '',
+      value: 'cross-skill-leak',
+    });
+    const handler = createAdminHandler(deps);
+    ({ server, port } = await startTestServer(handler));
+
+    const res = await fetchAdmin(port, '/admin/api/skills/setup/approve', {
+      token: 'test-secret-token',
+      method: 'POST',
+      body: {
+        agentId: 'main',
+        skillName: 'weather',
+        frontmatter: {
+          credentials: [{ envName: 'W_KEY', authType: 'api_key', scope: 'agent' }],
+          mcpServers: [],
+          domains: [],
+        },
+        credentialValues: [], // no typed value — forces resolveValue() to fall back
+      },
+    });
+
+    // Prior behavior: 200 OK with 'cross-skill-leak' written to weather.
+    // New behavior: 400 because resolveValue returns undefined.
+    expect(res.status).toBe(400);
+    const body = res.body as { error: string; details?: string };
+    expect(body.error).toBe('Missing credential value');
+    // The leaked row must remain ONLY on 'other-skill'; no new weather row.
+    expect(
+      deps.skillCredStoreMem.rows.filter((r) => r.skillName === 'weather'),
+    ).toEqual([]);
+  });
+
+  it('approval refuses to reuse another USER\'s stored row as a free credential', async () => {
+    // Same invariant as above but crossing userId — the admin must not
+    // silently take Alice's user-scoped credential and promote it to
+    // Bob's session.
+    const deps = await mockDeps({ defaultUserId: 'bob' });
+    seed(deps, [weatherUserScoped]);
+    // Alice stored her user-scoped W_KEY for THIS skill.
+    deps.skillCredStoreMem.rows.push({
+      agentId: 'main',
+      skillName: 'weather',
+      envName: 'W_KEY',
+      userId: 'alice',
+      value: 'alice-only',
+    });
+    const handler = createAdminHandler(deps);
+    ({ server, port } = await startTestServer(handler));
+
+    // Bob submits the approval with no typed value. resolveValue must
+    // NOT borrow Alice's row via the former `matching[0]` fallback.
+    const res = await fetchAdmin(port, '/admin/api/skills/setup/approve', {
+      token: 'test-secret-token',
+      method: 'POST',
+      body: {
+        agentId: 'main',
+        skillName: 'weather',
+        frontmatter: {
+          credentials: [{ envName: 'W_KEY', authType: 'api_key', scope: 'user' }],
+          mcpServers: [],
+          domains: [],
+        },
+        credentialValues: [],
+      },
+    });
+
+    expect(res.status).toBe(400);
+    const body = res.body as { error: string };
+    expect(body.error).toBe('Missing credential value');
+    // Alice's row untouched; no new bob row written.
+    expect(
+      deps.skillCredStoreMem.rows.filter((r) => r.userId === 'bob'),
+    ).toEqual([]);
+    expect(
+      deps.skillCredStoreMem.rows.find((r) => r.userId === 'alice'),
+    ).toMatchObject({ value: 'alice-only' });
+  });
+
   it('probe failure: MCP server that fails listTools returns 400 with probeFailures; nothing applied', async () => {
     // Replace strict cross-validation: the new endpoint accepts arbitrary
     // admin-edited frontmatter but refuses to persist when any declared MCP

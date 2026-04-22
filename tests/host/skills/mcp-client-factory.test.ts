@@ -69,7 +69,7 @@ describe('buildTurnMcpClientFactory', () => {
       headers: { Authorization: 'Bearer fallback-token' },
       transport: 'sse',
     });
-    expect(resolveAuthHeaders).toHaveBeenCalledWith('linear');
+    expect(resolveAuthHeaders).toHaveBeenCalledWith('linear', 'linear');
   });
 
   test('returns empty array (no throw) when URL map has no entry for the server', async () => {
@@ -183,7 +183,7 @@ describe('buildTurnMcpClientFactory', () => {
 
     await factory('linear', 'linear-mcp-server').listTools();
 
-    expect(resolveAuthHeadersByCredential).toHaveBeenCalledWith('LINEAR_API_KEY');
+    expect(resolveAuthHeadersByCredential).toHaveBeenCalledWith('linear', 'LINEAR_API_KEY');
     expect(resolveAuthHeaders).not.toHaveBeenCalled();
     expect(mockConnectAndListTools).toHaveBeenCalledWith('https://mcp.linear.app/mcp', {
       headers: { Authorization: 'Bearer ref-resolved' },
@@ -214,8 +214,8 @@ describe('buildTurnMcpClientFactory', () => {
 
     await factory('linear', 'linear').listTools();
 
-    expect(resolveAuthHeadersByCredential).toHaveBeenCalledWith('LINEAR_API_KEY');
-    expect(resolveAuthHeaders).toHaveBeenCalledWith('linear');
+    expect(resolveAuthHeadersByCredential).toHaveBeenCalledWith('linear', 'LINEAR_API_KEY');
+    expect(resolveAuthHeaders).toHaveBeenCalledWith('linear', 'linear');
     expect(mockConnectAndListTools).toHaveBeenCalledWith('https://mcp.linear.app/mcp', {
       headers: { Authorization: 'Bearer from-pattern' },
       transport: 'http',
@@ -238,7 +238,7 @@ describe('buildTurnMcpClientFactory', () => {
     await factory('gh', 'gh').listTools();
 
     expect(resolveAuthHeadersByCredential).not.toHaveBeenCalled();
-    expect(resolveAuthHeaders).toHaveBeenCalledWith('gh');
+    expect(resolveAuthHeaders).toHaveBeenCalledWith('gh', 'gh');
   });
 
   test('skips parse-failure snapshot entries when building the URL map', async () => {

@@ -741,6 +741,49 @@ name: broken
     expect(queue[0].unapprovedDomains).toEqual(['api.linear.app']);
   });
 
+  it('per-user view: Alice\'s stored credential does NOT satisfy Bob\'s skill state (issue #6)', async () => {
+    // Regression for PR #185 review issue #6. When `loadAgentProjection`
+    // (called via `getAgentSkills`) is given a viewer `userId`, only
+    // rows owned by THAT user should contribute `@user`. Prior behavior
+    // flipped the skill to "enabled" for everyone whenever ANY user had
+    // stored a credential — cross-user state bleed.
+    seedRepo(bareRepoPath, {
+      '.ax/skills/linear/SKILL.md': linearSkill,
+    });
+
+    const store = new InMemorySkillCredStore();
+    // Alice stored her user-scoped credential.
+    store.seed('agent-1', 'linear', 'LINEAR_TOKEN', 'alice', 'alice-token');
+
+    const domainStore = new InMemorySkillDomainStore();
+    domainStore.seed('agent-1', 'linear', 'api.linear.app');
+
+    const cache = createSnapshotCache<SkillSnapshotEntry[]>({ maxEntries: 8 });
+    const deps = {
+      skillCredStore: store,
+      skillDomainStore: domainStore,
+      getBareRepoPath: async () => bareRepoPath,
+      probeHead: async () => 'sha-abc',
+      snapshotCache: cache,
+    };
+
+    // From Alice's perspective, the skill is enabled.
+    const aliceStates = await getAgentSkills('agent-1', deps, 'alice');
+    expect(aliceStates.find((s) => s.name === 'linear')?.kind).toBe('enabled');
+
+    // From Bob's perspective, Alice's row must NOT satisfy the
+    // LINEAR_TOKEN@user requirement — the skill is still pending.
+    const bobStates = await getAgentSkills('agent-1', deps, 'bob');
+    expect(bobStates.find((s) => s.name === 'linear')?.kind).toBe('pending');
+    const pending = bobStates.find((s) => s.name === 'linear');
+    expect(pending?.pendingReasons?.some((r) => r.includes('LINEAR_TOKEN'))).toBe(true);
+
+    // Admin aggregate view (no userId) keeps the prior "any user
+    // satisfies" behavior so dashboard cards don't flip spuriously.
+    const aggregateStates = await getAgentSkills('agent-1', deps);
+    expect(aggregateStates.find((s) => s.name === 'linear')?.kind).toBe('enabled');
+  });
+
   it('emits missingCredentials for a skill with an unstored envName', async () => {
     seedRepo(bareRepoPath, {
       '.ax/skills/linear/SKILL.md': linearSkill,

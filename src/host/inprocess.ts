@@ -193,14 +193,23 @@ export async function runFastPath(
       // rationale as the call-time path in this file — skill credentials
       // live in the tuple-keyed store after the SSoT migration.
       const authForServer = deps.skillCredStore
-        ? async (server: { name: string; url: string }) => {
-            const headers = await resolveMcpAuthHeaders({
-              serverName: server.name,
-              agentId: request.agentId,
-              userId: request.userId,
-              skillCredStore: deps.skillCredStore!,
-            });
-            if (headers) return headers;
+        ? async (server: { name: string; url: string; skillName?: string }) => {
+            // Only consult the tuple-keyed skill_credentials store when we
+            // know the declaring skill — otherwise we can't filter by
+            // (skillName, envName) and the cross-skill isolation guarantee
+            // the resolver enforces would be undermined. Admin-added /
+            // plugin-added servers (no skillName) fall through to the
+            // legacy providers.credentials path below.
+            if (server.skillName) {
+              const headers = await resolveMcpAuthHeaders({
+                serverName: server.name,
+                skillName: server.skillName,
+                agentId: request.agentId,
+                userId: request.userId,
+                skillCredStore: deps.skillCredStore!,
+              });
+              if (headers) return headers;
+            }
             // Fallback for admin-added servers whose credentials still live
             // in providers.credentials (legacy path — untouched by the
             // skills SSoT migration).
@@ -287,13 +296,23 @@ export async function runFastPath(
       // `providers.credentials`). Skill credentials live in
       // `skill_credentials` after the SSoT migration.
       authForServer: deps.skillCredStore
-        ? async (server: { name: string; url: string; agentId: string; userId: string }) =>
-            resolveMcpAuthHeaders({
+        ? async (server: { name: string; url: string; agentId: string; userId: string; skillName?: string }) => {
+            // Without the declaring skill we can't scope the lookup to
+            // `(skillName, envName)` — return undefined and let the tool
+            // router's call land without auth rather than guess the
+            // wrong cross-skill row. Skill-declared servers carry
+            // `skillName` via `mcp-registry-sync.ts`; admin/plugin
+            // registrations don't, and historically never used this
+            // resolver anyway.
+            if (!server.skillName) return undefined;
+            return resolveMcpAuthHeaders({
               serverName: server.name,
+              skillName: server.skillName,
               agentId: server.agentId,
               userId: server.userId,
               skillCredStore: deps.skillCredStore!,
-            })
+            });
+          }
         : undefined,
       mcp: providers.mcp, // @deprecated — legacy fallback; remove when McpConnectionManager replaces all callers
     };

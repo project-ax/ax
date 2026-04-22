@@ -87,4 +87,22 @@ describe('registerMcpServersFromSnapshot', () => {
 
     expect(mgr.getServerMeta('agent-1', 'linear')?.source).toBe('skill');
   });
+
+  it('tags registered servers with the declaring skill name (cross-skill isolation)', () => {
+    // PR #185 review issues #2/#3 — `authForServer` needs the
+    // declaring skill to filter `skill_credentials` rows by
+    // (skillName, envName). Registering without the tag would revert
+    // to the old pattern-based fallback that can't tell two skills'
+    // `API_KEY` rows apart.
+    const mgr = new McpConnectionManager();
+    const snapshot = [
+      ok('linear', [{ name: 'linear', url: 'https://mcp.linear.app/sse' }]),
+      ok('github', [{ name: 'github', url: 'https://api.github.com/mcp' }]),
+    ];
+
+    registerMcpServersFromSnapshot('agent-1', snapshot, mgr);
+
+    expect(mgr.getServerMeta('agent-1', 'linear')?.skillName).toBe('linear');
+    expect(mgr.getServerMeta('agent-1', 'github')?.skillName).toBe('github');
+  });
 });

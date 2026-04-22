@@ -45,6 +45,7 @@ describe('resolveMcpAuthHeaders', () => {
     ]);
     const headers = await resolveMcpAuthHeaders({
       serverName: 'linear',
+      skillName: 'linear',
       agentId: 'pi',
       userId: 'u1',
       skillCredStore: store,
@@ -59,6 +60,7 @@ describe('resolveMcpAuthHeaders', () => {
     ]);
     const headers = await resolveMcpAuthHeaders({
       serverName: 'linear',
+      skillName: 'linear',
       agentId: 'pi',
       userId: 'u1',
       skillCredStore: store,
@@ -72,6 +74,7 @@ describe('resolveMcpAuthHeaders', () => {
     ]);
     const headers = await resolveMcpAuthHeaders({
       serverName: 'linear',
+      skillName: 'linear',
       agentId: 'pi',
       userId: 'u1',
       skillCredStore: store,
@@ -85,6 +88,7 @@ describe('resolveMcpAuthHeaders', () => {
     ]);
     const headers = await resolveMcpAuthHeaders({
       serverName: 'github-mcp',
+      skillName: 'gh',
       agentId: 'pi',
       userId: 'u1',
       skillCredStore: store,
@@ -100,11 +104,55 @@ describe('resolveMcpAuthHeaders', () => {
     delete process.env['SLACK_ACCESS_TOKEN'];
     const headers = await resolveMcpAuthHeaders({
       serverName: 'slack',
+      skillName: 'slack',
       agentId: 'pi',
       userId: 'u1',
       skillCredStore: store,
     });
     expect(headers).toEqual({ Authorization: 'Bearer xoxb-123' });
+  });
+
+  test('isolates credentials across skills: skill-A row does NOT resolve for skill-B', async () => {
+    // Regression for PR #185 review issue #2 — two skills both using
+    // `LINEAR_API_KEY` (e.g. `linear` and `linear-copy`) must not share
+    // credentials. Skill B's request against skill A's stored row
+    // should fall through to process.env (or undefined), not borrow.
+    const store = storeWith([
+      { skillName: 'linear', envName: 'LINEAR_API_KEY', userId: '', value: 'skill-a-only' },
+    ]);
+    delete process.env['LINEAR_API_KEY'];
+    delete process.env['LINEAR_ACCESS_TOKEN'];
+    delete process.env['LINEAR_OAUTH_TOKEN'];
+    delete process.env['LINEAR_TOKEN'];
+    const headers = await resolveMcpAuthHeaders({
+      serverName: 'linear',
+      skillName: 'linear-copy',
+      agentId: 'pi',
+      userId: 'u1',
+      skillCredStore: store,
+    });
+    expect(headers).toBeUndefined();
+  });
+
+  test('isolates credentials across users: another user\'s row does NOT resolve for Bob', async () => {
+    // Regression for PR #185 review issue #4 — with no agent-scope row
+    // and no row for Bob, Alice's user-scoped value must NOT leak via a
+    // `matching[0]` fallback.
+    const store = storeWith([
+      { skillName: 'linear', envName: 'LINEAR_API_KEY', userId: 'alice', value: 'alice-secret' },
+    ]);
+    delete process.env['LINEAR_API_KEY'];
+    delete process.env['LINEAR_ACCESS_TOKEN'];
+    delete process.env['LINEAR_OAUTH_TOKEN'];
+    delete process.env['LINEAR_TOKEN'];
+    const headers = await resolveMcpAuthHeaders({
+      serverName: 'linear',
+      skillName: 'linear',
+      agentId: 'pi',
+      userId: 'bob',
+      skillCredStore: store,
+    });
+    expect(headers).toBeUndefined();
   });
 
   test('returns undefined when no rows match and process.env is empty', async () => {
@@ -115,6 +163,7 @@ describe('resolveMcpAuthHeaders', () => {
     delete process.env['LINEAR_TOKEN'];
     const headers = await resolveMcpAuthHeaders({
       serverName: 'linear',
+      skillName: 'linear',
       agentId: 'pi',
       userId: 'u1',
       skillCredStore: store,
@@ -128,6 +177,7 @@ describe('resolveMcpAuthHeaders', () => {
     process.env['LINEAR_ACCESS_TOKEN'] = 'from-env';
     const headers = await resolveMcpAuthHeaders({
       serverName: 'linear',
+      skillName: 'linear',
       agentId: 'pi',
       userId: 'u1',
       skillCredStore: store,
@@ -142,6 +192,7 @@ describe('resolveMcpAuthHeaders', () => {
     process.env['LINEAR_API_KEY'] = 'from-env';
     const headers = await resolveMcpAuthHeaders({
       serverName: 'linear',
+      skillName: 'linear',
       agentId: 'pi',
       userId: 'u1',
       skillCredStore: store,

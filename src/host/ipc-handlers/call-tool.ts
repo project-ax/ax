@@ -69,6 +69,12 @@ export interface CallToolMcpDispatcher {
   callToolOnServer(call: {
     server: string;
     tool: string;
+    /** The skill that owns this tool — threaded through the catalog
+     *  entry's `skill` field. The adapter in `server-init.ts` filters
+     *  skill-credential lookups by `(skillName, envName)` so two skills
+     *  sharing a common envName cannot resolve to each other's rows
+     *  (PR #185 review, issue #2). */
+    skillName: string;
     args: Record<string, unknown>;
     ctx: { agentId: string; userId: string };
   }): Promise<unknown>;
@@ -96,6 +102,12 @@ export interface CallToolOpenApiDispatcher {
     /** Path template with `{name}` tokens preserved, e.g. `/pets/{id}`. */
     path: string;
     operationId: string;
+    /** The skill that owns this operation — threaded from the catalog
+     *  entry's `skill` field so the credential resolver can filter rows
+     *  by `(skillName, envName)` instead of envName alone. Required —
+     *  a silent cross-skill fallback is the exact bug this closes
+     *  (PR #185 review, issue #2). */
+    skillName: string;
     /** envName from skill frontmatter auth.credential, or undefined when
      *  no auth is configured. */
     credential?: string;
@@ -414,9 +426,13 @@ export function createCallToolHandler(deps: CallToolDeps) {
         // skill credentials against the caller's user, not a host-wide
         // default. `userId` falls back to '' for IPC contexts that
         // don't carry one — matches tool-batch's `ctx.userId ?? ''`.
+        // `skillName` comes from the catalog entry so the adapter can
+        // filter credential rows by `(skillName, envName)` — without
+        // it, skill-A's API_KEY row could resolve skill-B's request.
         result = await deps.mcpProvider.callToolOnServer({
           server: tool.dispatch.server,
           tool: tool.dispatch.toolName,
+          skillName: tool.skill,
           args: cleanedArgs,
           ctx: {
             agentId: ctx?.agentId ?? '',
@@ -445,6 +461,11 @@ export function createCallToolHandler(deps: CallToolDeps) {
           method: tool.dispatch.method,
           path: tool.dispatch.path,
           operationId: tool.dispatch.operationId,
+          // Thread skillName from the catalog entry so the credential
+          // resolver filters by `(skillName, envName)` — see the
+          // matching wiring in `CallToolMcpDispatcher` above for the
+          // rationale.
+          skillName: tool.skill,
           credential: tool.dispatch.credential,
           authScheme: tool.dispatch.authScheme,
           params: tool.dispatch.params,

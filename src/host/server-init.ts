@@ -419,11 +419,13 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
           callToolOnServer: async ({
             server,
             tool,
+            skillName,
             args,
             ctx,
           }: {
             server: string;
             tool: string;
+            skillName: string;
             args: Record<string, unknown>;
             ctx: { agentId: string; userId: string };
           }) => {
@@ -433,7 +435,9 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
             }
             // Resolve headers: prefer explicit headers (with placeholder
             // substitution), fall back to skill-credential auto-discovery
-            // against the caller's (agentId, userId).
+            // against the caller's (skillName, agentId, userId). Filtering
+            // by skillName prevents cross-skill credential leakage when
+            // two skills share a common envName prefix (PR #185 review).
             let headers: Record<string, string> | undefined;
             if (meta.headers) {
               headers = providers.credentials
@@ -447,6 +451,7 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
             } else if (skillCredStore) {
               headers = await resolveMcpAuthHeaders({
                 serverName: server,
+                skillName,
                 agentId: ctx.agentId,
                 userId: ctx.userId,
                 skillCredStore,
@@ -475,16 +480,18 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     // OpenAPI dispatcher for `call_tool` (Task 7.4). Parallel to the MCP
     // dispatcher above: closes over `skillCredStore` for credential
     // resolution and `config.url_rewrites` for e2e mock-server redirection.
-    // Only wired when `skillCredStore` exists — credential resolution has
-    // nothing to hit without it, and skipping the wire keeps openapi-kind
-    // tools routing through the fallback path instead of silently failing
-    // at dispatch time.
-    callToolOpenApiDispatcher: skillCredStore
-      ? makeDefaultOpenApiDispatcher({
-          skillCredStore,
-          urlRewrites: config.url_rewrites,
-        })
-      : undefined,
+    //
+    // `skillCredStore` is always set at this point (CodeQL flagged the
+    // earlier `skillCredStore ? ... : undefined` as a useless conditional,
+    // and the analysis is correct — the store is wired unconditionally
+    // from the host boot path), so the dispatcher is built unconditionally.
+    // An openapi tool that needs a credential will surface a clear
+    // "Missing credential" error via `resolveCredentialValueByEnvName`
+    // rather than silently falling through to `unsupported_dispatch`.
+    callToolOpenApiDispatcher: makeDefaultOpenApiDispatcher({
+      skillCredStore,
+      urlRewrites: config.url_rewrites,
+    }),
     // Auto-spill threshold for `call_tool` responses. `tool_dispatch`
     // is non-optional on Config and the Zod schema fills the default —
     // no optional chaining here (Task 4.3).

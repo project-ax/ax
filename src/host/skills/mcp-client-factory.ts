@@ -40,16 +40,19 @@ export interface BuildTurnMcpClientFactoryInput {
   /** Resolve auth headers for a named MCP server. Called only when the
    *  registered server entry carries no explicit headers AND the server's
    *  frontmatter didn't declare a `credential` ref. Signature takes the
-   *  server name so legacy pattern-match resolvers (`<SERVER>_API_KEY`,
-   *  etc.) keep working. */
-  resolveAuthHeaders(serverName: string): Promise<Record<string, string> | undefined>;
+   *  skill + server name so legacy pattern-match resolvers
+   *  (`<SERVER>_API_KEY`, etc.) keep working but still filter stored
+   *  credentials by the declaring skill (no cross-skill leakage). */
+  resolveAuthHeaders(skillName: string, serverName: string): Promise<Record<string, string> | undefined>;
   /** Resolve auth headers for an explicit `mcpServers[].credential` envName
    *  ref. When the skill's frontmatter pins a credential — e.g.
    *  `credential: LINEAR_API_KEY` — we look it up directly in the skill
    *  credential store under that name and scope, matching the path the
    *  admin-side Test-&-Enable probe uses. Absent = no ref was declared;
-   *  fall through to the legacy pattern resolver. */
-  resolveAuthHeadersByCredential?(envName: string): Promise<Record<string, string> | undefined>;
+   *  fall through to the legacy pattern resolver. Passed the skillName
+   *  so cross-skill rows holding the same envName don't satisfy
+   *  another skill's probe. */
+  resolveAuthHeadersByCredential?(skillName: string, envName: string): Promise<Record<string, string> | undefined>;
   /** Optional `config.url_rewrites` map applied to the MCP URL before the
    *  host's fetch. `undefined` (production default) is a no-op pass-through.
    *  The e2e harness populates this so skill frontmatter can point at
@@ -99,7 +102,7 @@ export function buildTurnMcpClientFactory(
     }
   }
 
-  return (_skillName, serverName) => ({
+  return (skillName, serverName) => ({
     async listTools() {
       const server = serverIndex.get(serverName);
       if (!server) return [];
@@ -119,11 +122,11 @@ export function buildTurnMcpClientFactory(
       let authSource: 'meta' | 'credential_ref' | 'pattern' | 'none' =
         headers ? 'meta' : 'none';
       if (!headers && server.credentialRef && resolveAuthHeadersByCredential) {
-        headers = await resolveAuthHeadersByCredential(server.credentialRef);
+        headers = await resolveAuthHeadersByCredential(skillName, server.credentialRef);
         if (headers) authSource = 'credential_ref';
       }
       if (!headers) {
-        headers = await resolveAuthHeaders(serverName);
+        headers = await resolveAuthHeaders(skillName, serverName);
         if (headers) authSource = 'pattern';
       }
       // Diagnostic signal — when catalog population returns empty tools
@@ -133,6 +136,7 @@ export function buildTurnMcpClientFactory(
       // path. Header VALUE never logged, only presence + resolution path.
       logger.debug('auth_resolved', {
         agentId,
+        skillName,
         serverName,
         credentialRef: server.credentialRef,
         authSource,

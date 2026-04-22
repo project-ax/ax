@@ -18,6 +18,13 @@ interface ManagedServer extends PluginMcpServer {
   pluginName?: string;
   source?: string;
   headers?: Record<string, string>;
+  /** The skill that declared this server, when `source === 'skill'`.
+   *  Threaded through `authForServer` so the credential resolver can
+   *  filter `skill_credentials` rows by `(skillName, envName)` instead
+   *  of guessing from the serverName prefix alone (PR #185 review
+   *  issues #2/#3 — cross-skill credential isolation). Undefined for
+   *  admin-added (`source === 'database'`) and plugin-added entries. */
+  skillName?: string;
 }
 
 /** Options for addServer (new calling convention). */
@@ -25,6 +32,8 @@ export interface AddServerOpts {
   source?: string;
   pluginName?: string;
   headers?: Record<string, string>;
+  /** See `ManagedServer.skillName`. */
+  skillName?: string;
 }
 
 /**
@@ -58,6 +67,7 @@ export class McpConnectionManager {
     let pluginName: string | undefined;
     let source: string | undefined;
     let headers: Record<string, string> | undefined;
+    let skillName: string | undefined;
 
     if (typeof optsOrPluginName === 'string') {
       pluginName = optsOrPluginName;
@@ -66,9 +76,10 @@ export class McpConnectionManager {
       pluginName = optsOrPluginName.pluginName;
       source = optsOrPluginName.source ?? (pluginName ? `plugin:${pluginName}` : undefined);
       headers = optsOrPluginName.headers;
+      skillName = optsOrPluginName.skillName;
     }
 
-    this.servers.set(server.name, { ...server, pluginName, source, headers });
+    this.servers.set(server.name, { ...server, pluginName, source, headers, skillName });
   }
 
   removeServer(_agentId: string, serverName: string): boolean {
@@ -104,20 +115,20 @@ export class McpConnectionManager {
    * actually reach the server. Pre-existing callers (that used this to
    * read `source`/`headers`/`transport`) keep working unchanged.
    */
-  getServerMeta(_agentId: string, name: string): { url: string; source?: string; headers?: Record<string, string>; transport?: 'http' | 'sse' } | undefined {
+  getServerMeta(_agentId: string, name: string): { url: string; source?: string; headers?: Record<string, string>; transport?: 'http' | 'sse'; skillName?: string } | undefined {
     const server = this.servers.get(name);
     if (!server) return undefined;
-    return { url: server.url, source: server.source, headers: server.headers, transport: server.transport };
+    return { url: server.url, source: server.source, headers: server.headers, transport: server.transport, skillName: server.skillName };
   }
 
   /**
    * Get metadata (source, headers, transport) for a server identified by its URL.
    * Used by the tool router which knows the server URL but not the server name.
    */
-  getServerMetaByUrl(_agentId: string, url: string): { name?: string; source?: string; headers?: Record<string, string>; transport?: 'http' | 'sse' } | undefined {
+  getServerMetaByUrl(_agentId: string, url: string): { name?: string; source?: string; headers?: Record<string, string>; transport?: 'http' | 'sse'; skillName?: string } | undefined {
     for (const server of this.servers.values()) {
       if (server.url === url) {
-        return { name: server.name, source: server.source, headers: server.headers, transport: server.transport };
+        return { name: server.name, source: server.source, headers: server.headers, transport: server.transport, skillName: server.skillName };
       }
     }
     return undefined;
@@ -235,8 +246,13 @@ export class McpConnectionManager {
     opts?: {
       resolveHeaders?: (headers: Record<string, string>) => Promise<Record<string, string>>;
       /** Provide auth headers for servers that have no explicit headers configured.
-       *  Called with the server name and URL; should return headers or undefined. */
-      authForServer?: (server: { name: string; url: string }) => Promise<Record<string, string> | undefined>;
+       *  Called with the server name, URL, and declaring skill (when
+       *  the server was registered from a skill's frontmatter). The
+       *  skillName lets the resolver filter `skill_credentials` rows
+       *  by `(skillName, envName)` so two skills sharing a common
+       *  envName can't resolve to each other's rows. `skillName` is
+       *  undefined for admin-added / plugin-added servers. */
+      authForServer?: (server: { name: string; url: string; skillName?: string }) => Promise<Record<string, string> | undefined>;
       /** When set, only discover tools from servers whose name is in this set.
        *  Used to respect per-agent connector assignments (agent_mcp_servers). */
       serverFilter?: Set<string>;
@@ -251,7 +267,11 @@ export class McpConnectionManager {
         if (server.headers && opts?.resolveHeaders) {
           resolvedHeaders = await opts.resolveHeaders(server.headers);
         } else if (!server.headers && opts?.authForServer) {
-          resolvedHeaders = await opts.authForServer({ name: server.name, url: server.url });
+          resolvedHeaders = await opts.authForServer({
+            name: server.name,
+            url: server.url,
+            ...(server.skillName ? { skillName: server.skillName } : {}),
+          });
         } else {
           resolvedHeaders = server.headers;
         }

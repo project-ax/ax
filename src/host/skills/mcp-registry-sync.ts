@@ -31,7 +31,12 @@ export function registerMcpServersFromSnapshot(
       mcpManager.addServer(
         agentId,
         { name: s.name, type: 'http', url: s.url, transport: s.transport },
-        { source: 'skill' },
+        // Pass the declaring skill so `authForServer` (and the
+        // `resolveMcpAuthHeaders` call chain under it) can filter
+        // `skill_credentials` rows by `(skillName, envName)` rather
+        // than guess from the serverName prefix alone — closes
+        // cross-skill credential bleed (PR #185 review, issues #2/#3).
+        { source: 'skill', skillName: entry.name },
       );
     }
   }

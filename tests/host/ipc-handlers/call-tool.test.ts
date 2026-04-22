@@ -66,10 +66,33 @@ describe('call_tool handler', () => {
     expect(mcpProvider.callToolOnServer).toHaveBeenCalledWith({
       server: 'linear',
       tool: 'list_issues',
+      skillName: 'linear',
       args: { team: 'p' },
       ctx: { agentId: 'main', userId: 'alice' },
     });
     expect(result).toEqual({ result: { issues: [{ id: 1 }] } });
+  });
+
+  it('threads skillName from the catalog entry through to the MCP dispatcher (cross-skill isolation)', async () => {
+    // Regression for PR #185 review issue #2 — the dispatcher receives
+    // the declaring skill so the credential resolver can filter by
+    // `(skillName, envName)` instead of envName alone. Without this,
+    // two skills both using `API_KEY` can resolve each other's creds.
+    const mcpProvider = {
+      callToolOnServer: vi.fn().mockResolvedValue({ ok: true }),
+    };
+    const catalog = new ToolCatalog();
+    // Tool's catalog skill is 'skill-a', NOT matching the tool name
+    // prefix — confirms the dispatcher reads `tool.skill`, not a name
+    // heuristic.
+    catalog.register(
+      makeTool({ name: 'mcp_shared_list_things', skill: 'skill-a' }),
+    );
+
+    const handler = createCallToolHandler({ catalog, mcpProvider, openApiProvider: unusedOpenApiProvider });
+    await handler({ tool: 'mcp_shared_list_things', args: {} }, ctx);
+
+    expect(mcpProvider.callToolOnServer.mock.calls[0][0].skillName).toBe('skill-a');
   });
 
   it('threads per-request userId through to the dispatcher (no captured default)', async () => {
@@ -280,6 +303,10 @@ describe('call_tool handler', () => {
         method: 'GET',
         path: '/x/{id}',
         operationId: 'getX',
+        // skillName threads from `tool.skill` so the dispatcher's
+        // credential resolver can filter by `(skillName, envName)` —
+        // PR #185 review issue #2.
+        skillName: 'foo',
         params: [{ name: 'id', in: 'path' }],
         args: { id: '5' },
         ctx: { agentId: 'main', userId: 'alice' },

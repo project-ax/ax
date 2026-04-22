@@ -250,11 +250,17 @@ function rowToLogShape(
  *  looks up by explicit envName rather than guessing from the server name. */
 export async function resolveMcpAuthHeaders(args: {
   serverName: string;
+  /** The skill that owns this MCP server lookup. Filters out rows
+   *  stored by other skills so skills sharing a common envName (e.g.
+   *  two skills both using `API_KEY`) can't resolve to each other's
+   *  credentials. Required — a silent cross-skill fallback is the
+   *  exact bug this field closes. */
+  skillName: string;
   agentId: string;
   userId: string;
   skillCredStore: import('./skills/skill-cred-store.js').SkillCredStore;
 }): Promise<Record<string, string> | undefined> {
-  const { serverName, agentId, userId, skillCredStore } = args;
+  const { serverName, skillName, agentId, userId, skillCredStore } = args;
   const prefix = serverName.toUpperCase().replace(/-/g, '_');
   const candidates = [
     `${prefix}_API_KEY`,
@@ -264,11 +270,13 @@ export async function resolveMcpAuthHeaders(args: {
   ];
   const rows = await skillCredStore.listForAgent(agentId);
   for (const envName of candidates) {
-    const matching = rows.filter(r => r.envName === envName);
+    const matching = rows.filter(
+      r => r.skillName === skillName && r.envName === envName,
+    );
     if (matching.length === 0) {
       if (process.env[envName]) {
         logger.info('skill_cred_resolved', {
-          agentId, userId, serverName, envName,
+          agentId, userId, skillName, serverName, envName,
           source: 'process_env',
           resolverPath: 'pattern',
           matchingRows: [],
@@ -281,24 +289,36 @@ export async function resolveMcpAuthHeaders(args: {
     }
     const user = matching.find(r => r.userId === userId);
     const agent = matching.find(r => r.userId === '');
-    const selected = user ?? agent ?? matching[0];
+    // No cross-user / cross-row fallback. If neither the current user's
+    // row nor the agent-scope sentinel matches, this credential is not
+    // ours to use — even if another user stored a value under the same
+    // (skillName, envName) tuple.
+    const selected = user ?? agent;
+    if (!selected) {
+      logger.debug('skill_cred_resolved', {
+        agentId, userId, skillName, serverName, envName,
+        resolverPath: 'pattern',
+        source: 'none',
+        matchingRowCount: matching.length,
+      });
+      continue;
+    }
     const value = selected.value;
     if (value) {
       logger.info('skill_cred_resolved', {
-        agentId, userId, serverName, envName,
+        agentId, userId, skillName, serverName, envName,
         source: 'skill_credentials',
         resolverPath: 'pattern',
         matchingRowCount: matching.length,
         matchingRows: matching.map(rowToLogShape),
         selectedRow: rowToLogShape(selected),
-        selectionReason:
-          user ? 'user_scope_match' : agent ? 'agent_scope_fallback' : 'first_row_fallback',
+        selectionReason: user ? 'user_scope_match' : 'agent_scope_fallback',
       });
       return { Authorization: `Bearer ${value}` };
     }
   }
   logger.debug('skill_cred_resolved', {
-    agentId, userId, serverName,
+    agentId, userId, skillName, serverName,
     resolverPath: 'pattern',
     source: 'none',
     candidates,
@@ -316,18 +336,24 @@ export async function resolveMcpAuthHeaders(args: {
  *  agent-scope over first-match), plus a `process.env[envName]` fallback
  *  for dev creds that bypass `skill_credentials`. */
 export async function resolveMcpAuthHeadersByCredential(args: {
+  /** The skill that declared this credential ref. Filters out rows
+   *  stored by other skills so two skills pinning the same envName
+   *  cannot resolve to each other's credentials. Required. */
+  skillName: string;
   envName: string;
   agentId: string;
   userId: string;
   skillCredStore: import('./skills/skill-cred-store.js').SkillCredStore;
 }): Promise<Record<string, string> | undefined> {
-  const { envName, agentId, userId, skillCredStore } = args;
+  const { skillName, envName, agentId, userId, skillCredStore } = args;
   const rows = await skillCredStore.listForAgent(agentId);
-  const matching = rows.filter(r => r.envName === envName);
+  const matching = rows.filter(
+    r => r.skillName === skillName && r.envName === envName,
+  );
   if (matching.length === 0) {
     if (process.env[envName]) {
       logger.info('skill_cred_resolved', {
-        agentId, userId, envName,
+        agentId, userId, skillName, envName,
         source: 'process_env',
         resolverPath: 'credential_ref',
         matchingRows: [],
@@ -337,7 +363,7 @@ export async function resolveMcpAuthHeadersByCredential(args: {
       return { Authorization: `Bearer ${process.env[envName]}` };
     }
     logger.debug('skill_cred_resolved', {
-      agentId, userId, envName,
+      agentId, userId, skillName, envName,
       resolverPath: 'credential_ref',
       source: 'none',
       matchingRowCount: 0,
@@ -346,18 +372,30 @@ export async function resolveMcpAuthHeadersByCredential(args: {
   }
   const user = matching.find(r => r.userId === userId);
   const agent = matching.find(r => r.userId === '');
-  const selected = user ?? agent ?? matching[0];
+  // No cross-user / cross-row fallback. `matching[0]` could be another
+  // user's stored row; returning it would leak credentials across
+  // identities. If neither the per-user row nor the agent-scope
+  // sentinel is set, this resolver returns undefined.
+  const selected = user ?? agent;
+  if (!selected) {
+    logger.debug('skill_cred_resolved', {
+      agentId, userId, skillName, envName,
+      resolverPath: 'credential_ref',
+      source: 'none',
+      matchingRowCount: matching.length,
+    });
+    return undefined;
+  }
   const value = selected.value;
   if (value) {
     logger.info('skill_cred_resolved', {
-      agentId, userId, envName,
+      agentId, userId, skillName, envName,
       source: 'skill_credentials',
       resolverPath: 'credential_ref',
       matchingRowCount: matching.length,
       matchingRows: matching.map(rowToLogShape),
       selectedRow: rowToLogShape(selected),
-      selectionReason:
-        user ? 'user_scope_match' : agent ? 'agent_scope_fallback' : 'first_row_fallback',
+      selectionReason: user ? 'user_scope_match' : 'agent_scope_fallback',
     });
     return { Authorization: `Bearer ${value}` };
   }
@@ -1503,8 +1541,12 @@ export async function processCompletion(
 
     // ── Live skill index for the system prompt ──
     // Computed fresh per turn from the git snapshot + host approvals/creds.
+    // Pass the current user so a skill is marked "enabled" only when THIS
+    // user has stored their own credential (or an agent-scope value
+    // exists) — another user's stored row must not flip the skill to
+    // enabled on Bob's turn (PR #185 review, issue #6).
     const skillsPayload: SkillSummary[] = (
-      await getAgentSkills(agentId, deps.agentSkillsDeps)
+      await getAgentSkills(agentId, deps.agentSkillsDeps, currentUserId)
     ).map(toSkillSummary);
 
     // ── Populate per-agent tool routes for skill-declared MCP servers ──
@@ -1522,10 +1564,16 @@ export async function processCompletion(
         // name — lets `authForServer` prefer the authoritative envName
         // lookup when frontmatter pinned one, matching the probe path.
         const credRefByServerName = new Map<string, string>();
+        // Also side-index which skill declared each server so the
+        // credential-resolver calls below can filter by (skillName,
+        // envName). Without this the resolver can't tell skill-A's
+        // API_KEY row from skill-B's (#2 / #3 in PR #185 review).
+        const skillNameByServerName = new Map<string, string>();
         for (const entry of snapshot) {
           if (!entry.ok) continue;
           for (const s of entry.frontmatter.mcpServers) {
             skillServerNames.add(s.name);
+            skillNameByServerName.set(s.name, entry.name);
             if (s.credential) credRefByServerName.set(s.name, s.credential);
           }
         }
@@ -1534,9 +1582,12 @@ export async function processCompletion(
           await deps.mcpManager.ensureToolsDiscoveredForHead(agentId, headSha, {
             serverFilter: skillServerNames,
             authForServer: async (server) => {
+              const skillName = skillNameByServerName.get(server.name);
+              if (!skillName) return undefined;
               const ref = credRefByServerName.get(server.name);
               if (ref) {
                 const byRef = await resolveMcpAuthHeadersByCredential({
+                  skillName,
                   envName: ref,
                   agentId,
                   userId: currentUserId,
@@ -1546,6 +1597,7 @@ export async function processCompletion(
               }
               return resolveMcpAuthHeaders({
                 serverName: server.name,
+                skillName,
                 agentId,
                 userId: currentUserId,
                 skillCredStore: deps.skillCredStore,
@@ -1592,8 +1644,9 @@ export async function processCompletion(
                 mcpManager: deps.mcpManager!,
                 agentId,
                 snapshot: snapshotForCatalog,
-                resolveAuthHeaders: (serverName) =>
+                resolveAuthHeaders: (skillName, serverName) =>
                   resolveMcpAuthHeaders({
+                    skillName,
                     serverName,
                     agentId,
                     userId: currentUserId,
@@ -1605,8 +1658,9 @@ export async function processCompletion(
                 // holds even when the server name doesn't match the
                 // legacy prefix heuristic (e.g. "linear-mcp-server" +
                 // envName "LINEAR_API_KEY").
-                resolveAuthHeadersByCredential: (envName) =>
+                resolveAuthHeadersByCredential: (skillName, envName) =>
                   resolveMcpAuthHeadersByCredential({
+                    skillName,
                     envName,
                     agentId,
                     userId: currentUserId,
