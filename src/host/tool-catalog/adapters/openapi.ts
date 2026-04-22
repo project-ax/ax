@@ -43,6 +43,7 @@ import { minimatch } from 'minimatch';
 import type { OpenAPIV3 } from 'openapi-types';
 import { getLogger } from '../../../logger.js';
 import type { CatalogTool } from '../types.js';
+import { toSnakeCase } from '../name-utils.js';
 
 const logger = getLogger().child({ component: 'openapi-adapter' });
 
@@ -92,14 +93,9 @@ function isOpenApiV3(spec: unknown): spec is OpenAPIV3.Document {
  * catches trailing-acronym cases like `PetByID`. Everything is lowercased
  * at the end, then any leftover non-alnum runs collapse.
  */
-function toSnakeCase(input: string): string {
-  return input
-    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
-    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
-}
+// Sanitization moved to `../name-utils.ts` so the MCP adapter shares the
+// same logic (skills with hyphens, MCP tool names with dots). Imported at
+// the top of this file.
 
 function matchesAny(name: string, globs: string[]): boolean {
   return globs.some((g) => minimatch(name, g));
