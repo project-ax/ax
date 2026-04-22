@@ -2,6 +2,14 @@
 
 Sandbox providers, canonical paths, workspace tiers.
 
+## [2026-04-22 10:00] — Correction: `canonicalEnv()` *does* see `requestId`; reason for not folding it in
+
+**Task:** Code-review correction for the prior Task 2 entry (2026-04-22 09:45). That entry justified keeping `AX_REQUEST_ID` injection inside each provider rather than centralizing it in `canonicalEnv()` by claiming "`canonicalEnv` doesn't see `requestId` (it's a top-level `SandboxConfig` field, not a sub-config)." That reasoning is wrong — `canonical-paths.ts:25` shows `canonicalEnv(config: SandboxConfig)` takes the entire `SandboxConfig`, so it absolutely sees `config.requestId`.
+**What I did:** No code change — this is a documentation correction only. The actual reason for keeping the injection per-provider: `canonicalEnv` returns a flat `Record<string, string>` that providers spread into a single env object. There's no existing elision pattern (every key it returns is unconditional except `AX_WEB_PROXY_SOCKET`, which uses `if (webProxySocket) env.X = ...`). Folding `requestId` in would either (a) require always emitting `AX_REQUEST_ID` (even as empty string when unset, which violates the "omit when unset" convention used elsewhere in per-turn env), or (b) add a second conditional branch — fine, just no clear win over the per-provider conditional spread that already exists. Option B in the code review (move it into `canonicalEnv` and remove the duplication) is viable but not done here; the per-provider injection is correct and consistent.
+**Files touched:** None (journal-only correction).
+**Outcome:** Success — incorrect reasoning replaced with accurate reasoning. Append-only protocol respected.
+**Notes:** Lesson recorded for future self: when a helper takes the whole config object, "doesn't see X" is never a valid reason — the question is always whether folding X in fits the helper's existing pattern.
+
 ## [2026-04-22 09:45] — Inject `AX_REQUEST_ID` into container env (k8s/docker/apple)
 
 **Task:** Task 2 of the chat-correlation-id plan, sandbox-provider half. After Task 1 added `requestId` to `SandboxConfig` and bound it into the per-pod logger, the agent runner inside the sandbox still didn't see it — its logs had no `reqId` so `grep <reqId>` stopped at the pod boundary.

@@ -2,6 +2,14 @@
 
 Agent runner implementations, process management, dev/production mode split.
 
+## [2026-04-22 10:00] — Extend `reqId` binding to hot-path runners (`pi-session`, `claude-code`)
+
+**Task:** Code-review fix for the prior Task 2 entry. The previous fix bound `reqId` only on `runner.ts`'s top-level logger, but the bulk of agent-execution chatter is emitted from `runners/pi-session.ts` and `runners/claude-code.ts`, each of which had their own `getLogger().child({ component: ... })` with no reqId. So `grep <reqId>` lit up the dispatcher and stopped — missing the actual chat turn.
+**What I did:** Applied the same env-bound binding pattern from `runner.ts:15-22` at module load in both runner files: read `process.env.AX_REQUEST_ID?.slice(-8)` once and (if present) build the `logger` as `getLogger().child({ component, reqId })`, else the bare `{ component }`. No call-site changes. Extended `tests/agent/runner-correlation.test.ts` with a third test case that imports both runner modules with `AX_REQUEST_ID` set, drives one log emit through each (`runPiSession({userMessage:''})` -> `skip_empty`; `runClaudeCode({userMessage:'force log emit'})` -> `missing_proxy_socket` with stubbed exit), and asserts every `component: 'pi-session'` and `component: 'claude-code'` entry carries `reqId`.
+**Files touched:** `src/agent/runners/pi-session.ts`, `src/agent/runners/claude-code.ts`, `tests/agent/runner-correlation.test.ts`
+**Outcome:** Success — new test case passes alongside the existing two; agent + sandbox suites still green; build clean.
+**Notes:** Same env-read-at-import trade-off as `runner.ts` — sandbox provider sets `AX_REQUEST_ID` before node imports the module. If the env-read pattern ever needs to change (e.g. centralize via a `getLogger()` helper), all three call sites move together.
+
 ## [2026-04-22 09:45] — Bind `reqId` on runner's top-level logger from `AX_REQUEST_ID`
 
 **Task:** Task 2 of the chat-correlation-id plan — propagate the chat turn's correlation ID through the sandbox env and into the agent runner's logger so a single `grep <reqId>` reconstructs the chain across host -> sandbox provider -> agent runner.

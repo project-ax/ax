@@ -91,6 +91,61 @@ describe('agent runner correlation', () => {
     }
   });
 
+  test('hot-path runners (pi-session, claude-code) bind reqId from AX_REQUEST_ID', async () => {
+    // The bulk of agent-execution chatter flows through the per-runner module
+    // loggers (pi-session.ts, claude-code.ts), not the runner.ts top-level
+    // logger. Drive one log emit from each runner's module-level logger and
+    // assert reqId is bound — proving the env-read at import time worked.
+    const { entries, stream } = captureLogs();
+
+    const { initLogger } = await import('../../src/logger.js');
+    initLogger({ level: 'debug', stream, file: false, pretty: false });
+
+    const requestId = 'req-hotpath-abcdef0123456789';
+    process.env.AX_REQUEST_ID = requestId;
+
+    // Fresh imports — vi.resetModules() in beforeEach cleared the cached copy
+    // so the module-level `logger` const re-binds against current env.
+    const { runPiSession } = await import('../../src/agent/runners/pi-session.js');
+    const { runClaudeCode } = await import('../../src/agent/runners/claude-code.js');
+
+    // Trigger one emit from pi-session's module logger: empty userMessage
+    // hits the `logger.debug('skip_empty')` branch and returns immediately.
+    await runPiSession({
+      agent: 'pi-coding-agent',
+      ipcSocket: '',
+      workspace: '/tmp/nonexistent-ax-pi-correlation',
+      userMessage: '',
+    });
+
+    // Trigger one emit from claude-code's module logger: non-empty
+    // userMessage with no proxySocket and no AX_HOST_URL hits
+    // `logger.error('missing_proxy_socket')` then `process.exit(1)`.
+    const origExit = process.exit;
+    let exitCalled = false;
+    (process as any).exit = (_code?: number) => { exitCalled = true; };
+    try {
+      await runClaudeCode({
+        agent: 'claude-code',
+        ipcSocket: '',
+        workspace: '/tmp/nonexistent-ax-cc-correlation',
+        userMessage: 'force log emit',
+      });
+    } catch { /* ignore — exit stub may break the rest of the function */ }
+    process.exit = origExit;
+
+    await new Promise(r => setTimeout(r, 20));
+    expect(exitCalled).toBe(true);
+
+    const piEntries = entries.filter(e => e.component === 'pi-session');
+    const ccEntries = entries.filter(e => e.component === 'claude-code');
+    expect(piEntries.length).toBeGreaterThan(0);
+    expect(ccEntries.length).toBeGreaterThan(0);
+    for (const e of [...piEntries, ...ccEntries]) {
+      expect(e.reqId).toBe(requestId.slice(-8));
+    }
+  });
+
   test('omits reqId binding when AX_REQUEST_ID is unset', async () => {
     const { entries, stream } = captureLogs();
     const { initLogger } = await import('../../src/logger.js');
