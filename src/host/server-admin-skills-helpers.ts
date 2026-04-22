@@ -24,6 +24,7 @@ import type { UrlRewriteMap } from '../plugins/url-rewrite.js';
 import { loadSnapshot, getAgentSkills, type GetAgentSkillsDeps } from './skills/get-agent-skills.js';
 import { probeMcpServers, type ProbeMcpServerInput } from './skills/probe-mcp-server.js';
 import { parseSkillFile } from '../skills/parser.js';
+import type { SkillOpenApiSource } from '../skills/frontmatter-schema.js';
 
 const ENV_NAME_RE = /^[A-Z][A-Z0-9_]{1,63}$/;
 
@@ -132,14 +133,22 @@ export type ApproveResult =
 
 /** Serialize intended frontmatter to the canonical key order that matches
  *  what skill-creator produces (name → description → source → credentials →
- *  mcpServers → domains). Omits empty arrays/undefineds so the diff against
- *  what the agent wrote stays minimal. */
-function serializeFrontmatter(fm: {
+ *  mcpServers → openapi → domains). Omits empty arrays/undefineds so the diff
+ *  against what the agent wrote stays minimal.
+ *
+ *  `openapi[]` is operational (drives catalog population) — MUST be preserved
+ *  across the approval rewrite. A prior version of this function omitted it,
+ *  which silently torched the spec/baseUrl/auth/include/exclude block on every
+ *  approve, leaving the skill "enabled" with zero tools in the catalog and no
+ *  error surface. Caught in the field via the petstore skill.
+ */
+export function serializeFrontmatter(fm: {
   name: string;
   description: string;
   source?: { url: string; version?: string };
   credentials: ApproveBody['frontmatter']['credentials'];
   mcpServers: ApproveBody['frontmatter']['mcpServers'];
+  openapi?: SkillOpenApiSource[];
   domains: string[];
 }): Record<string, unknown> {
   const out: Record<string, unknown> = {
@@ -160,6 +169,15 @@ function serializeFrontmatter(fm: {
       if (m.credential) entry.credential = m.credential;
       if (m.include) entry.include = m.include;
       if (m.exclude) entry.exclude = m.exclude;
+      return entry;
+    });
+  }
+  if (fm.openapi && fm.openapi.length > 0) {
+    out.openapi = fm.openapi.map((o) => {
+      const entry: Record<string, unknown> = { spec: o.spec, baseUrl: o.baseUrl };
+      if (o.auth) entry.auth = o.auth;
+      if (o.include) entry.include = o.include;
+      if (o.exclude) entry.exclude = o.exclude;
       return entry;
     });
   }
@@ -210,6 +228,11 @@ export async function approveSkillSetup(
     source: current.source,
     credentials: body.frontmatter.credentials,
     mcpServers: body.frontmatter.mcpServers,
+    // openapi[] isn't admin-editable through Test-&-Enable (the probe flow
+    // only exercises MCP servers), so preserve it verbatim from whatever
+    // skill-creator originally wrote. Dropping this is how an OpenAPI-only
+    // skill ended up "enabled" with zero tools in the catalog.
+    openapi: current.openapi,
     domains: body.frontmatter.domains,
   });
   const yamlBlock = stringifyYaml(intended, { lineWidth: 0 });

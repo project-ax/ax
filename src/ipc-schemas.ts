@@ -314,6 +314,17 @@ const skillMcpServer = z.strictObject({
   transport: z.enum(['http', 'sse']).optional(),
 });
 
+const skillOpenApiSource = z.strictObject({
+  spec: safeString(2048),
+  baseUrl: safeString(2048),
+  auth: z.strictObject({
+    scheme: z.enum(['bearer', 'basic', 'api_key_header', 'api_key_query']),
+    credential: safeString(64),
+  }).optional(),
+  include: z.array(safeString(200)).max(64).optional(),
+  exclude: z.array(safeString(200)).max(64).optional(),
+});
+
 export const SkillWriteSchema = ipcAction('skill_write', {
   name: safeString(100),
   description: safeString(2000),
@@ -323,6 +334,7 @@ export const SkillWriteSchema = ipcAction('skill_write', {
   }).optional(),
   credentials: z.array(skillCredential).max(32).optional(),
   mcpServers: z.array(skillMcpServer).max(32).optional(),
+  openapi: z.array(skillOpenApiSource).max(32).optional(),
   domains: z.array(safeString(253)).max(64).optional(),
   body: safeString(100_000),
 });

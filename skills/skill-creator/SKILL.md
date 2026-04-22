@@ -35,11 +35,13 @@ That last bit is the whole point: **ask once, works forever after**.
 
 2. **Research connectivity, MCP first.** Check whether the service has an official MCP server. Good places to look: the vendor's docs (search "MCP" on their developer site), `github.com/modelcontextprotocol/servers`, and the vendor's GitHub org. An official MCP endpoint is always preferable — it's a single `mcpServers[]` entry plus a credential, no code to write. Note: the URL path varies by vendor (`/mcp`, `/sse`, `/api/v1/mcp`, etc.) — always use the vendor's documented URL, don't guess.
 
-3. **Fallback: npx-based tools.** If there's no MCP server, look for a CLI tool distributed via npm that you can invoke with `npx <package>`. Declare the tool's API hostnames in `domains[]`. **Never tell the agent to `npm install -g`** — use `npx` (which caches in the workspace) or a project-local `package.json`. The `registry.npmjs.org` host is already on the default allowlist, so `npx` downloads work out of the box.
+3. **Fallback: OpenAPI spec.** No MCP? Check whether the service publishes an OpenAPI 3.0 spec (the vendor's docs will link to a `/openapi.json` or `/swagger.json`; fetch it and confirm the first line is `{"openapi": "3.0.x", ...}`). An OpenAPI skill declares `openapi[]` with the spec URL + baseUrl + optional auth, and the catalog auto-generates one tool per operation. Scope with `include:` globs if the spec has >20 operations. **See the worked petstore example below** for the exact shape. (v2/Swagger specs are rejected — convert to v3 first.)
 
-4. **Last resort: raw HTTPS.** If there's no MCP and no decent npx tool, the skill can describe a raw `fetch()` pattern — but this is the worst option. Declare the API hostname in `domains[]` or the proxy will deny it.
+4. **Fallback: npx-based tools.** If there's no MCP server AND no OpenAPI spec, look for a CLI tool distributed via npm that you can invoke with `npx <package>`. Declare the tool's API hostnames in `domains[]`. **Never tell the agent to `npm install -g`** — use `npx` (which caches in the workspace) or a project-local `package.json`. The `registry.npmjs.org` host is already on the default allowlist, so `npx` downloads work out of the box.
 
-5. **Show the proposed frontmatter and wait for confirmation — ALWAYS, no exceptions.** Before writing any SKILL.md, post a compact preview of every high-risk field and stop for the user to confirm or correct. This is mandatory even for vendors you think you know — every field shown below is one the admin later has to fix in the dashboard if we get it wrong, which is slower than a one-turn confirmation now.
+5. **Last resort: raw HTTPS.** If there's no MCP, no OpenAPI spec, and no decent npx tool, the skill can describe a raw `fetch()` pattern — but this is the worst option. Declare the API hostname in `domains[]` or the proxy will deny it.
+
+6. **Show the proposed frontmatter and wait for confirmation — ALWAYS, no exceptions.** Before writing any SKILL.md, post a compact preview of every high-risk field and stop for the user to confirm or correct. This is mandatory even for vendors you think you know — every field shown below is one the admin later has to fix in the dashboard if we get it wrong, which is slower than a one-turn confirmation now.
 
    Preview format — bundle everything into one message:
 
@@ -119,6 +121,17 @@ mcpServers:                           # optional — remote MCP endpoints
     url: https://mcp.example.com/mcp  # must be https://; use the vendor's ACTUAL path
     credential: SERVICE_API_KEY       # IMPORTANT: just the envName STRING — must match an entry in credentials[] above. NOT a nested { envName, authType, scope } object.
     transport: http                   # optional — inferred from URL (/sse → sse, else http); override if needed
+openapi:                              # optional — OpenAPI/Swagger REST endpoints (parallel to mcpServers)
+  - spec: https://api.example.com/openapi.json   # URL to a v3 spec (reject v2/Swagger), or a workspace-relative path
+    baseUrl: https://api.example.com/v1          # must be https://; operations get appended to this
+    auth:                             # optional — how to inject credentials
+      scheme: bearer                  # bearer | basic | api_key_header | api_key_query
+      credential: SERVICE_API_KEY     # envName — string ref, same rules as mcpServers[].credential
+    include:                          # optional — minimatch globs against bare operationId
+      - "findPets*"
+      - "getPet*"
+    exclude:                          # optional — applied after include
+      - "deletePet"
 domains:                              # optional — additional allowlist entries
   - api.example.com                   # plain hostname, no scheme, no path
   - "*.my.example.com"                # leading-label wildcard — covers <anything>.my.example.com
@@ -129,10 +142,32 @@ Rules the host enforces:
 - `mcpServers[].url` must be `https://`
 - `mcpServers[].credential` is a **string** — the envName of an entry in the top-level `credentials:` array. It's a reference, not a definition. Parser rejects `credential: { envName: ..., authType: ... }` with "expected string, received object".
 - `mcpServers[].transport` is one of `http` (default) or `sse`
+- `openapi[].spec` is a v3 spec URL (or workspace-relative path). v2/Swagger is rejected — convert the spec to v3 first.
+- `openapi[].baseUrl` must be `https://` (the URL the operations get appended to).
+- `openapi[].auth.scheme` is one of `bearer | basic | api_key_header | api_key_query`. If `auth` is present, BOTH `scheme` and `credential` are required.
+- `openapi[].auth.credential` (like MCP) is an envName STRING reference to a top-level `credentials[]` entry.
 - `domains[]` entries must be plain hostnames (no `https://`, no `/path`). Leading-label wildcards like `*.foo.com` are allowed for multi-tenant vendors (cover any subdomain of `foo.com`; do NOT cover the bare apex — list that explicitly if needed). Mid-label wildcards, deep wildcards, `*.com`, and bare `*` are rejected as too broad.
 - `envName` must be uppercase `SCREAMING_SNAKE_CASE`
 - `authType` values are exactly `api_key` or `oauth` (snake_case, NOT `apiKey`/`camelCase`)
 - Unknown top-level keys or unknown keys inside a block → rejection
+
+### MCP vs OpenAPI — which integration does this service use?
+
+Two ways to plug a third-party service into the tool catalog. Pick exactly one (or both if the service genuinely exposes both surfaces, which is rare).
+
+- **`mcpServers[]`** — for services that publish a native MCP endpoint (Linear, GitHub, Slack, Notion, Sentry, most modern SaaS with an agent-ready API). The catalog discovers tools via `tools/list` at session start.
+- **`openapi[]`** — for services that publish an OpenAPI 3.0 spec but no MCP server (petstore demos, many REST APIs, internal services with Swagger docs). The catalog builds one tool per operation with inputSchema derived from params + requestBody.
+
+**Signals it's OpenAPI, not MCP:**
+- The vendor's docs reference "OpenAPI spec" or "Swagger JSON" — and you can `curl` the spec URL and see `openapi: 3.0.x` at the top.
+- The vendor publishes a REST API reference but no MCP server.
+- You're wrapping an internal service that already has a Swagger UI.
+
+**Do NOT** put the OpenAPI spec URL in `source:` and leave `openapi[]` off. `source:` is *provenance metadata* — where the skill came from, for humans to reference. The catalog-populate loop iterates `openapi[]`, not `source`. A skill with only `source:` set for a REST API will be enabled with **zero** tools in the catalog.
+
+**Do NOT** invent a fake `mcpServers[]` entry pointing at an OpenAPI URL. MCP's `tools/list` will fail against a plain REST endpoint and the skill will be rejected during Test-&-Enable. Use `openapi[]`.
+
+**Scoping OpenAPI skills with `include:`** — if the spec has >20 operations, pin the surface with `include:` globs (minimatch, matched against bare operationId, not the catalog-prefixed `api_<skill>_*` name). This keeps the catalog small and the LLM's prompt context cheap. Example: `include: ["findPets*", "getPet*", "getInventory"]` — excludes mutations and admin ops. You can also use `exclude:` for "mostly everything but not these."
 
 ### Picking the right MCP transport
 
@@ -232,6 +267,75 @@ Call the Linear MCP tools. Common flows:
 
 5. **Write the file.** Use the file-write tool to create `.ax/skills/linear/SKILL.md`. Don't run git — the sidecar commits it.
 6. **Tell the user:** "I've drafted a Linear skill. An admin needs to provide `LINEAR_API_KEY` and approve it in the AX dashboard. Once that's done, just ask me again."
+
+## Example: drafting an OpenAPI-based skill (no MCP server, but a spec)
+
+User says: "let me query the public petstore API."
+
+1. **MCP check.** No MCP server — it's a plain REST API.
+2. **OpenAPI check.** Petstore publishes a v3 spec at `https://petstore3.swagger.io/api/v3/openapi.json`. Fetch it to confirm: the first line is `{"openapi": "3.0.x", ...}`. That means `openapi[]` is the right block — NOT `mcpServers[]`, NOT just `source:`.
+3. **Auth.** The public petstore demo is unauthenticated (read-only endpoints like `findPetsByStatus` work without a key). Omit the `auth:` block entirely.
+4. **Scoping.** Petstore's spec has ~20 operations. Scope to read-only with `include:` to keep the catalog tight and avoid teaching the agent destructive endpoints it shouldn't be reaching for.
+5. **Draft** `.ax/skills/petstore/SKILL.md`:
+
+```yaml
+---
+name: petstore
+description: |
+  Query the public Swagger petstore demo API. Trigger on any mention of
+  "petstore", "pets", "pet inventory", or "pet orders" — this is the demo
+  API most commonly used for OpenAPI integration testing. Read-only scope.
+openapi:
+  - spec: https://petstore3.swagger.io/api/v3/openapi.json
+    baseUrl: https://petstore3.swagger.io/api/v3
+    include:
+      - findPets*
+      - getPet*
+      - getInventory
+      - getOrderById
+domains:
+  - petstore3.swagger.io
+---
+
+# Petstore
+
+## When to use this skill
+
+Any time the user mentions the public petstore demo, pet inventory, or
+asks to "find available pets" / "look up pet by ID" / "check the petstore
+order status." This is the canonical OpenAPI demo — use it when the user
+is testing OpenAPI integration, not as a general-purpose pet database.
+
+## When pending
+
+The system prompt's "Available skills" section shows this skill's state.
+If it's `(setup pending: ...)` rather than `enabled`, the declared domain
+is NOT yet on the proxy allowlist and the catalog tools are NOT populated.
+
+Stop. Tell the user: "The petstore skill is still awaiting admin approval.
+Once an admin approves it in the dashboard, ask me again." End the turn.
+
+## How to use
+
+The catalog exposes these tools once enabled (operationId → catalog name):
+
+- `findPetsByStatus` → `api_petstore_find_pets_by_status` with `{status: 'available' | 'pending' | 'sold'}`
+- `findPetsByTags` → `api_petstore_find_pets_by_tags` with `{tags: string[]}`
+- `getPetById` → `api_petstore_get_pet_by_id` with `{petId: number}`
+- `getInventory` → `api_petstore_get_inventory` (no args)
+- `getOrderById` → `api_petstore_get_order_by_id` with `{orderId: number}`
+
+Always call `describe_tools(["api_petstore_..."])` first to confirm the
+exact arg shape — the adapter derives inputSchema from the spec's
+`parameters` + `requestBody`, which is stricter than the prose above.
+
+Handle empty-result arrays gracefully: the API returns `[]` when nothing
+matches, not a 404.
+```
+
+6. **Write the file** and tell the user: "I've drafted a petstore skill. An admin needs to approve it in the dashboard — no credentials required, it's a public demo. Once approved, ask me again."
+
+**Critical mistake to avoid on OpenAPI skills**: don't put the spec URL in `source:` and leave `openapi[]` off. `source:` is metadata; it does NOT drive catalog population. A skill written that way will approve cleanly and end up enabled with zero tools — and the agent won't be able to tell you what went wrong. The operational block is `openapi[]`.
 
 ## Example: drafting a skill when there's no MCP server
 

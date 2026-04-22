@@ -352,6 +352,58 @@ export const TOOL_CATALOG: readonly ToolSpec[] = [
           'Remote MCP server endpoints. Omit entirely if the service has no MCP — ' +
           'do not invent a fake entry to "hold" a credential.',
       })),
+      openapi: Type.Optional(Type.Array(Type.Object({
+        spec: Type.String({
+          description:
+            'URL to an OpenAPI 3.0 spec (JSON or YAML), or a workspace-relative ' +
+            'path. v2/Swagger specs are rejected — convert to v3 first.',
+        }),
+        baseUrl: Type.String({
+          description:
+            'Must start with https://. Operations get appended to this. ' +
+            'Example: "https://api.example.com/v1".',
+        }),
+        auth: Type.Optional(Type.Object({
+          scheme: Type.Union([
+            Type.Literal('bearer'),
+            Type.Literal('basic'),
+            Type.Literal('api_key_header'),
+            Type.Literal('api_key_query'),
+          ], {
+            description:
+              'How to inject the credential: "bearer" (Authorization: Bearer <v>), ' +
+              '"basic" (Authorization: Basic <v> — value is base64 user:pass), ' +
+              '"api_key_header" (X-API-Key: <v>), "api_key_query" (?api_key=<v>).',
+          }),
+          credential: Type.String({
+            description:
+              'BARE envName STRING — a reference to an entry in credentials[] above. ' +
+              'Same rule as mcpServers[].credential.',
+          }),
+        }, {
+          description:
+            'Optional. If present, BOTH scheme and credential are required.',
+        })),
+        include: Type.Optional(Type.Array(Type.String(), {
+          description:
+            'Optional minimatch globs. Matched against the bare operationId ' +
+            '(e.g. "findPetsByStatus"), NOT the catalog-prefixed name. ' +
+            'Example: ["findPets*", "getPet*"] — narrows a 20-op spec to ' +
+            'read-only endpoints.',
+        })),
+        exclude: Type.Optional(Type.Array(Type.String(), {
+          description:
+            'Optional minimatch globs. Applied AFTER include. Use for ' +
+            '"mostly everything but not these few" scoping.',
+        })),
+      }), {
+        description:
+          'OpenAPI-backed REST endpoints, parallel to mcpServers. Use when the ' +
+          'vendor publishes an OpenAPI 3.0 spec but no MCP server. Do NOT put ' +
+          'the spec URL in `source:` and leave openapi[] empty — source is ' +
+          'informational only; openapi[] is what drives catalog population. ' +
+          'A skill with only source:<spec url> set will enable with zero tools.',
+      })),
       domains: Type.Optional(Type.Array(Type.String(), {
         description:
           'Additional hostnames the skill needs the proxy to allow. Plain hostnames only — ' +

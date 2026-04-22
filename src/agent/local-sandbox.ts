@@ -247,6 +247,7 @@ export function createLocalSandbox(opts: LocalSandboxOptions) {
       source?: { url: string; version?: string };
       credentials?: Array<Record<string, unknown>>;
       mcpServers?: Array<Record<string, unknown>>;
+      openapi?: Array<Record<string, unknown>>;
       domains?: string[];
       body: string;
     }): Promise<{ written?: boolean; error?: string; path?: string; bytes?: number }> {
@@ -254,7 +255,9 @@ export function createLocalSandbox(opts: LocalSandboxOptions) {
 
       // Build frontmatter object — omit empty optional arrays so the YAML
       // matches what the agent would hand-write and the reconciler sees a
-      // clean shape.
+      // clean shape. Canonical key order matches serializeFrontmatter in
+      // server-admin-skills-helpers.ts so agent-authored and
+      // admin-rewritten files produce identical YAML.
       const frontmatter: Record<string, unknown> = { name: args.name };
       if (args.description) frontmatter.description = args.description;
       if (args.source !== undefined) frontmatter.source = args.source;
@@ -263,6 +266,9 @@ export function createLocalSandbox(opts: LocalSandboxOptions) {
       }
       if (Array.isArray(args.mcpServers) && args.mcpServers.length > 0) {
         frontmatter.mcpServers = args.mcpServers;
+      }
+      if (Array.isArray(args.openapi) && args.openapi.length > 0) {
+        frontmatter.openapi = args.openapi;
       }
       if (Array.isArray(args.domains) && args.domains.length > 0) {
         frontmatter.domains = args.domains;

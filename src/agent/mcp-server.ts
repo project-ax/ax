@@ -251,6 +251,16 @@ export function createIPCMcpServer(client: IIPCClient, opts?: MCPServerOptions):
           credential: z.string().max(64).optional(),
           transport: z.enum(['http', 'sse']).optional(),
         })).max(32).optional(),
+        openapi: z.array(z.object({
+          spec: z.string().max(2048),
+          baseUrl: z.string().max(2048),
+          auth: z.object({
+            scheme: z.enum(['bearer', 'basic', 'api_key_header', 'api_key_query']),
+            credential: z.string().max(64),
+          }).optional(),
+          include: z.array(z.string().max(200)).max(64).optional(),
+          exclude: z.array(z.string().max(200)).max(64).optional(),
+        })).max(32).optional(),
         domains: z.array(z.string().max(253)).max(64).optional(),
         body: z.string().max(100_000),
       },

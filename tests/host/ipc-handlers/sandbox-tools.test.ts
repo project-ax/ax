@@ -389,6 +389,51 @@ mcpServers:
       );
     });
 
+    test('preserves openapi[] block when writing an OpenAPI-backed skill', async () => {
+      // REGRESSION: a prior version of this handler didn't thread req.openapi
+      // into the built frontmatter, which meant `skill_write` silently
+      // dropped the operational openapi block and the catalog-populate loop
+      // had nothing to iterate. Paired with the approval-flow fix in
+      // server-admin-skills-helpers.ts.
+      const handlers = createSandboxToolHandlers(providers, { workspaceMap });
+      const result = await handlers.skill_write({
+        name: 'petstore',
+        description: 'Query the public Swagger petstore demo API.',
+        openapi: [{
+          spec: 'https://petstore3.swagger.io/api/v3/openapi.json',
+          baseUrl: 'https://petstore3.swagger.io/api/v3',
+          include: ['findPets*', 'getPet*'],
+        }],
+        domains: ['petstore3.swagger.io'],
+        body: '# Petstore\n\nUsage notes.',
+      }, ctx);
+      expect(result.written).toBe(true);
+      const onDisk = readFileSync(join(workspace, '.ax/skills/petstore/SKILL.md'), 'utf-8');
+      expect(onDisk).toContain('openapi:');
+      expect(onDisk).toContain('spec: https://petstore3.swagger.io/api/v3/openapi.json');
+      expect(onDisk).toContain('baseUrl: https://petstore3.swagger.io/api/v3');
+      expect(onDisk).toContain('- findPets*');
+    });
+
+    test('preserves openapi[].auth block with all four schemes', async () => {
+      const handlers = createSandboxToolHandlers(providers, { workspaceMap });
+      const result = await handlers.skill_write({
+        name: 'authed-api',
+        description: 'Example auth-required API.',
+        credentials: [{ envName: 'EXAMPLE_TOKEN', authType: 'api_key' }],
+        openapi: [{
+          spec: 'https://example.com/openapi.json',
+          baseUrl: 'https://example.com/v1',
+          auth: { scheme: 'bearer', credential: 'EXAMPLE_TOKEN' },
+        }],
+        body: '# Example',
+      }, ctx);
+      expect(result.written).toBe(true);
+      const onDisk = readFileSync(join(workspace, '.ax/skills/authed-api/SKILL.md'), 'utf-8');
+      expect(onDisk).toContain('scheme: bearer');
+      expect(onDisk).toContain('credential: EXAMPLE_TOKEN');
+    });
+
     test('audits validation failures', async () => {
       const handlers = createSandboxToolHandlers(providers, { workspaceMap });
       await handlers.skill_write({

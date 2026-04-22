@@ -396,6 +396,10 @@ export function createSandboxToolHandlers(providers: ProviderRegistry, opts: San
       // minimal — omit fields the caller didn't supply so the round-trip
       // parse matches what the catalog reconciler will see. Default values
       // live in the Zod schema, not here, so we don't accidentally diverge.
+      // Canonical key order: name → description → source → credentials →
+      // mcpServers → openapi → domains. Matches serializeFrontmatter in
+      // server-admin-skills-helpers.ts so agent-authored and admin-rewritten
+      // files produce identical YAML.
       const frontmatter: Record<string, unknown> = { name };
       if (typeof req.description === 'string') frontmatter.description = req.description;
       if (req.source !== undefined) frontmatter.source = req.source;
@@ -404,6 +408,9 @@ export function createSandboxToolHandlers(providers: ProviderRegistry, opts: San
       }
       if (Array.isArray(req.mcpServers) && req.mcpServers.length > 0) {
         frontmatter.mcpServers = req.mcpServers;
+      }
+      if (Array.isArray(req.openapi) && req.openapi.length > 0) {
+        frontmatter.openapi = req.openapi;
       }
       if (Array.isArray(req.domains) && req.domains.length > 0) {
         frontmatter.domains = req.domains;
