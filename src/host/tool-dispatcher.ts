@@ -1,9 +1,9 @@
 /**
  * Unified tool dispatch bottleneck for all external tools (MCP + OpenAPI).
  *
- * Both tool_batch IPC (from toolgen scripts) and tool-router.ts (from
- * pi-agent tool_use) call into this single dispatcher. Handles server
- * resolution, header injection, size limits, taint tagging, and errors.
+ * `tool-router.ts` (from pi-agent tool_use) calls into this single dispatcher.
+ * Handles server resolution, header injection, size limits, taint tagging,
+ * and errors.
  */
 
 import type { TaintTag } from '../types.js';
@@ -42,13 +42,24 @@ export interface ToolDispatcherOptions {
     args: Record<string, unknown>,
     opts?: { headers?: Record<string, string> },
   ) => Promise<{ content: string | Record<string, unknown>; isError?: boolean }>;
-  /** Get server metadata for credential resolution. */
+  /** Get server metadata for credential resolution. `skillName` is
+   *  threaded through so `authForServer` can filter `skill_credentials`
+   *  rows by `(skillName, envName)`. */
   getServerMeta?: (agentId: string, serverUrl: string) =>
-    { name?: string; headers?: Record<string, string> } | undefined;
+    { name?: string; headers?: Record<string, string>; skillName?: string } | undefined;
   /** Resolve credential placeholders in headers. */
   resolveHeaders?: (headers: Record<string, string>) => Promise<Record<string, string>>;
-  /** Auto-discover auth for servers without explicit headers. */
-  authForServer?: (server: { name: string; url: string }) => Promise<Record<string, string> | undefined>;
+  /** Auto-discover auth for servers without explicit headers. Receives the
+   *  per-request agentId + userId and (when known) the declaring skill
+   *  so the implementation can filter `skill_credentials` rows by
+   *  `(skillName, envName)` — prevents cross-skill credential bleed. */
+  authForServer?: (server: {
+    name: string;
+    url: string;
+    agentId: string;
+    userId: string;
+    skillName?: string;
+  }) => Promise<Record<string, string> | undefined>;
 }
 
 export class ToolDispatcher {
@@ -74,7 +85,13 @@ export class ToolDispatcher {
             : meta.headers;
         }
         if (!headers && this.opts.authForServer && meta?.name) {
-          headers = await this.opts.authForServer({ name: meta.name, url: serverUrl });
+          headers = await this.opts.authForServer({
+            name: meta.name,
+            url: serverUrl,
+            agentId: ctx.agentId,
+            userId: ctx.userId,
+            ...(meta.skillName ? { skillName: meta.skillName } : {}),
+          });
         }
       }
     } catch {
@@ -112,70 +129,4 @@ export class ToolDispatcher {
     }
   }
 
-  /** Batch dispatch with dependency resolution (for tool_batch IPC). */
-  async dispatchBatch(
-    calls: DispatchCall[],
-    ctx: DispatchContext,
-  ): Promise<unknown[]> {
-    const results: unknown[] = [];
-    for (const call of calls) {
-      try {
-        const resolved = this.resolveRefs(call.args, results);
-        const result = await this.dispatch({ tool: call.tool, args: resolved }, ctx);
-        if (result.isError) {
-          results.push({ ok: false, error: result.content });
-        } else {
-          try { results.push(JSON.parse(result.content)); }
-          catch { results.push(result.content); }
-        }
-      } catch (err) {
-        results.push({ ok: false, error: (err as Error).message });
-      }
-    }
-    return results;
-  }
-
-  /** Resolve __batchRef markers in args using prior results. */
-  private resolveRefs(value: unknown, results: unknown[]): Record<string, unknown> {
-    return this.deepResolve(value, results) as Record<string, unknown>;
-  }
-
-  private deepResolve(value: unknown, results: unknown[]): unknown {
-    if (value && typeof value === 'object' && '__batchRef' in (value as Record<string, unknown>)) {
-      const ref = value as { __batchRef: number; path?: string };
-      if (ref.__batchRef < 0 || ref.__batchRef >= results.length) {
-        throw new Error(`Batch ref index ${ref.__batchRef} out of range (${results.length} results available)`);
-      }
-      const resolved = results[ref.__batchRef];
-      if (resolved && typeof resolved === 'object' && 'ok' in (resolved as Record<string, unknown>) && !(resolved as Record<string, unknown>).ok) {
-        throw new Error(`Batch ref index ${ref.__batchRef} references a failed call`);
-      }
-      return ref.path ? this.evaluatePath(resolved, ref.path) : resolved;
-    }
-    if (Array.isArray(value)) return value.map(v => this.deepResolve(v, results));
-    if (value && typeof value === 'object') {
-      const out: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(value)) {
-        out[k] = this.deepResolve(v, results);
-      }
-      return out;
-    }
-    return value;
-  }
-
-  private evaluatePath(value: unknown, path: string): unknown {
-    if (!path) return value;
-    const segments = path.match(/\.([^.[]+)|\[(\d+)\]/g);
-    if (!segments) return value;
-    let current: any = value;
-    for (const seg of segments) {
-      if (current == null) return undefined;
-      if (seg.startsWith('[')) {
-        current = (current as unknown[])[parseInt(seg.slice(1, -1))];
-      } else {
-        current = (current as Record<string, unknown>)[seg.slice(1)];
-      }
-    }
-    return current;
-  }
 }

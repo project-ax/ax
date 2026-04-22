@@ -113,13 +113,9 @@ Uses `src/utils/content-serialization.ts`:
 - **`serializeContent(content)`** — Strings stored as-is, ContentBlock[] JSON-stringified. Strips `image_data` blocks before persisting.
 - **`deserializeContent(raw)`** — Detects JSON arrays by checking if string starts with `[`.
 
-## Tool Stubs Cache (`tool-stubs.ts`)
+## Tool Stubs (`tool-stubs.ts`)
 
-Caches generated TypeScript tool stubs for Cap'n Web batching:
-- **`computeSchemaHash(tools)`** — SHA-256 hash of canonical tool JSON
-- **`getCachedOrNull(documents, agentId, hash)`** — Retrieves cached stubs only if hash matches
-- **`putToolStubs(documents, agentId, hash, content)`** — Stores cache with schema hash and timestamp
-- Cache invalidated when tools discovered from MCP servers change (hash mismatch)
+Vestigial `ToolStubFile` shape (`{ path, content }`) — left over from the deleted codegen pipeline (Phase 6 of tool-dispatch-unification). No live consumers. Safe to delete when convenient.
 
 ## Gotchas
 
@@ -137,7 +133,7 @@ Caches generated TypeScript tool stubs for Cap'n Web batching:
 - `src/providers/storage/database.ts` — Database-backed implementation (SQLite + PostgreSQL via Kysely)
 - `src/providers/storage/migrations.ts` — Database schema migrations
 - `src/providers/storage/migrate-to-db.ts` — One-time filesystem-to-DocumentStore migration utility
-- `src/providers/storage/tool-stubs.ts` — Tool stub caching with schema hash invalidation
+- `src/providers/storage/tool-stubs.ts` — Vestigial `ToolStubFile` shape (no live consumers; codegen pipeline was deleted in Phase 6 of tool-dispatch-unification)
 - `src/utils/content-serialization.ts` — Content serialization/deserialization helpers
 - `src/utils/migrator.ts` — Shared DB-agnostic migration runner
 - `tests/providers/storage/database.test.ts`

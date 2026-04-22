@@ -4,6 +4,7 @@ Security patterns: import resolution, static allowlist design, and safe path han
 
 ## Entries
 
+- Credential resolvers MUST filter by (skillName, envName, userId) — never fall back to `matching[0]` [entries.md](entries.md)
 - Always pin GCM auth tag length to 16 — Node accepts 4-16 byte tags by default [entries.md](entries.md)
 - Validate shapes at schema boundaries, not downstream consumers [entries.md](entries.md)
 - timingSafeEqual throws on unequal-length buffers — gate with a regex first [entries.md](entries.md)

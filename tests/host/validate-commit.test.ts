@@ -128,6 +128,128 @@ diff --git a/.ax/hacks/evil.sh b/.ax/hacks/evil.sh
   });
 });
 
+describe('validateCommit — SKILL.md frontmatter validation', () => {
+  // Regression: skills with broken frontmatter were accepted at commit time
+  // and only rejected later when the loader tried to parse them, leaving
+  // the agent thinking everything was fine while the skill silently landed
+  // in "invalid" state on the admin Skills tab. The only signal was a
+  // user noticing the missing approval. Fix: parse frontmatter here, return
+  // the Zod errors as part of the rejection reason so the LLM can fix and
+  // retry in the same turn.
+
+  const validSkill = `---
+name: linear
+description: Linear issue tracking
+credentials:
+  - envName: LINEAR_API_KEY
+    authType: api_key
+mcpServers:
+  - name: linear
+    url: https://mcp.linear.app
+    credential: LINEAR_API_KEY
+---
+
+# Linear
+
+Use this skill to manage Linear issues.`;
+
+  it('passes a SKILL.md with valid frontmatter', () => {
+    const result = validateCommit('', [
+      { path: '.ax/skills/linear/SKILL.md', content: validSkill },
+    ]);
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('rejects SKILL.md with mcpServers[].credential as nested object', () => {
+    // Exact bug from the field report: agent wrote
+    //   credential: { envName: ..., authType: ..., scope: ... }
+    // instead of a string reference.
+    const badSkill = `---
+name: linear
+description: Linear issues
+mcpServers:
+  - name: linear
+    url: https://mcp.linear.app
+    credential:
+      envName: LINEAR_API_KEY
+      authType: api_key
+      scope: read
+---
+
+# Linear`;
+    const result = validateCommit('', [
+      { path: '.ax/skills/linear/SKILL.md', content: badSkill },
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/mcpServers\[\]\.credential must be a string envName/);
+  });
+
+  it('rejects SKILL.md with invalid credentials.authType', () => {
+    const badSkill = `---
+name: linear
+description: Linear issues
+credentials:
+  - envName: LINEAR_API_KEY
+    authType: bearer_token
+---
+
+# Linear`;
+    const result = validateCommit('', [
+      { path: '.ax/skills/linear/SKILL.md', content: badSkill },
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/authType/);
+  });
+
+  it('rejects SKILL.md with missing required frontmatter fields', () => {
+    const badSkill = `---
+description: Missing name
+---
+
+# Body`;
+    const result = validateCommit('', [
+      { path: '.ax/skills/linear/SKILL.md', content: badSkill },
+    ]);
+    expect(result.ok).toBe(false);
+  });
+
+  it('rejects SKILL.md with unterminated frontmatter', () => {
+    const badSkill = `---
+name: linear
+description: Missing closing delimiter`;
+    const result = validateCommit('', [
+      { path: '.ax/skills/linear/SKILL.md', content: badSkill },
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/frontmatter/);
+  });
+
+  it('includes the skill path in the rejection reason', () => {
+    const badSkill = `---
+description: Missing name
+---
+`;
+    const result = validateCommit('', [
+      { path: '.ax/skills/my-broken-one/SKILL.md', content: badSkill },
+    ]);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/\.ax\/skills\/my-broken-one\/SKILL\.md/);
+  });
+
+  it('ignores files outside .ax/skills/*/SKILL.md (no spurious parse)', () => {
+    // A file named SKILL.md under policy/ should not be parsed as a skill.
+    const result = validateCommit('', [
+      { path: '.ax/policy/SKILL.md', content: 'not yaml at all' },
+    ]);
+    expect(result).toEqual({ ok: true });
+  });
+
+  it('backward compat: still works when files arg is absent', () => {
+    const result = validateCommit('');
+    expect(result).toEqual({ ok: true });
+  });
+});
+
 describe('hostGitCommit integration', () => {
   it('validateCommit is used by hostGitCommit to gate .ax/ changes', () => {
     // The integration is verified by:

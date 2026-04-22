@@ -206,6 +206,18 @@ export const MOCK_MEMORY = [
   { id: 'mem-1', scope: 'general', content: 'User prefers concise answers', tags: ['preference'], createdAt: '2026-03-06T10:00:00Z' },
 ];
 
+export const MOCK_AGENT_SKILLS = {
+  skills: [
+    { name: 'skill-creator', kind: 'enabled' as const, description: 'Creates new skills from user intent' },
+    {
+      name: 'linear',
+      kind: 'pending' as const,
+      description: 'Query Linear issues for the team',
+      pendingReasons: ['missing credential LINEAR_API_KEY (user)', 'domain not approved: mcp.linear.app'],
+    },
+  ],
+};
+
 /** Set up all standard API mocks for an authenticated dashboard session. */
 export async function mockAllAPIs(page: Page) {
   await mockSetupStatus(page, true);
@@ -217,7 +229,6 @@ export async function mockAllAPIs(page: Page) {
   await mockSessions(page);
   await mockEvents(page);
   await mockSkillsSetup(page);
-  await mockCredentialRequests(page);
 }
 
 export async function mockSetupStatus(page: Page, configured: boolean) {
@@ -300,6 +311,19 @@ export async function mockAgentTabs(page: Page) {
       body: JSON.stringify(MOCK_MEMORY),
     }),
   );
+
+  // Mock per-agent skills endpoint.
+  await page.route('**/admin/api/agents/*/skills', (route) => {
+    const url = new URL(route.request().url());
+    if (!/^\/admin\/api\/agents\/[^/]+\/skills$/.test(url.pathname)) {
+      return route.fallback();
+    }
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(MOCK_AGENT_SKILLS),
+    });
+  });
 }
 
 export async function mockAudit(page: Page, data = MOCK_AUDIT) {
@@ -372,21 +396,40 @@ export const MOCK_SKILL_SETUP = {
         {
           skillName: 'linear-tracker',
           description: 'Read and update Linear issues.',
-          missingCredentials: [
-            {
-              envName: 'LINEAR_TOKEN',
-              authType: 'api_key',
-              scope: 'user',
-            },
+          credentials: [
+            { envName: 'LINEAR_TOKEN', authType: 'api_key', scope: 'user' },
           ],
+          missingCredentials: [
+            { envName: 'LINEAR_TOKEN', authType: 'api_key', scope: 'user' },
+          ],
+          domains: [{ domain: 'api.linear.app', approved: false }],
           unapprovedDomains: ['api.linear.app'],
           mcpServers: [
-            { name: 'linear-mcp', url: 'https://mcp.linear.app/sse' },
+            {
+              name: 'linear-mcp',
+              url: 'https://mcp.linear.app/sse',
+              transport: 'sse',
+              credential: 'LINEAR_TOKEN',
+            },
           ],
         },
         {
           skillName: 'gcal-helper',
           description: 'Schedule things on Google Calendar.',
+          credentials: [
+            {
+              envName: 'GOOGLE_OAUTH',
+              authType: 'oauth',
+              scope: 'user',
+              oauth: {
+                provider: 'google',
+                clientId: 'example-client-id',
+                authorizationUrl: 'https://accounts.google.com/o/oauth2/auth',
+                tokenUrl: 'https://oauth2.googleapis.com/token',
+                scopes: ['https://www.googleapis.com/auth/calendar'],
+              },
+            },
+          ],
           missingCredentials: [
             {
               envName: 'GOOGLE_OAUTH',
@@ -401,22 +444,11 @@ export const MOCK_SKILL_SETUP = {
               },
             },
           ],
+          domains: [],
           unapprovedDomains: [],
           mcpServers: [],
         },
       ],
-    },
-  ],
-};
-
-export const MOCK_CREDENTIAL_REQUESTS = {
-  requests: [
-    {
-      sessionId: 'sess-credreq-1111aaaa',
-      envName: 'STRIPE_API_KEY',
-      agentName: 'billing-bot',
-      userId: 'user-42',
-      createdAt: 1_710_000_000_000,
     },
   ],
 };
@@ -450,6 +482,20 @@ export const MOCK_SKILL_SETUP_WITH_OAUTH = {
         {
           skillName: 'linear-oauth',
           description: 'Linear via OAuth',
+          credentials: [
+            {
+              envName: 'LINEAR_TOKEN',
+              authType: 'oauth',
+              scope: 'user',
+              oauth: {
+                provider: 'linear',
+                clientId: 'frontmatter-cid',
+                authorizationUrl: 'https://linear.app/oauth/authorize',
+                tokenUrl: 'https://api.linear.app/oauth/token',
+                scopes: ['read', 'write'],
+              },
+            },
+          ],
           missingCredentials: [
             {
               envName: 'LINEAR_TOKEN',
@@ -464,8 +510,16 @@ export const MOCK_SKILL_SETUP_WITH_OAUTH = {
               },
             },
           ],
+          domains: [{ domain: 'api.linear.app', approved: false }],
           unapprovedDomains: ['api.linear.app'],
-          mcpServers: [{ name: 'linear', url: 'https://mcp.linear.app' }],
+          mcpServers: [
+            {
+              name: 'linear',
+              url: 'https://mcp.linear.app',
+              transport: 'http',
+              credential: 'LINEAR_TOKEN',
+            },
+          ],
         },
       ],
     },
@@ -491,19 +545,6 @@ export async function mockSkillsSetupWithOAuth(
       body: JSON.stringify(data),
     });
   });
-}
-
-export async function mockCredentialRequests(
-  page: Page,
-  data: typeof MOCK_CREDENTIAL_REQUESTS = MOCK_CREDENTIAL_REQUESTS,
-) {
-  await page.route('**/admin/api/credentials/requests', (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(data),
-    }),
-  );
 }
 
 /** Navigate to the dashboard with a pre-set auth token. */

@@ -275,4 +275,155 @@ describe('regression test sequence', () => {
     expect(res.status).toBe(200);
     expect(res.content.length).toBeGreaterThan(0);
   }, 180_000);
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 17. INDIRECT DISPATCH — call_tool routes through host catalog + IPC
+  // ──────────────────────────────────────────────────────────────────────
+  //
+  // Smoke test for Phase 3 of the tool-dispatch-unification plan
+  // (Task 3.6). Proves the unified indirect-dispatch loop wires end to
+  // end: the agent emits a `call_tool` tool call, the stub forwards it
+  // over IPC, the host's `call_tool` handler resolves the per-turn
+  // catalog, and the structured result makes it back to the agent.
+  //
+  // The e2e catalog is empty (no skills installed with MCP servers in
+  // this environment), so `call_tool` with `mcp_linear_list_issues`
+  // returns `{error, kind: 'unknown_tool'}`. That structured response
+  // travelling the full path IS the evidence. Real MCP dispatch is
+  // covered by unit tests and by Task 4.4 once projection lands.
+  test('17. indirect dispatch: call_tool round-trips through IPC', async () => {
+    const sessionId = `${SESSION_PREFIX}:dispatch`;
+    // The phrase "indirect dispatch smoke" is the only thing the
+    // TOOL_DISPATCH_TURNS pattern keys on — deliberately distinct from
+    // every other scripted turn's regex so the test stays deterministic
+    // even when run in isolation (e.g. `vitest -t "indirect dispatch"`).
+    const res = await client.sendMessage(
+      'Please exercise the indirect dispatch smoke path.',
+      { sessionId, user: 'testuser', timeoutMs: 120_000 },
+    );
+
+    expect(res.status).toBe(200);
+    // The mock OpenRouter's tool-result follow-up path produces the final
+    // user-facing summary from the IPC response; any non-empty content
+    // proves the round-trip completed without the agent crashing or the
+    // IPC handler throwing across the boundary.
+    expect(res.content.length).toBeGreaterThan(0);
+  }, 180_000);
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 18. LINEAR 3-TURN FLOW — catalog → call_tool → MCP → chained calls
+  // ──────────────────────────────────────────────────────────────────────
+  //
+  // Task 4.4 final: prove the unified indirect-dispatch pipeline handles a
+  // realistic multi-step tool chain end-to-end.
+  //
+  //   1. User asks "What issues are in Product's current cycle?"
+  //   2. The `linear_mcp` fixture skill's mcpServers frontmatter populates
+  //      the per-turn catalog with 3 tools from the mock MCP server.
+  //   3. LLM emits call_tool(mcp_linear_mcp_get_team) — scripted.
+  //   4. Host dispatches via MCP → mock MCP returns {team_id:'team_product'}.
+  //   5. LLM emits call_tool(mcp_linear_mcp_list_cycles, {team_id}) —
+  //      scripted via matchToolResult:/team_product/.
+  //   6. Mock MCP returns {cycle_id:'cycle_99', ...}.
+  //   7. LLM emits call_tool(mcp_linear_mcp_list_issues, {cycle_id}) —
+  //      scripted via matchToolResult:/cycle_99/.
+  //   8. Mock MCP returns {issues:[ISS-1, ISS-2]}.
+  //   9. LLM emits final content summary naming ISS-1.
+  //
+  // Evidence: the mock MCP server tracks per-method hit counters; we
+  // assert each of get_team/list_cycles/list_issues was hit exactly once.
+  // That proves zero retries AND all three dispatches actually landed on
+  // the server (not short-circuited by the mock or a catalog miss).
+  test('18. Linear 3-turn cycle flow through indirect dispatch', async () => {
+    // Reset MCP stats so prior tests don't contaminate the counters.
+    const mockPort = process.env.MOCK_SERVER_PORT;
+    if (!mockPort) {
+      throw new Error('MOCK_SERVER_PORT env var not set — global setup skipped?');
+    }
+    const mockBase = `http://127.0.0.1:${mockPort}`;
+    await fetch(`${mockBase}/mcp/_reset`, { method: 'POST' });
+
+    const sessionId = `${SESSION_PREFIX}:linear-flow`;
+    const res = await client.sendMessage(
+      "What issues are in Product's current cycle?",
+      { sessionId, user: 'testuser', timeoutMs: 180_000 },
+    );
+
+    expect(res.status).toBe(200);
+    // Final answer must reference an issue surfaced by list_issues —
+    // proves the full chain executed and the final summary turn fired.
+    expect(res.content).toMatch(/ISS-1|ISS-2|Ship Task 4\.4|Sync docs/i);
+
+    // Verify each MCP method was hit exactly once — the core evidence that
+    // the 3-call chain actually landed on the server with no retries.
+    const stats = await fetch(`${mockBase}/mcp/_stats`).then(r => r.json()) as {
+      get_team: number;
+      list_cycles: number;
+      list_issues: number;
+    };
+    expect(stats.get_team).toBe(1);
+    expect(stats.list_cycles).toBe(1);
+    expect(stats.list_issues).toBe(1);
+  }, 240_000);
+
+  // ──────────────────────────────────────────────────────────────────────
+  // 19. PETSTORE 2-CALL FLOW — catalog → call_tool → OpenAPI → chained calls
+  // ──────────────────────────────────────────────────────────────────────
+  //
+  // Task 7.5: prove the unified indirect-dispatch pipeline handles an
+  // OpenAPI-sourced chain end-to-end (Phase 7 parallel to Task 4.4's
+  // Linear/MCP chain).
+  //
+  //   1. User asks: "Create a pet named Rex and tell me its id."
+  //   2. The `petstore` fixture skill's `openapi[]` frontmatter populates
+  //      the per-turn catalog with 4 tools fetched from the mock spec at
+  //      https://mock-target.test/openapi/petstore.json (url_rewrites
+  //      redirect to the e2e mock server on a dynamic port).
+  //   3. LLM emits call_tool(api_petstore_create_pet, {body:{name:'Rex'}})
+  //      — scripted. Host dispatches via OpenAPI → mock returns
+  //      {id:42, name:'Rex'} (deterministic: name='Rex' → id=42).
+  //   4. LLM emits call_tool(api_petstore_get_pet_by_id, {id:42}) —
+  //      scripted via matchToolResult pinning both id=42 and name="Rex".
+  //   5. Mock returns {id:42, name:'Rex', _readback:true}.
+  //   6. LLM emits final content summary naming the id.
+  //
+  // Evidence: the mock tracks per-operation hit counters; we assert
+  // createPet=1 + getPetByID=1 + listPets=0 + deletePet=0. That proves
+  // (a) the OpenAPI adapter populated the catalog, (b) both dispatches
+  // actually landed on the server with the right path/method/body, and
+  // (c) nothing extraneous fired (no retries, no accidental listPets).
+  test('19. Petstore 2-call flow through OpenAPI indirect dispatch', async () => {
+    const mockPort = process.env.MOCK_SERVER_PORT;
+    if (!mockPort) {
+      throw new Error('MOCK_SERVER_PORT env var not set — global setup skipped?');
+    }
+    const mockBase = `http://127.0.0.1:${mockPort}`;
+    await fetch(`${mockBase}/petstore/_reset`, { method: 'POST' });
+
+    const sessionId = `${SESSION_PREFIX}:petstore-flow`;
+    const res = await client.sendMessage(
+      'Create a pet named Rex and tell me its id.',
+      { sessionId, user: 'testuser', timeoutMs: 180_000 },
+    );
+
+    expect(res.status).toBe(200);
+    // Final answer must reference both "Rex" and "42" — proves the full
+    // chain executed and Turn 3's summary fired from the read-back.
+    expect(res.content).toMatch(/rex.*42|42.*rex/i);
+
+    // Verify each OpenAPI op was hit the expected number of times — the
+    // core evidence that the 2-call chain actually landed on the server
+    // with no retries and no accidental dispatches.
+    const stats = await fetch(`${mockBase}/petstore/_stats`).then((r) => r.json()) as {
+      listPets: number;
+      createPet: number;
+      getPetById: number;
+      deletePet: number;
+    };
+    expect(stats.createPet).toBe(1);
+    expect(stats.getPetById).toBe(1);
+    expect(stats.listPets).toBe(0);
+    expect(stats.deletePet).toBe(0);
+  }, 240_000);
+
 });

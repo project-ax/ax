@@ -79,7 +79,18 @@ export interface CompletionHandlerOpts {
     messages: { role: string; content: string | ContentBlock[] }[],
     sessionId: string,
     userId?: string,
-  ) => Promise<{ responseContent: string; finishReason: 'stop' | 'content_filter'; contentBlocks?: ContentBlock[] }>;
+  ) => Promise<{
+    responseContent: string;
+    finishReason: 'stop' | 'content_filter';
+    contentBlocks?: ContentBlock[];
+    /** Per-turn diagnostics collected during `processCompletion` (Task B2 of
+     *  the surface-skill-failures pipeline). Forwarded to the client as
+     *  `event: diagnostic` SSE frames in streaming mode, or attached as a
+     *  top-level `diagnostics` field on the JSON body in non-streaming mode.
+     *  Absent array (legacy callers) behaves identically to an empty array —
+     *  a clean turn emits zero diagnostic frames. */
+    diagnostics?: readonly import('./diagnostics.js').Diagnostic[];
+  }>;
   /** Optional pre-flight check (e.g. bootstrap gate). Return error string or undefined to proceed. */
   preFlightCheck?: (sessionId: string, userId: string | undefined) => string | undefined | Promise<string | undefined>;
 }
@@ -225,12 +236,6 @@ export async function handleCompletions(
             authorizeUrl: event.data.authorizeUrl as string,
             requestId,
           });
-        } else if (event.type === 'credential.required' && event.data.envName) {
-          sendSSENamedEvent(res, 'credential_required', {
-            envName: event.data.envName as string,
-            sessionId: event.data.sessionId as string,
-            requestId,
-          });
         } else if (
           event.type === 'status' &&
           typeof event.data.operation === 'string' &&
@@ -284,6 +289,23 @@ export async function handleCompletions(
         id: requestId, object: 'chat.completion.chunk', created, model: requestModel,
         choices: [{ index: 0, delta: {}, finish_reason: streamFinishReason }],
       });
+
+      // Emit turn-level diagnostics AFTER the finish-reason chunk and BEFORE
+      // [DONE]. Order matters: SSE clients (including the chat UI's
+      // `ax-chat-transport.ts`) treat everything before the finish-reason
+      // chunk as streaming content, so diagnostics must land in the
+      // post-finish window. An empty `diagnostics` array (clean turn or
+      // legacy path) produces zero frames — the UI banner never fires on
+      // happy paths. Typed as `Record<string, unknown>` for the helper;
+      // the chat transport parses it as `Diagnostic` from the shared type.
+      if (result.diagnostics && result.diagnostics.length > 0) {
+        for (const diagnostic of result.diagnostics) {
+          try {
+            sendSSENamedEvent(res, 'diagnostic', diagnostic as unknown as Record<string, unknown>);
+          } catch { /* client gone, skip */ }
+        }
+      }
+
       res.write('data: [DONE]\n\n');
       res.end();
     } catch (err) {
@@ -305,6 +327,15 @@ export async function handleCompletions(
     try {
       const result = await opts.runCompletion(content, requestId, chatReq.messages, sessionId, userId);
 
+      // Always emit `diagnostics` as an array — the chat UI is the
+      // primary non-streaming consumer and uniformity beats wire-shape
+      // bit-compat with pre-B2. Two shapes (`undefined` vs `[]`) forces
+      // every consumer to remember an undefined-guard; one shape is a
+      // guaranteed array. Legacy callers that don't populate the field
+      // see `diagnostics: []` which is a no-op for their render logic.
+      // Snapshot-test churn for external REST callers is a one-time
+      // mechanical cost paid once; a silent undefined-access bug in
+      // the UI on a clean turn is a recurring reliability cost.
       const response = {
         id: requestId, object: 'chat.completion', created, model: requestModel,
         choices: [{
@@ -313,6 +344,7 @@ export async function handleCompletions(
           finish_reason: result.finishReason,
         }],
         usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        diagnostics: result.diagnostics ?? [],
       };
 
       const responseBody = JSON.stringify(response);
@@ -505,11 +537,18 @@ export interface RequestHandlerOpts {
   adminHandler: AdminHandler | null;
 
   // Admin-initiated OAuth flow (phase 6) — used by /v1/oauth/callback/* to
-  // resolve admin-provenance states (set.skillStateStore dashboard) before
-  // falling through to the agent-initiated path (oauth-skills.ts).
+  // resolve admin-provenance states before falling through to the
+  // agent-initiated path (oauth-skills.ts).
   adminOAuthFlow?: import('./admin-oauth-flow.js').AdminOAuthFlow;
-  /** Paired with adminOAuthFlow — fire-and-forget after tokens are written. */
-  reconcileAgent?: (agentId: string, ref: string) => Promise<{ skills: number; events: number }>;
+  /** Tuple-keyed skill credential store. Required whenever `adminOAuthFlow`
+   *  is wired — tokens from OAuth callbacks land here. */
+  skillCredStore?: import('./skills/skill-cred-store.js').SkillCredStore;
+  /** Paired with adminOAuthFlow — the OAuth callback invalidates the
+   *  agent's snapshot cache after tokens land so the next turn reads
+   *  fresh skill state. */
+  snapshotCache?: import('./skills/snapshot-cache.js').SnapshotCache<
+    import('./skills/types.js').SkillSnapshotEntry[]
+  >;
 
   // Drain state — caller manages the boolean; handler reads it
   isDraining: () => boolean;
@@ -530,7 +569,7 @@ export function createRequestHandler(opts: RequestHandlerOpts): (req: IncomingMe
   const {
     modelId, eventBus, providers, fileStore, gcsFileStorage,
     completionOpts, webhookPrefix, webhookHandler, adminHandler,
-    adminOAuthFlow, reconcileAgent,
+    adminOAuthFlow, skillCredStore, snapshotCache,
     isDraining, trackRequestStart, trackRequestEnd, extraRoutes,
     authProviders,
   } = opts;
@@ -669,38 +708,6 @@ export function createRequestHandler(opts: RequestHandlerOpts): (req: IncomingMe
       return;
     }
 
-    // Credential provide
-    if (url === '/v1/credentials/provide' && req.method === 'POST') {
-      try {
-        const body = JSON.parse(await readBody(req));
-        const { envName, value, sessionId: credSessionId } = body;
-        if (typeof envName !== 'string' || !envName || typeof value !== 'string') {
-          sendError(res, 400, 'Missing required fields: envName, value');
-          return;
-        }
-        const { credentialScope, getSessionCredentialContext } = await import('./credential-scopes.js');
-        // Resolve agentName/userId from session context (set during completion)
-        const ctx = credSessionId ? getSessionCredentialContext(credSessionId) : undefined;
-        if (ctx) {
-          // Store user-scoped if userId known
-          if (ctx.userId) {
-            await providers.credentials.set(envName, value, credentialScope(ctx.agentName, ctx.userId));
-          }
-          // Always store at agent scope
-          await providers.credentials.set(envName, value, credentialScope(ctx.agentName));
-        } else {
-          // No session context — store unscoped (backward compat)
-          await providers.credentials.set(envName, value);
-        }
-        const responseBody = JSON.stringify({ ok: true });
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(responseBody)) });
-        res.end(responseBody);
-      } catch (err) {
-        sendError(res, 400, `Invalid request: ${(err as Error).message}`);
-      }
-      return;
-    }
-
     // OAuth callback — admin-initiated flow tries first (claims the state on
     // match, success or failure), then falls through to the agent-initiated
     // path in oauth-skills.ts when no admin flow is pending for this state.
@@ -722,13 +729,13 @@ export function createRequestHandler(opts: RequestHandlerOpts): (req: IncomingMe
         // we do NOT fall through — matched:true means the state was
         // consumed, and leaking it back to the agent module would defeat
         // the single-use replay defense.
-        if (adminOAuthFlow) {
+        if (adminOAuthFlow && skillCredStore) {
           const adminResult = await adminOAuthFlow.resolveCallback({
             provider,
             code,
             state,
-            credentials: providers.credentials,
-            reconcileAgent,
+            skillCredStore,
+            snapshotCache,
             audit: providers.audit,
           });
           if (adminResult.matched) {

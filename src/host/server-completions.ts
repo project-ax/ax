@@ -19,7 +19,9 @@ import { deserializeContent } from '../utils/content-serialization.js';
 import type { ConversationStoreProvider, DocumentStore, MessageQueueStore } from '../providers/storage/types.js';
 import type { Router } from './router.js';
 import { TaintBudget, thresholdForProfile } from './taint-budget.js';
-import { type Logger, truncate } from '../logger.js';
+import { type Logger, truncate, getLogger } from '../logger.js';
+
+const logger = getLogger().child({ component: 'credential-resolution' });
 import { startAnthropicProxy } from './proxy.js';
 import { startWebProxy, type WebProxy } from './web-proxy.js';
 import { CredentialPlaceholderMap } from './credential-placeholders.js';
@@ -35,10 +37,21 @@ import type { EventBus } from './event-bus.js';
 import { maybeSummarizeHistory, type SummarizationConfig } from './history-summarizer.js';
 import { recallMemoryForMessage, type MemoryRecallConfig } from './memory-recall.js';
 import { createEmbeddingClient } from '../utils/embedding-client.js';
-import { credentialScope, setSessionCredentialContext } from './credential-scopes.js';
+import { setSessionCredentialContext } from './session-credential-context.js';
 import { generateSessionTitle } from './session-title.js';
 import type { McpConnectionManager } from '../plugins/mcp-manager.js';
 import { validateCommit, AX_DIFF_PATHSPEC } from './validate-commit.js';
+import { getAgentSkills, loadSnapshot, type GetAgentSkillsDeps } from './skills/get-agent-skills.js';
+import type { SkillState } from './skills/types.js';
+import type { SkillSummary } from '../agent/prompt/types.js';
+import { ToolCatalog } from './tool-catalog/registry.js';
+import { getOrBuildCatalog } from './tool-catalog/cache.js';
+import { populateCatalogFromSkills } from './skills/catalog-population.js';
+import { createDiagnosticCollector } from './diagnostics.js';
+import { buildTurnMcpClientFactory } from './skills/mcp-client-factory.js';
+import { makeDefaultFetchOpenApiSpec } from './skills/openapi-spec-fetcher.js';
+import type { CatalogTool } from '../types/catalog.js';
+import { catalogReaderFromTools } from './ipc-handlers/describe-tools.js';
 
 // ── Session ID placeholder rewriting ──
 // HTTP sessions use '_' as the workspace placeholder in the SessionAddress.
@@ -72,8 +85,12 @@ export interface CompletionDeps {
   eventBus?: EventBus;
   /** Maps sessionId → workspace directory path. Shared with sandbox tool IPC handlers. */
   workspaceMap?: Map<string, string>;
-  /** Tracks credential_request IPC calls per session. Consumed by post-agent credential loop. */
-  requestedCredentials?: Map<string, Set<string>>;
+  /** Maps sessionId → per-turn `CatalogReader`. Registered after the
+   *  catalog is built in `processCompletion`, unregistered in the finally
+   *  block so a crashed turn does not leak a stale catalog into the next.
+   *  Consumed by the `describe_tools` + `call_tool` IPC handlers via the
+   *  `resolveCatalog` closure wired in `server-init.ts`. */
+  catalogMap?: Map<string, import('./ipc-handlers/describe-tools.js').CatalogReader>;
   /** IPC handler function for reverse bridge connections (Apple containers). */
   ipcHandler?: (raw: string, ctx: import('./ipc-server.js').IPCContext) => Promise<string>;
   /** Extra env vars to inject into sandbox pods (per-turn IPC token, request ID). */
@@ -85,8 +102,10 @@ export interface CompletionDeps {
    *  Per-session credential maps are registered/deregistered here so the
    *  shared proxy can replace placeholders from any active session. */
   sharedCredentialRegistry?: import('./credential-placeholders.js').SharedCredentialRegistry;
-  /** Domain allowlist for proxy — populated from installed skill manifests. */
-  domainList?: import('./proxy-domain-list.js').ProxyDomainList;
+  /** Tuple-keyed skill domain approval store. Turn-time proxy allowlist is
+   *  computed from `skill_domain_approvals` joined with declared domains on
+   *  enabled skills. */
+  skillDomainStore: import('./skills/skill-domain-store.js').SkillDomainStore;
   /** Callback to start the agent_response timeout timer (k8s HTTP mode).
    *  Called after work is published so the timer doesn't include pre-processing time
    *  (scanner LLM calls, workspace provisioning, etc.). */
@@ -99,6 +118,21 @@ export interface CompletionDeps {
   provisioner?: import('./agent-provisioner.js').AgentProvisioner;
   /** When true, sandbox exits after completing this turn (cron, heartbeat, delegation). */
   singleTurn?: boolean;
+  /** Dependencies for live `getAgentSkills` computation — used to build the
+   *  per-turn skills list pushed to the sandbox via the stdin payload. */
+  agentSkillsDeps: GetAgentSkillsDeps;
+  /** Tuple-keyed skill credential store. Turn-time credential injection
+   *  reads `(agentId, skillName, envName, userId|'')` rows from it. */
+  skillCredStore: import('./skills/skill-cred-store.js').SkillCredStore;
+  /** Update the per-turn IPC token's context (k8s HTTP mode). Called after
+   *  `rewriteSessionPlaceholder` resolves `:_:` to the concrete agentId so
+   *  the `entry.ctx.sessionId` stored by `server.ts` stays in sync with the
+   *  rewritten sessionId used as the key for `catalogMap`, `workspaceMap`,
+   *  etc. Without this, agent IPC calls work (they stamp `_sessionId` on the
+   *  body, overriding the stale ctx) but script `ax.callTool` calls fail
+   *  with "unknown tool" because they fall back to `entry.ctx.sessionId`
+   *  which still holds the original placeholder form. */
+  updateTurnCtx?: (updates: { sessionId?: string; agentId?: string }) => void;
 }
 
 export interface ExtractedFile {
@@ -118,6 +152,16 @@ export interface CompletionResult {
   /** User ID that owns the workspace (for file URL construction). */
   userId?: string;
   finishReason: 'stop' | 'content_filter';
+  /** User-surfacable diagnostics collected during this turn (B1/B2 of the
+   *  "surface skill/catalog failures" pipeline). Currently populated only by
+   *  `populateCatalogFromSkills` when an MCP `listTools` or OpenAPI spec
+   *  fetch fails. `handleCompletions` forwards these to the SSE stream as
+   *  `event: diagnostic` frames (streaming) or as a top-level `diagnostics`
+   *  field on the JSON response body (non-streaming). A clean turn produces
+   *  an empty array — absent only on legacy error-return paths that predate
+   *  the collector. Defensive copy from the collector, so mutation by a
+   *  caller cannot leak back into the collector's internal buffer. */
+  diagnostics?: readonly import('./diagnostics.js').Diagnostic[];
 }
 
 /** MIME type to file extension mapping. */
@@ -138,6 +182,240 @@ export interface IdentityPayload {
   bootstrap?: string;
   userBootstrap?: string;
   heartbeat?: string;
+}
+
+/** Project a live `SkillState` onto the compact shape the agent prompt reads.
+ *  Description and pendingReasons are included only when set on the source,
+ *  matching the shape the agent's SkillsModule expects. Exported for
+ *  stdin-payload tests that need to assert on the mapped shape. */
+export function toSkillSummary(s: SkillState): SkillSummary {
+  return {
+    name: s.name,
+    description: s.description ?? '',
+    kind: s.kind,
+    ...(s.pendingReasons?.length ? { pendingReasons: s.pendingReasons } : {}),
+  };
+}
+
+/** Filter a skill snapshot to only enabled skills with parsed frontmatter.
+ *  Used at the start of every turn to gate which skills drive MCP tool-route
+ *  discovery AND the per-turn `ToolCatalog` build. Pending skills (missing
+ *  credentials, unapproved domains) and invalid skills (frontmatter parse
+ *  failure) are excluded so the agent never gets `call_tool` entries that
+ *  are guaranteed to fail at dispatch with 401/403.
+ *
+ *  Exported for unit tests; all production callers pass `enabledNames`
+ *  computed from `getAgentSkills(...)` filtered on `kind === 'enabled'`. */
+export function filterSnapshotToEnabled<T extends { ok?: boolean; name: string }>(
+  snapshot: readonly T[],
+  enabledNames: ReadonlySet<string>,
+): T[] {
+  return snapshot.filter((entry) => entry.ok !== false && enabledNames.has(entry.name));
+}
+
+/** Build a short, stable fingerprint for a credential value — the first 8
+ *  hex chars of its SHA-256. Logged alongside resolution events so ops can
+ *  tell whether two candidate rows hold the same secret or different ones
+ *  (a common failure mode: multiple Test-&-Enable runs leaving stale rows
+ *  behind). Never emits any portion of the plaintext. An empty value gets
+ *  the sentinel `"<empty>"` so log consumers can distinguish it from a
+ *  hash collision.
+ *
+ *  Exported for unit tests to verify the no-leak invariant without having
+ *  to capture log records. */
+export function fingerprintCred(value: string): string {
+  if (value.length === 0) return '<empty>';
+  return createHash('sha256').update(value, 'utf8').digest('hex').slice(0, 8);
+}
+
+/** Shape of a row safe for logs — no value, just an 8-char hash fingerprint. */
+interface CredRowLogShape {
+  skillName: string;
+  envName: string;
+  userScope: 'agent' | 'user';
+  userId: string;
+  valueFingerprint: string;
+  valueLength: number;
+}
+
+function rowToLogShape(
+  row: { skillName: string; envName: string; userId: string; value: string },
+): CredRowLogShape {
+  return {
+    skillName: row.skillName,
+    envName: row.envName,
+    userScope: row.userId === '' ? 'agent' : 'user',
+    userId: row.userId,
+    valueFingerprint: fingerprintCred(row.value),
+    valueLength: row.value.length,
+  };
+}
+
+/** Resolve MCP auth headers for a server by looking up skill-declared
+ *  credentials for `(agentId, envName, userId)`. Tries the canonical
+ *  suffixes (`_API_KEY`, `_ACCESS_TOKEN`, `_OAUTH_TOKEN`, `_TOKEN`) in
+ *  order and prefers a user-scoped row over the agent-scope sentinel (''),
+ *  matching the precedence used by turn-time credential injection.
+ *
+ *  Last-resort fallback reads `process.env` when no matching row exists —
+ *  covers dev/infra creds that were never written to `skill_credentials`.
+ *
+ *  Pattern-based — name-convention fallback for skills whose frontmatter
+ *  doesn't pin a `mcpServers[].credential` ref. Skills that DO pin one
+ *  should route through `resolveMcpAuthHeadersByCredential` instead, which
+ *  looks up by explicit envName rather than guessing from the server name. */
+export async function resolveMcpAuthHeaders(args: {
+  serverName: string;
+  /** The skill that owns this MCP server lookup. Filters out rows
+   *  stored by other skills so skills sharing a common envName (e.g.
+   *  two skills both using `API_KEY`) can't resolve to each other's
+   *  credentials. Required — a silent cross-skill fallback is the
+   *  exact bug this field closes. */
+  skillName: string;
+  agentId: string;
+  userId: string;
+  skillCredStore: import('./skills/skill-cred-store.js').SkillCredStore;
+}): Promise<Record<string, string> | undefined> {
+  const { serverName, skillName, agentId, userId, skillCredStore } = args;
+  const prefix = serverName.toUpperCase().replace(/-/g, '_');
+  const candidates = [
+    `${prefix}_API_KEY`,
+    `${prefix}_ACCESS_TOKEN`,
+    `${prefix}_OAUTH_TOKEN`,
+    `${prefix}_TOKEN`,
+  ];
+  const rows = await skillCredStore.listForAgent(agentId);
+  for (const envName of candidates) {
+    const matching = rows.filter(
+      r => r.skillName === skillName && r.envName === envName,
+    );
+    if (matching.length === 0) {
+      if (process.env[envName]) {
+        logger.info('skill_cred_resolved', {
+          agentId, userId, skillName, serverName, envName,
+          source: 'process_env',
+          resolverPath: 'pattern',
+          matchingRows: [],
+          selectedRow: null,
+          valueFingerprint: fingerprintCred(process.env[envName] ?? ''),
+        });
+        return { Authorization: `Bearer ${process.env[envName]}` };
+      }
+      continue;
+    }
+    const user = matching.find(r => r.userId === userId);
+    const agent = matching.find(r => r.userId === '');
+    // No cross-user / cross-row fallback. If neither the current user's
+    // row nor the agent-scope sentinel matches, this credential is not
+    // ours to use — even if another user stored a value under the same
+    // (skillName, envName) tuple.
+    const selected = user ?? agent;
+    if (!selected) {
+      logger.debug('skill_cred_resolved', {
+        agentId, userId, skillName, serverName, envName,
+        resolverPath: 'pattern',
+        source: 'none',
+        matchingRowCount: matching.length,
+      });
+      continue;
+    }
+    const value = selected.value;
+    if (value) {
+      logger.info('skill_cred_resolved', {
+        agentId, userId, skillName, serverName, envName,
+        source: 'skill_credentials',
+        resolverPath: 'pattern',
+        matchingRowCount: matching.length,
+        matchingRows: matching.map(rowToLogShape),
+        selectedRow: rowToLogShape(selected),
+        selectionReason: user ? 'user_scope_match' : 'agent_scope_fallback',
+      });
+      return { Authorization: `Bearer ${value}` };
+    }
+  }
+  logger.debug('skill_cred_resolved', {
+    agentId, userId, skillName, serverName,
+    resolverPath: 'pattern',
+    source: 'none',
+    candidates,
+  });
+  return undefined;
+}
+
+/** Resolve MCP auth headers for an explicit envName ref — the bare string
+ *  from a skill's `mcpServers[].credential` field. Authoritative lookup
+ *  path used by both turn-time catalog population and the admin-side
+ *  Test-&-Enable probe, so "probe succeeds → turn-time dispatch succeeds"
+ *  holds as an invariant.
+ *
+ *  Same scope precedence as `resolveMcpAuthHeaders` (user-scoped over
+ *  agent-scope over first-match), plus a `process.env[envName]` fallback
+ *  for dev creds that bypass `skill_credentials`. */
+export async function resolveMcpAuthHeadersByCredential(args: {
+  /** The skill that declared this credential ref. Filters out rows
+   *  stored by other skills so two skills pinning the same envName
+   *  cannot resolve to each other's credentials. Required. */
+  skillName: string;
+  envName: string;
+  agentId: string;
+  userId: string;
+  skillCredStore: import('./skills/skill-cred-store.js').SkillCredStore;
+}): Promise<Record<string, string> | undefined> {
+  const { skillName, envName, agentId, userId, skillCredStore } = args;
+  const rows = await skillCredStore.listForAgent(agentId);
+  const matching = rows.filter(
+    r => r.skillName === skillName && r.envName === envName,
+  );
+  if (matching.length === 0) {
+    if (process.env[envName]) {
+      logger.info('skill_cred_resolved', {
+        agentId, userId, skillName, envName,
+        source: 'process_env',
+        resolverPath: 'credential_ref',
+        matchingRows: [],
+        selectedRow: null,
+        valueFingerprint: fingerprintCred(process.env[envName] ?? ''),
+      });
+      return { Authorization: `Bearer ${process.env[envName]}` };
+    }
+    logger.debug('skill_cred_resolved', {
+      agentId, userId, skillName, envName,
+      resolverPath: 'credential_ref',
+      source: 'none',
+      matchingRowCount: 0,
+    });
+    return undefined;
+  }
+  const user = matching.find(r => r.userId === userId);
+  const agent = matching.find(r => r.userId === '');
+  // No cross-user / cross-row fallback. `matching[0]` could be another
+  // user's stored row; returning it would leak credentials across
+  // identities. If neither the per-user row nor the agent-scope
+  // sentinel is set, this resolver returns undefined.
+  const selected = user ?? agent;
+  if (!selected) {
+    logger.debug('skill_cred_resolved', {
+      agentId, userId, skillName, envName,
+      resolverPath: 'credential_ref',
+      source: 'none',
+      matchingRowCount: matching.length,
+    });
+    return undefined;
+  }
+  const value = selected.value;
+  if (value) {
+    logger.info('skill_cred_resolved', {
+      agentId, userId, skillName, envName,
+      source: 'skill_credentials',
+      resolverPath: 'credential_ref',
+      matchingRowCount: matching.length,
+      matchingRows: matching.map(rowToLogShape),
+      selectedRow: rowToLogShape(selected),
+      selectionReason: user ? 'user_scope_match' : 'agent_scope_fallback',
+    });
+    return { Authorization: `Bearer ${value}` };
+  }
+  return undefined;
 }
 
 /**
@@ -393,8 +671,8 @@ function seedAxDirectory(workspace: string, gitDir: string, logger: Logger): voi
   }
 
   // Seed default skills from project skills/ directory into .ax/skills/.
-  // File-based skills (default.md) become .ax/skills/default/SKILL.md.
-  // Directory-based skills (deploy/SKILL.md) keep their structure.
+  // File-based skills (<name>.md) become .ax/skills/<name>/SKILL.md.
+  // Directory-based skills (<name>/SKILL.md + companions) keep their structure.
   let sDir: string;
   try { sDir = resolveSeedSkillsDir(); } catch { sDir = ''; }
   if (sDir && existsSync(sDir)) {
@@ -402,7 +680,7 @@ function seedAxDirectory(workspace: string, gitDir: string, logger: Logger): voi
       const entries = readdirSync(sDir, { withFileTypes: true });
       for (const entry of entries) {
         if (entry.isFile() && entry.name.endsWith('.md')) {
-          // File-based skill: default.md → .ax/skills/default/SKILL.md
+          // File-based skill: <name>.md → .ax/skills/<name>/SKILL.md
           const skillName = entry.name.replace(/\.md$/, '');
           const destDir = join(workspace, '.ax', 'skills', skillName);
           const destPath = join(destDir, 'SKILL.md');
@@ -496,6 +774,36 @@ export async function processCompletion(
   let sessionId = preProcessed?.sessionId ?? persistentSessionId ?? randomUUID();
   const reqLogger = logger.child({ reqId: requestId.slice(-8) });
 
+  // Per-turn diagnostic collector — captures user-surfacable failure events
+  // (currently: MCP `listTools` rejections, OpenAPI spec fetch/parse failures)
+  // that `populateCatalogFromSkills` pushes into it. `handleCompletions`
+  // reads the snapshot off the returned `CompletionResult` and forwards it
+  // to the chat UI (SSE named events in streaming mode, JSON field in
+  // non-streaming). Fresh per call — never shared across turns, because a
+  // stale banner from a previous turn's failure is worse than no banner.
+  //
+  // Passed by reference into the `getOrBuildCatalog` `build` closure below;
+  // the closure pushes into it synchronously within its try/catch, so the
+  // snapshot taken after the build resolves reflects every failure that
+  // happened during this build. On a cache HIT the closure doesn't fire
+  // and the collector stays empty — which is correct: the user already
+  // saw the banner on the turn that actually did the build.
+  const diagnostics = createDiagnosticCollector();
+
+  // `attach` stamps the turn's diagnostic snapshot onto every
+  // `CompletionResult` at the return site. Structural, not per-site: a
+  // future contributor who adds a new return path can't forget to
+  // include `diagnostics` because the wrapper IS the return — every
+  // `return attach({...})` grabs the current snapshot, every raw
+  // `return {...}` stands out as a missed site in review. The generic
+  // `T` preserves whatever other optional fields the caller included
+  // (contentBlocks, extractedFiles, agentName, userId) without having
+  // to enumerate them here.
+  const attach = <T extends { responseContent: string; finishReason: 'stop' | 'content_filter' }>(
+    result: T,
+  ): T & { diagnostics: readonly import('./diagnostics.js').Diagnostic[] } =>
+    ({ ...result, diagnostics: diagnostics.list() });
+
   // Extract text for scanning/logging; structured content may contain image refs
   const textContent = typeof content === 'string'
     ? content
@@ -551,10 +859,10 @@ export async function processCompletion(
         timestamp: Date.now(),
         data: { verdict: 'BLOCK', reason: result.scanResult.reason },
       });
-      return {
+      return attach({
         responseContent: `Request blocked: ${result.scanResult.reason ?? 'security scan failed'}`,
         finishReason: 'content_filter',
-      };
+      });
     }
 
     reqLogger.debug('scan_inbound', { status: 'clean' });
@@ -572,7 +880,7 @@ export async function processCompletion(
   const queued = result.messageId ? await db.dequeueById(result.messageId) : await db.dequeue();
   if (!queued) {
     reqLogger.debug('dequeue_failed', { messageId: result.messageId });
-    return { responseContent: 'Internal error: message not queued', finishReason: 'stop' };
+    return attach({ responseContent: 'Internal error: message not queued', finishReason: 'stop' });
   }
 
   // ── Fast path: in-process LLM loop (no pod, no IPC, no proxy) ──
@@ -605,6 +913,7 @@ export async function processCompletion(
       if (persistentSessionId) {
         persistentSessionId = rewriteSessionPlaceholder(persistentSessionId, agentId);
       }
+      deps.updateTurnCtx?.({ sessionId, agentId });
     }
 
     try {
@@ -629,6 +938,7 @@ export async function processCompletion(
           eventBus,
           workspaceBasePath: '~/.ax/workspaces',
           mcpManager: deps.mcpManager,
+          skillCredStore: deps.skillCredStore,
         },
       );
 
@@ -654,16 +964,16 @@ export async function processCompletion(
         data: { finishReason, responseLength: outbound.content.length, sessionId },
       });
 
-      return {
+      return attach({
         responseContent: outbound.content,
         agentName: agentId,
         userId: currentUserId,
         finishReason,
-      };
+      });
     } catch (err) {
       await db.fail(queued.id);
       reqLogger.error('fast_path_error', { error: (err as Error).message });
-      return { responseContent: `Fast path error: ${(err as Error).message}`, finishReason: 'stop' };
+      return attach({ responseContent: `Fast path error: ${(err as Error).message}`, finishReason: 'stop' });
     }
     } // end documents guard
   }
@@ -694,6 +1004,7 @@ export async function processCompletion(
     if (persistentSessionId) {
       persistentSessionId = rewriteSessionPlaceholder(persistentSessionId, agentId);
     }
+    deps.updateTurnCtx?.({ sessionId, agentId });
   }
 
   // Register session context so the credential provide endpoint can resolve
@@ -927,10 +1238,10 @@ export async function processCompletion(
       const hasOAuthToken = !!process.env.CLAUDE_CODE_OAUTH_TOKEN;
       if (!hasApiKey && !hasOAuthToken) {
         await db.fail(queued.id);
-        return {
+        return attach({
           responseContent: 'No API credentials configured. Run `ax configure` to set up authentication.',
           finishReason: 'stop',
-        };
+        });
       }
 
       proxySocketPath = join(ipcSocketDir, 'anthropic-proxy.sock');
@@ -980,8 +1291,14 @@ export async function processCompletion(
         credentials: credentialMap,
         bypassDomains: new Set(config.mitm_bypass_domains ?? []),
       };
-      const allowedDomains = deps.domainList ? { has: (d: string) => deps.domainList!.isAllowed(d) } : undefined;
-      const onDenied = (domain: string) => deps.domainList?.addPending(domain, sessionId);
+      // Per-session frozen set; per-CONNECT lookup stays synchronous.
+      // The set may include `*.parent` wildcard entries — `matchesDomain`
+      // normalizes the candidate and walks the set for both exact and
+      // wildcard hits.
+      const { getAllowedDomainsForAgent, matchesDomain } =
+        await import('./skills/domain-allowlist.js');
+      const allowedSet = await getAllowedDomainsForAgent(agentId, deps.agentSkillsDeps);
+      const allowedDomains = { has: (d: string) => matchesDomain(allowedSet, d) };
       const urlRewrites = config.url_rewrites
         ? new Map(Object.entries(config.url_rewrites))
         : undefined;
@@ -992,15 +1309,15 @@ export async function processCompletion(
         const webProxy = await startWebProxy({
           listen: webProxySocketPath,
           sessionId, canaryToken, onAudit: webProxyAudit,
-          allowedDomains, onDenied, mitm: mitmConfig, urlRewrites,
+          allowedDomains, mitm: mitmConfig, urlRewrites,
         });
         webProxyCleanup = webProxy.stop;
       } else {
-        // TCP mode — docker or k8s (k8s uses separate port in host-process.ts)
+        // TCP mode — docker or k8s (k8s uses separate port)
         const webProxy = await startWebProxy({
           listen: 0,
           sessionId, canaryToken, onAudit: webProxyAudit,
-          allowedDomains, onDenied, mitm: mitmConfig, urlRewrites,
+          allowedDomains, mitm: mitmConfig, urlRewrites,
         });
         webProxyPort = webProxy.address as number;
         webProxyCleanup = webProxy.stop;
@@ -1153,32 +1470,40 @@ export async function processCompletion(
       content = resolvedContent;
     }
 
-    // Pre-load all stored credentials for this agent/user into the sandbox env.
-    // When web_proxy is enabled: register as MITM proxy placeholders (the proxy
-    // replaces them with real values in intercepted HTTPS traffic).
-    // When web_proxy is disabled (local mode): inject real values directly
-    // since there's no proxy to do placeholder replacement.
-    // Also check global (unscoped) credentials — catches credentials stored
-    // without session context or via process.env fallback in the plaintext provider.
-    for (const scope of [credentialScope(agentId, currentUserId), credentialScope(agentId), undefined]) {
-      try {
-        const storedNames = await providers.credentials.list(scope);
-        for (const envName of storedNames) {
-          // Skip if already registered (user scope takes precedence over agent, agent over global)
-          if (credentialMap.toEnvMap()[envName] || credentialEnv[envName]) continue;
-          const realValue = await providers.credentials.get(envName, scope);
-          if (realValue) {
-            if (config.web_proxy) {
-              // Container sandboxes: web_proxy is always true — use placeholder
-              credentialMap.register(envName, realValue);
-            } else {
-              // Subprocess sandbox: no proxy — inject real values directly
-              credentialEnv[envName] = realValue;
-            }
-            reqLogger.info('credential_injected', { envName, scope: scope ?? 'global' });
-          }
+    // Pre-load skill-declared credentials into the sandbox env. Every row in
+    // skill_credentials for this agentId that matches the caller's userId (or
+    // the '' sentinel for agent-scope) is injected. User-scoped rows win over
+    // agent-scope when both exist for the same envName.
+    //
+    // web_proxy enabled  → register as MITM proxy placeholders (the proxy
+    //                      substitutes real values in intercepted traffic).
+    // web_proxy disabled → inject real values into the subprocess env directly.
+    try {
+      const rows = await deps.skillCredStore.listForAgent(agentId);
+      // Sort user-scoped rows ahead of agent-scope so the already-filled guard
+      // lets the user's value win — regardless of DB row order.
+      rows.sort((a, b) => {
+        const aScore = a.userId === currentUserId ? 0 : 1;
+        const bScore = b.userId === currentUserId ? 0 : 1;
+        return aScore - bScore;
+      });
+      for (const row of rows) {
+        const applicable = row.userId === currentUserId || row.userId === '';
+        if (!applicable) continue;
+        if (credentialMap.toEnvMap()[row.envName] || credentialEnv[row.envName]) continue;
+        if (config.web_proxy) {
+          credentialMap.register(row.envName, row.value);
+        } else {
+          credentialEnv[row.envName] = row.value;
         }
-      } catch { /* list may not be supported */ }
+        reqLogger.info('credential_injected', {
+          envName: row.envName,
+          skillName: row.skillName,
+          userScoped: row.userId !== '',
+        });
+      }
+    } catch (err) {
+      reqLogger.warn('credential_injection_failed', { error: (err as Error).message });
     }
 
     // Create canonical workspace mount info for sandbox tool IPC handlers.
@@ -1228,77 +1553,245 @@ export async function processCompletion(
     // Skills live in the git workspace at .ax/skills/ — no DB loading needed.
     // The agent reads them directly from the workspace filesystem.
 
-    // ── Generate MCP CLI tools + tool modules ──
-    let mcpCLIsPayload: Array<{ path: string; content: string }> | undefined;
-    let toolModuleIndex: string | undefined;
+    // Identity and skills are delivered to the agent via stdin payload (below).
+
+    // ── Live skill index for the system prompt ──
+    // Computed fresh per turn from the git snapshot + host approvals/creds.
+    // Pass the current user so a skill is marked "enabled" only when THIS
+    // user has stored their own credential (or an agent-scope value
+    // exists) — another user's stored row must not flip the skill to
+    // enabled on Bob's turn (PR #185 review, issue #6).
+    const skillStates = await getAgentSkills(agentId, deps.agentSkillsDeps, currentUserId);
+    const skillsPayload: SkillSummary[] = skillStates.map(toSkillSummary);
+    // Only ENABLED skills drive tool population. `loadSnapshot` also
+    // returns `pending` (missing creds, unapproved domains) and
+    // `invalid` (frontmatter parse failure) skills — surfacing those in
+    // the catalog or tool-route map gives the LLM dispatch targets that
+    // will fail at call time with auth errors or 403s. Issue #5 in PR
+    // #185 review. Computed once here and used for both the tool-route
+    // discovery AND the catalog build below so they stay in lockstep.
+    const enabledSkillNames = new Set(
+      skillStates.filter((s) => s.kind === 'enabled').map((s) => s.name),
+    );
+
+    // ── Populate per-agent tool routes for skill-declared MCP servers ──
+    // The subprocess sandbox path relies on `mcpManager.toolServerMap` to
+    // resolve tool names → server URLs at tool-dispatch time. The inprocess
+    // fast-path does its own discovery at turn start; for the subprocess turn
+    // path we run `ensureToolsDiscoveredForHead` here so every turn lands with
+    // a populated map. HEAD-cached dedup keeps the network cost at once per
+    // (agent, HEAD) per pod.
     if (deps.mcpManager) {
       try {
-        const resolveHeaders = providers.credentials
-          ? async (h: Record<string, string>) => {
-              const { resolveHeaders: rh } = await import('../providers/mcp/database.js');
-              return rh(JSON.stringify(h), providers.credentials);
-            }
-          : undefined;
-        // For servers without explicit headers, try to find a matching credential
-        // by convention: SERVER_NAME_API_KEY, SERVER_NAME_ACCESS_TOKEN, etc.
-        const authForServer = providers.credentials
-          ? async (server: { name: string; url: string }) => {
-              const prefix = server.name.toUpperCase().replace(/-/g, '_');
-              const candidates = [
-                `${prefix}_API_KEY`,
-                `${prefix}_ACCESS_TOKEN`,
-                `${prefix}_OAUTH_TOKEN`,
-                `${prefix}_TOKEN`,
-              ];
-              for (const envName of candidates) {
-                const value = await providers.credentials.get(envName);
-                if (value) return { Authorization: `Bearer ${value}` };
-              }
-              return undefined;
-            }
-          : undefined;
-        // Only discover tools from servers assigned to this agent (agent_mcp_servers).
-        // If no assignments exist, discover from all servers (backward compat).
-        let serverFilter: Set<string> | undefined;
-        if (providers.database) {
-          try {
-            const { listAgentServerNames } = await import('../providers/mcp/database.js');
-            const assigned = await listAgentServerNames(providers.database.db, agentId);
-            serverFilter = new Set(assigned);
-          } catch { /* table may not exist yet — leave filter undefined (all servers) */ }
-        }
-        const mcpTools = await deps.mcpManager.discoverAllTools(agentId, { resolveHeaders, authForServer, serverFilter });
-        if (mcpTools.length > 0) {
-          const { prepareMcpCLIs, prepareToolModules } = await import('./toolgen/generate-and-cache.js');
-          const clis = await prepareMcpCLIs({ agentName: agentId, tools: mcpTools });
-          if (clis && clis.length > 0) mcpCLIsPayload = clis;
-          const modules = await prepareToolModules({ agentName: agentId, tools: mcpTools });
-          if (modules) {
-            mcpCLIsPayload = [...(mcpCLIsPayload ?? []), ...modules.files];
-            toolModuleIndex = modules.compactIndex;
+        const snapshot = await loadSnapshot(agentId, deps.agentSkillsDeps);
+        const skillServerNames = new Set<string>();
+        // Side-index the skill's `mcpServers[].credential` refs by server
+        // name — lets `authForServer` prefer the authoritative envName
+        // lookup when frontmatter pinned one, matching the probe path.
+        const credRefByServerName = new Map<string, string>();
+        // Also side-index which skill declared each server so the
+        // credential-resolver calls below can filter by (skillName,
+        // envName). Without this the resolver can't tell skill-A's
+        // API_KEY row from skill-B's (#2 / #3 in PR #185 review).
+        const skillNameByServerName = new Map<string, string>();
+        for (const entry of snapshot) {
+          if (!entry.ok) continue;
+          // Skip servers from pending/invalid skills — only enabled skills
+          // should have their MCP servers discovered for this turn.
+          if (!enabledSkillNames.has(entry.name)) continue;
+          for (const s of entry.frontmatter.mcpServers) {
+            skillServerNames.add(s.name);
+            skillNameByServerName.set(s.name, entry.name);
+            if (s.credential) credRefByServerName.set(s.name, s.credential);
           }
         }
-      } catch (err) {
-        reqLogger.warn('mcp_cli_generation_failed', { error: (err as Error).message });
-      }
-    } else if (providers.mcp && providers.mcp.listTools) {
-      // @deprecated Legacy fallback: no manager, use providers.mcp directly.
-      try {
-        const { prepareMcpCLIs, prepareToolModules } = await import('./toolgen/generate-and-cache.js');
-        const mcpTools = await providers.mcp.listTools();
-        const clis = await prepareMcpCLIs({ agentName: agentId, tools: mcpTools });
-        if (clis && clis.length > 0) mcpCLIsPayload = clis;
-        const modules = await prepareToolModules({ agentName: agentId, tools: mcpTools });
-        if (modules) {
-          mcpCLIsPayload = [...(mcpCLIsPayload ?? []), ...modules.files];
-          toolModuleIndex = modules.compactIndex;
+        if (skillServerNames.size > 0) {
+          const headSha = await deps.agentSkillsDeps.probeHead(agentId);
+          await deps.mcpManager.ensureToolsDiscoveredForHead(agentId, headSha, {
+            serverFilter: skillServerNames,
+            authForServer: async (server) => {
+              const skillName = skillNameByServerName.get(server.name);
+              if (!skillName) return undefined;
+              const ref = credRefByServerName.get(server.name);
+              if (ref) {
+                const byRef = await resolveMcpAuthHeadersByCredential({
+                  skillName,
+                  envName: ref,
+                  agentId,
+                  userId: currentUserId,
+                  skillCredStore: deps.skillCredStore,
+                });
+                if (byRef) return byRef;
+              }
+              return resolveMcpAuthHeaders({
+                serverName: server.name,
+                skillName,
+                agentId,
+                userId: currentUserId,
+                skillCredStore: deps.skillCredStore,
+              });
+            },
+          });
         }
       } catch (err) {
-        reqLogger.warn('mcp_cli_generation_failed', { error: (err as Error).message });
+        // Partial tool map is better than a refused turn — agent may still
+        // succeed via tools that were discovered earlier, or surface a more
+        // actionable error at the specific call site.
+        reqLogger.warn('ensure_tools_discovered_failed', {
+          agentId,
+          error: (err as Error).message,
+        });
       }
     }
 
-    // Identity and skills are delivered to the agent via stdin payload (below).
+    // ── Populate the per-turn `ToolCatalog` from active skills ──
+    // Source-of-truth for tool dispatch (tool-dispatch-unification). The
+    // catalog is built each turn from the live MCP server + skill snapshot;
+    // the agent's `call_tool` IPC handler (indirect mode) and direct-mode
+    // tool registrations both read from this same per-session registry.
+    //
+    // Cached per (agentId, userId, HEAD-sha) — first turn after a skill push
+    // rebuilds (same ~200–400 ms cost as before); every subsequent turn is
+    // an O(1) Map lookup with zero network work. The cache is invalidated
+    // from the post-receive hook and the admin-OAuth callback, matching
+    // the invalidation surface of the sibling `snapshotCache`.
+    let catalogTools: CatalogTool[] = [];
+    if (deps.mcpManager) {
+      try {
+        const headSha = await deps.agentSkillsDeps.probeHead(agentId);
+        catalogTools = await getOrBuildCatalog({
+          agentId,
+          userId: currentUserId,
+          headSha,
+          build: async () => {
+            // Filter to ENABLED skills only — pending/invalid skills
+            // shouldn't produce call_tool entries that the agent will
+            // just hit auth/403 on. Matches the tool-route discovery
+            // filter above so the two stay in lockstep. Issue #5 in PR
+            // #185 review.
+            const snapshotForCatalog = filterSnapshotToEnabled(
+              await loadSnapshot(agentId, deps.agentSkillsDeps),
+              enabledSkillNames,
+            );
+            const toolCatalog = new ToolCatalog();
+            const buildResult = await populateCatalogFromSkills({
+              skills: snapshotForCatalog,
+              getMcpClient: buildTurnMcpClientFactory({
+                mcpManager: deps.mcpManager!,
+                agentId,
+                snapshot: snapshotForCatalog,
+                resolveAuthHeaders: (skillName, serverName) =>
+                  resolveMcpAuthHeaders({
+                    skillName,
+                    serverName,
+                    agentId,
+                    userId: currentUserId,
+                    skillCredStore: deps.skillCredStore,
+                  }),
+                // Authoritative lookup when frontmatter pins
+                // `mcpServers[].credential: <envName>`. Same path the
+                // admin Test-&-Enable probe uses, so "probe OK → turn OK"
+                // holds even when the server name doesn't match the
+                // legacy prefix heuristic (e.g. "linear-mcp-server" +
+                // envName "LINEAR_API_KEY").
+                resolveAuthHeadersByCredential: (skillName, envName) =>
+                  resolveMcpAuthHeadersByCredential({
+                    skillName,
+                    envName,
+                    agentId,
+                    userId: currentUserId,
+                    skillCredStore: deps.skillCredStore,
+                  }),
+                // Apply `config.url_rewrites` at host MCP fetch time.
+                // `undefined` in production (no-op); e2e sets it so a
+                // skill's `https://mock-target.test/...` frontmatter URL
+                // redirects to the mock server's dynamic port.
+                urlRewrites: config.url_rewrites,
+              }),
+              // OpenAPI spec fetcher — http:// URLs go direct to
+              // SwaggerParser; workspace-relative paths resolve against
+              // the agent's bare skills repo via git-show. Same
+              // url_rewrites hook as MCP for e2e mock redirection.
+              fetchOpenApiSpec: makeDefaultFetchOpenApiSpec({
+                getBareRepoPath: () => deps.agentSkillsDeps.getBareRepoPath(agentId),
+                urlRewrites: config.url_rewrites,
+              }),
+              catalog: toolCatalog,
+              // Turn-scoped collector captured by reference: every
+              // per-server/per-source failure pushed inside this closure
+              // survives into the outer scope and is read via
+              // `diagnostics.list()` after the build completes (or after
+              // a cache hit skipped the build, in which case the
+              // collector stays empty and no banner fires).
+              diagnostics,
+            });
+            toolCatalog.freeze();
+            // Flag the build partial when ANY MCP server failed listTools
+            // OR any openapi source failed to fetch/parse. `getOrBuildCatalog`
+            // skips its cache write on partial so the next turn retries the
+            // flaky source instead of serving empty tools until HEAD changes.
+            // Dupe-name register failures don't count — those are
+            // deterministic outcomes of frontmatter shape.
+            const partial =
+              buildResult.serverFailures > 0 ||
+              buildResult.openApiSourceFailures > 0;
+            if (partial) {
+              reqLogger.warn('catalog_partial_build', {
+                agentId,
+                serverFailures: buildResult.serverFailures,
+                openApiSourceFailures: buildResult.openApiSourceFailures,
+                catalogSize: toolCatalog.list().length,
+              });
+            }
+            return {
+              tools: toolCatalog.list(),
+              partial,
+            };
+          },
+        });
+      } catch (err) {
+        // Same posture as the discovery block above — log and continue.
+        // An empty/partial catalog is strictly better than a refused turn;
+        // the agent can still call core tools + handle the task.
+        reqLogger.warn('populate_catalog_failed', {
+          agentId,
+          error: (err as Error).message,
+        });
+      }
+    }
+
+    // ── Register the per-turn catalog for indirect-dispatch IPC handlers ──
+    // `describe_tools` and `call_tool` read this via the `resolveCatalog`
+    // closure wired in `server-init.ts`. Unregistration happens in the
+    // outer finally block (same lifetime as `workspaceMap`), so an
+    // uncaught error in the turn cannot leak a stale catalog into the
+    // next one. Keyed on `sessionId` to match the IPC context.
+    if (deps.catalogMap) {
+      deps.catalogMap.set(sessionId, catalogReaderFromTools(catalogTools));
+    }
+
+    // Catalog visibility at turn-start. Pair this with the agent-side
+    // `agent_catalog_received` log: if the host says size=N but the agent
+    // says size=0, the stdin payload lost the catalog; if both say 0 but
+    // skills had MCP servers, discovery failed (check
+    // `populate_catalog_failed` above); if both agree but agent still
+    // guesses names, the prompt module was dropped (check
+    // `toolCatalogModuleIncluded`).
+    const catalogBySkill: Record<string, number> = {};
+    for (const t of catalogTools) catalogBySkill[t.skill] = (catalogBySkill[t.skill] ?? 0) + 1;
+    reqLogger.info('catalog_registered', {
+      agentId,
+      sessionId,
+      catalogSize: catalogTools.length,
+      catalogBySkill,
+      // Emit the actual tool names when the catalog is small (≤ 50) so an
+      // "agent guessed a wrong name" incident can be diagnosed from the
+      // log alone. Bigger catalogs stay counts-only to keep log line size
+      // manageable.
+      ...(catalogTools.length > 0 && catalogTools.length <= 50
+        ? { catalogNames: catalogTools.map((t) => t.name) }
+        : {}),
+    });
 
     // ── Workspace GCS prefixes ──
     // Build stdin payload once — reused across retry attempts.
@@ -1321,10 +1814,17 @@ export async function processCompletion(
       webProxyUrl: deps.extraSandboxEnv?.AX_WEB_PROXY_URL,
       // Enterprise fields
       agentId,
-      // Identity from git, skills from .ax/skills/ in workspace
+      // Identity from git; skills derived live from the agent's bare repo.
       identity: identityPayload,
-      mcpCLIs: mcpCLIsPayload,
-      toolModuleIndex,
+      skills: skillsPayload,
+      // Host-authoritative tool catalog — built per-turn above from active
+      // skills' MCP servers, cached per (agentId, userId, HEAD-sha). Agent
+      // consumes in Task 2.4 (system prompt render) and later phases (dispatch).
+      catalog: catalogTools,
+      // Tool-dispatch mode — controls whether the agent registers the
+      // describe_tools + call_tool meta-tools (indirect) or direct catalog
+      // entries (direct). Shipped so the agent doesn't need its own Config.
+      tool_dispatch: config.tool_dispatch,
       // Credential placeholders — k8s pods don't have these in their pod spec,
       // so include them in the payload for the agent to set via process.env.
       credentialEnv: {
@@ -1365,7 +1865,7 @@ export async function processCompletion(
         ? 86400
         : config.sandbox.timeout_sec,
       memoryMB: config.sandbox.memory_mb,
-      cpus: 1,
+      cpus: config.sandbox.cpus,
       command: spawnCommand,
       extraEnv: {
         ...deps.extraSandboxEnv,
@@ -1642,7 +2142,7 @@ export async function processCompletion(
         reqLogger.error('agent_failed', { exitCode, attempt, retryable: isTransient, maxRetries: MAX_AGENT_RETRIES, messageId: queued.id, stderr: stderr.slice(0, 2000) });
         await db.fail(queued.id);
         const diagnosed = diagnoseError(stderr || 'agent exited with no output');
-        return { responseContent: `Agent processing failed: ${diagnosed.diagnosis}`, finishReason: 'stop' };
+        return attach({ responseContent: `Agent processing failed: ${diagnosed.diagnosis}`, finishReason: 'stop' });
       }
 
       // Transient failure — retry after delay
@@ -1769,8 +2269,15 @@ export async function processCompletion(
       }
     }
 
-    // Auto-generate session title for new sessions (first turn)
-    if (persistentSessionId && maxTurns > 0) {
+    // Auto-generate session title for new sessions (first turn). Only for
+    // chat-UI-originated sessions — scheduler / cron / heartbeat runs have
+    // sessionIds like `scheduler:dm:...` and shouldn't appear in the chat
+    // UI sidebar. Without this guard, every heartbeat turn writes a row to
+    // `chat_sessions` and the agent's self-initiated tasks (retry-pending-
+    // skill, reconcile, etc.) show up as orphan threads with hallucinated
+    // titles in the sidebar.
+    const isChatUiSession = persistentSessionId?.startsWith('http:') ?? false;
+    if (persistentSessionId && maxTurns > 0 && isChatUiSession) {
       try {
         const chatSessions = providers.storage?.chatSessions;
         if (chatSessions) {
@@ -1821,7 +2328,7 @@ export async function processCompletion(
       timestamp: Date.now(),
       data: { finishReason, responseLength: outbound.content.length, sessionId },
     });
-    return { responseContent: outbound.content, contentBlocks: responseBlocks, extractedFiles, agentName: agentId, userId: currentUserId, finishReason };
+    return attach({ responseContent: outbound.content, contentBlocks: responseBlocks, extractedFiles, agentName: agentId, userId: currentUserId, finishReason });
 
   } catch (err) {
     reqLogger.error('completion_error', {
@@ -1838,14 +2345,17 @@ export async function processCompletion(
     // Clean up canary token on error — without this, every failed completion
     // permanently leaks an entry in sessionCanaries, eventually causing OOM.
     sessionCanaries.delete(queued.session_id);
-    return { responseContent: 'Internal processing error', finishReason: 'stop' };
+    return attach({ responseContent: 'Internal processing error', finishReason: 'stop' });
   } finally {
-    // Clean up per-session credential request tracking.
-    deps.requestedCredentials?.delete(sessionId);
     // Deregister workspace from the shared map so sandbox tool handlers
     // can't access it after the agent finishes.
     if (deps.workspaceMap) {
       deps.workspaceMap.delete(sessionId);
+    }
+    // Deregister the per-turn catalog so `describe_tools` / `call_tool`
+    // can't see stale entries after the turn ends (mirrors workspaceMap).
+    if (deps.catalogMap) {
+      deps.catalogMap.delete(sessionId);
     }
     // Clean up the symlink mountRoot used by sandbox tool handlers.
     if (toolMountRoot) {

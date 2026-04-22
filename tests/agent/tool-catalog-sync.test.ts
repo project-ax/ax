@@ -117,11 +117,12 @@ describe('tool-catalog <-> system prompt sync', () => {
     });
     const rendered = mod.render(ctx).join('\n');
     // Git-native skills: reader uses .ax/skills/<name>/SKILL.md for both loading
-    // existing skills and authoring new ones. The `/workspace/skills/` legacy
-    // path is gone — the agent writes SKILL.md files and commits them.
+    // existing skills and authoring new ones. The sidecar auto-commits at
+    // end-of-turn; the agent writes SKILL.md files and does not run git itself.
     expect(rendered, 'skill read path missing from SkillsModule system prompt').toContain('.ax/skills/<name>/SKILL.md');
-    expect(rendered, 'creating skills section missing from SkillsModule system prompt').toContain('Creating Skills');
-    expect(rendered, 'creating skills should reference commit-and-push flow').toContain('commit and push');
+    expect(rendered, 'creating skills section missing from SkillsModule system prompt').toContain('Creating new skills');
+    expect(rendered, 'creating skills should point at the skill-creator seed skill').toContain('skill-creator');
+    expect(rendered, 'creating skills should reference sidecar auto-commit').toContain('sidecar commits at end-of-turn');
   });
 
   test('delegate tool is documented in DelegationModule', () => {
@@ -151,19 +152,14 @@ describe('tool-catalog <-> system prompt sync', () => {
 // ── tool-catalog <-> IPC schemas sync ──────────────────────────────────
 
 describe('tool-catalog <-> IPC schemas sync', () => {
-  // Actions that run agent-local (no IPC round-trip) and therefore have no IPC schema
-  const agentLocalActions = new Set(['execute_script']);
-
   test('every tool action in catalog has a corresponding IPC schema', () => {
     for (const tool of TOOL_CATALOG) {
       if (tool.actionMap) {
         // Multi-op tool: every action in the actionMap must have an IPC schema
         for (const [typeValue, ipcAction] of Object.entries(tool.actionMap)) {
-          if (agentLocalActions.has(ipcAction)) continue;
           expect(IPC_SCHEMAS, `IPC schema missing for action "${ipcAction}" (tool "${tool.name}", type "${typeValue}")`).toHaveProperty(ipcAction);
         }
       } else if (tool.singletonAction) {
-        if (agentLocalActions.has(tool.singletonAction)) continue;
         // Singleton tool: the singletonAction must have an IPC schema
         expect(IPC_SCHEMAS, `IPC schema missing for singleton action "${tool.singletonAction}" (tool "${tool.name}")`).toHaveProperty(tool.singletonAction);
       }
@@ -185,9 +181,8 @@ describe('tool-catalog <-> IPC schemas sync', () => {
 
     const schemaActions = new Set(Object.keys(IPC_SCHEMAS));
 
-    // Every catalog action MUST have a schema (except agent-local ones)
+    // Every catalog action MUST have a schema
     for (const action of catalogActions) {
-      if (agentLocalActions.has(action)) continue;
       expect(schemaActions.has(action), `Catalog action "${action}" missing from IPC_SCHEMAS`).toBe(true);
     }
 
@@ -212,14 +207,14 @@ describe('tool-catalog <-> IPC schemas sync', () => {
       'workspace_release',
       // Session lifecycle (host → pod push notification)
       'session_expiring',
-      // Tool batch (scripted tool execution with __batchRef pipelining, not agent-facing tool)
-      'tool_batch',
       // Agent work loop (multi-turn sessions — agent polls for queued work)
       'fetch_work',
       // Commit validation (git sidecar → host, validates .ax/ diffs before committing)
       'validate_commit',
-      // Skills index (host-authoritative skill state for system prompt; not an agent tool)
-      'skills_index',
+      // NOTE: describe_tools + call_tool were here as `knownInternalActions`
+      // during Task 3.2 → 3.4 (schema + handler only). Task 3.5 graduated them
+      // into TOOL_CATALOG as agent-facing meta-tools, so they now appear in
+      // `catalogActions` and no longer need an internal-action exemption.
     ]);
 
     for (const action of schemaActions) {

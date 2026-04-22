@@ -1,3 +1,15 @@
+### `tsc` strips shebangs — post-build helper is the reliable fix
+**Date:** 2026-04-21
+**Context:** Installing the `tool` CLI at `/opt/ax/tools/bin/tool` in the agent Docker image (Task 9, tool-cli-shims plan). Source `src/cli/tool/index.ts` has `#!/usr/bin/env node` as line 1, but TypeScript's compiler treats it as a comment and normalizes it away in ES module output, so `dist/cli/tool/index.js` ships without a shebang. Without a shebang, symlinks like `/opt/ax/tools/bin/tool -> /opt/ax/dist/cli/tool/index.js` can't be invoked directly — they get executed as shell scripts and fail.
+**Lesson:** Don't rely on `tsc` to preserve shebangs. Chain a tiny stdlib-only post-build helper (`scripts/add-shebang.mjs`) that reads each entry file, prepends `#!/usr/bin/env node\n` if absent, and `chmodSync(file, 0o755)`. Wire it into the `build` script: `"build": "tsc && node scripts/add-shebang.mjs dist/cli/tool/index.js"`. Verify with `head -1 dist/cli/tool/index.js` + `ls -la ...` — shebang present, mode `-rwxr-xr-x`. This is the canonical AX pattern for TS-compiled CLIs; don't introduce a tsc plugin for this.
+**Tags:** tsc, build, shebang, cli, docker, post-build
+
+### Dockerfile `chown -R user:group` requires the user exists first
+**Date:** 2026-04-21
+**Context:** Adding the `tool` CLI shim infrastructure to `container/agent/Dockerfile` (Task 9). Needed to place the block that does `mkdir -p /opt/ax/tools/bin`, symlink the dispatcher, and `chown -R ax:ax /opt/ax/tools`. Putting the block right after `COPY dist/ ./dist/` (too early) would fail at chown because `ax` doesn't exist yet; putting it after `USER ax` would fail because non-root users can't chown arbitrarily.
+**Lesson:** In AX's agent Dockerfile, the right slot for any step that touches `/opt/ax` *as root* but needs to leave ownership with `ax` is: AFTER `RUN groupadd -r ax && useradd -r -g ax -m ax`, BEFORE `USER ax`. Also set `ENV PATH=...` in the same window so the non-root user inherits it. The order matters: `groupadd/useradd` → `mkdir/ln/chmod/chown` → `ENV PATH` → `USER ax` → `ENTRYPOINT/CMD`.
+**Tags:** dockerfile, chown, user-order, agent-container, path
+
 ### Large-scale provider removal requires systematic grep + batch replace
 **Date:** 2026-04-06
 **Context:** Removing subprocess sandbox required updating 53 files. The string 'subprocess' appeared in test configs, YAML fixtures, comments, and code. Simple batch `perl -pi -e` replacements handled most cases, but special tests that tested the subprocess provider itself (sandbox-isolation subprocess env leak, provider-map subprocess assertions) required manual removal/editing.
@@ -11,14 +23,15 @@
 **Tags:** admin-api, mcp, mcpManager, live-sync, server-admin
 
 ### MCP tool stubs must support HTTP IPC for k8s mode
+**Status: superseded 2026-04-20 (Phase 6 of tool-dispatch-unification)** — the generated `_runtime.ts` / `tool-stubs` cache is gone. In the catalog world, tool calls go through `ax.callTool` (or the `call_tool` meta-tool), which routes through the unified `call-tool` IPC handler. Transport auto-detection (HTTP vs Unix socket) now lives in `src/agent/ipc-client.ts` / `src/agent/http-ipc-client.ts`; adjust there if k8s regressions resurface. The "don't register MCP tools as first-class LLM tools" point still holds under `indirect` mode but is configurable per the mode flag.
 **Date:** 2026-03-30
 **Context:** "get all linear issues in this cycle" prompt triggered 40+ bash/read_file calls. The generated `_runtime.ts` in `./agent/tools/` only supported Unix socket IPC (`AX_IPC_SOCKET`), which is empty in k8s HTTP IPC mode. The stubs are intentional — they save tokens by keeping MCP tool schemas out of every LLM turn. Do NOT register MCP tools as first-class LLM tools.
 **Lesson:** The `_runtime.ts` template must auto-detect transport: check `AX_HOST_URL` for HTTP mode (POST to `/internal/ipc` with Bearer token from `AX_IPC_TOKEN`), fall back to Unix socket. Import paths must use `.ts` extensions (not `.js`) for `node --experimental-strip-types` compatibility. The system prompt must give explicit execution instructions. After changing the runtime template, clear the `tool-stubs` cache in DB (`DELETE FROM documents WHERE collection = 'tool-stubs'`) because the schema hash doesn't cover template changes.
-**Tags:** mcp, tool-stubs, codegen, runtime, http-ipc, k8s, experimental-strip-types
+**Tags:** mcp, tool-stubs, codegen, runtime, http-ipc, k8s, experimental-strip-types, superseded
 
 ### initHostCore must create McpConnectionManager by default
 **Date:** 2026-03-29
-**Context:** Debugging why /workspace/agent/tools directory was missing in k8s despite 10 MCP connectors being activated. Traced through server-completions.ts → deps.mcpManager was always undefined because neither server-k8s.ts nor server-local.ts passed it to initHostCore, and initHostCore just destructured `undefined` from opts.
+**Context:** (Historical: "tool stub generation" was deleted in Phase 6 of tool-dispatch-unification. `mcpManager` is still required at runtime — now for the tool catalog's MCP adapter and `call-tool` IPC — so the meta-lesson stands.) Debugging why /workspace/agent/tools directory was missing in k8s despite 10 MCP connectors being activated. Traced through server-completions.ts → deps.mcpManager was always undefined because neither server-k8s.ts nor server-local.ts passed it to initHostCore, and initHostCore just destructured `undefined` from opts.
 **Lesson:** When `initHostCore` creates shared infrastructure (completionDeps) used by both server-local.ts and server-k8s.ts, it must provide sensible defaults for optional deps that are needed at runtime. The `mcpManager` was marked optional in HostCoreOptions but required for tool stub generation. Always create a default instance in the shared init function rather than relying on each caller to create it. Check that optional deps are actually being wired through by searching for all consumers.
 **Tags:** server-init, mcp, tool-stubs, optional-deps, completionDeps
 

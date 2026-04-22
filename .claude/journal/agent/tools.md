@@ -2,6 +2,72 @@
 
 Tool catalog consolidation, MCP server tools, tool definition generation, prompt module updates.
 
+## [2026-04-19 19:37] — Close remaining `_select` LLM-facing surfaces (companion to cd22e645)
+
+**Task:** Reviewer agreed my prior-fix callout was valid: closing `_select` in only the `call_tool` description is inconsistent because the prompt-render one-liners (`(team, state?, _select?)`) and the `describe_tools` handler's schema augmentation both still expose `_select` to the LLM. The model would lean on those and ignore the description anyway. Close all three surfaces.
+**What I did:**
+- `src/types/catalog-render.ts`: dropped `.concat('_select?')` from the one-liner renderer. Left a TODO-ish comment pointing at Task 4.2 for the re-enable (one-line flip).
+- `src/host/ipc-handlers/describe-tools.ts`: reduced `augmentSchemaWithSelect` to a pass-through (return the schema unchanged). Kept the function name + call-site + comment so Task 4.2 is a one-line body swap. Updated the file-level doc comment to explain why.
+- `src/host/ipc-server.ts`: updated a stale comment that claimed `_select` was still augmented into describe_tools responses.
+- Flipped test expectations in 3 test files (no tests deleted):
+  - `tests/agent/prompt/modules/tool-catalog.test.ts`: `_select?` no longer in one-liner output; added `.not.toContain('_select')` guard.
+  - `tests/host/tool-catalog/render.test.ts`: same — one-liners drop the `_select?` suffix; added `.not.toContain('_select')` guard.
+  - `tests/host/ipc-handlers/describe-tools.test.ts`: renamed the "augments with _select" test to "returns schemas WITHOUT _select" (explicitly asserts absence); adjusted the mutation-safety test's title now that it's no longer about augmentation; updated file-level guard comment.
+**Files touched:**
+- Modified: `src/types/catalog-render.ts` (removed 1 `.concat` + 5-line comment)
+- Modified: `src/host/ipc-handlers/describe-tools.ts` (augmentSchemaWithSelect → pass-through + updated doc comments)
+- Modified: `src/host/ipc-server.ts` (stale-comment fix)
+- Modified: `tests/agent/prompt/modules/tool-catalog.test.ts` (2 assertions flipped)
+- Modified: `tests/host/tool-catalog/render.test.ts` (2 assertions flipped)
+- Modified: `tests/host/ipc-handlers/describe-tools.test.ts` (2 tests flipped, 1 file comment updated)
+**Outcome:** Success. 555/555 tests green across `tests/agent/ + tests/host/tool-catalog/ + tests/host/ipc-handlers/`. `tsc --noEmit` clean. Kept intact: `stripSelect` (still defensive), IPC schemas, `tests/agent/tools/describe-tools.test.ts` _select pass-through test, `tests/host/ipc-handlers/call-tool.test.ts` strip-before-dispatch test.
+**Notes:**
+- This is the structural fix. After this, the LLM has zero surface advertising `_select`: not in the prompt render, not in describe_tools schema output, not in call_tool's own description. Task 4.2 re-enables all three in one go when projection is wired.
+- Companion to cd22e645 (which closed only the call_tool description). Standalone commit so the trajectory is reviewable.
+
+## [2026-04-19 19:34] — Remove `_select` from call_tool description (post-3.5 review fix)
+
+**Task:** Code-quality review on 562524b7 flagged an Important (conf 85) issue: the `call_tool` description advertised `_select` as a jq projection knob, but `stripSelect` in the host handler currently drops it silently (projection lands in Task 4.2). An LLM reading the description would send `_select` expecting a smaller response and get the full response back — a token-budget trap.
+**What I did:** Removed the `_select` mention from the `call_tool` catalog description in `src/agent/tool-catalog.ts` (both the `description` string and the nested `args` field description). Same edit in `src/agent/mcp-server.ts` (the claude-code-runner mirror). Kept `stripSelect` intact — it's the defensive guard that prevents `_select` from leaking into the MCP provider if the LLM sends it anyway. Left `describe_tools` description unchanged per the reviewer's explicit scope. Task 4.2 re-adds the advertisement when projection actually works.
+**Files touched:**
+- Modified: `src/agent/tool-catalog.ts` (description + args description)
+- Modified: `src/agent/mcp-server.ts` (args Zod description)
+**Outcome:** Success. 627/627 related tests green (tests assert forwarding of `_select`, not its description — no tests needed to change). `tsc` clean.
+**Notes:** Other `_select` surfaces — `src/types/catalog-render.ts` appends `_select?` to prompt one-liners, `describe-tools.ts` augments every schema with an `_select` property — are outside the review's scope. Flagged-but-not-fixed-here for a future reviewer pass if the concern extends. The stripSelect defensive guard stays.
+
+## [2026-04-19 19:25] — Register agent-side describe_tools + call_tool (Task 3.5)
+
+**Task:** Task 3.5 of the tool-dispatch-unification plan — graduate `describe_tools` + `call_tool` from schema-only stubs into agent-facing meta-tools, register conditionally on `tool_dispatch.mode === 'indirect'`, ship mode from host via stdin payload. This flips the switch: the full indirect-mode dispatch loop (agent → describe_tools/call_tool → host handlers → MCP) is now reachable end-to-end.
+**What I did:**
+- Added two new entries to `TOOL_CATALOG` with `singletonAction` (auto-flows into pi-session's `createIPCToolDefinitions` via the existing catalog.map pattern).
+- Added matching MCP `tool()` definitions in `mcp-server.ts` so the claude-code runner also registers them.
+- Extended `ToolFilterContext` with an optional `toolDispatchMode` field (defaults to `'indirect'` when absent). `filterTools(ctx)` strips describe_tools + call_tool in `direct` mode via a `INDIRECT_ONLY_TOOLS` set.
+- Extended `AgentConfig` + `StdinPayload` + `parseStdinPayload` + `applyPayload` with a `tool_dispatch` block. Host `server-completions.ts` ships `config.tool_dispatch` alongside `catalog`. `buildSystemPrompt` reads `config.tool_dispatch?.mode ?? 'indirect'` and threads it into the returned `toolFilter`.
+- Created `src/agent/tools/describe-tools.ts` with `createDescribeToolsTool(ipc)` + `createCallToolTool(ipc)` factory functions — primitive IPC pass-throughs used by the new unit-test file. These are a hook point for the Task 4.x projection + spill work; real wiring stays in the catalog dispatch layer.
+- New `tests/agent/tools/describe-tools.test.ts` with 11 tests covering both factories (IPC payload shape, pass-through, error propagation, `_select` forwarding).
+- Cleaned up the `knownInternalActions` exemption for `describe_tools` + `call_tool` in `tool-catalog-sync.test.ts` per the Task 3.2→3.5 graduation comment (left a breadcrumb comment noting where the actions now live).
+- Bumped tool counts 13→15 in `tool-catalog.test.ts`, `ipc-tools.test.ts`, `mcp-server.test.ts`. Added 6 new mode-based filtering tests (covers direct mode hides / indirect mode exposes / default-indirect).
+- Updated `.claude/skills/ax-agent/SKILL.md` with the new file reference and a note about `toolDispatchMode`.
+**Files touched:**
+- Modified: `src/agent/tool-catalog.ts` (+55 lines — 2 catalog entries + mode filter)
+- Modified: `src/agent/mcp-server.ts` (+17 lines — 2 `tool()` defs)
+- Modified: `src/agent/runner.ts` (+26 lines — AgentConfig + StdinPayload + parse + apply)
+- Modified: `src/agent/agent-setup.ts` (+4 lines — thread mode into toolFilter)
+- Modified: `src/host/server-completions.ts` (+4 lines — ship `tool_dispatch` in stdin payload)
+- Created: `src/agent/tools/describe-tools.ts` (+77 lines)
+- Created: `tests/agent/tools/describe-tools.test.ts` (+123 lines, 11 tests)
+- Modified: `tests/agent/tool-catalog.test.ts` (+34 lines — count + mode filter tests)
+- Modified: `tests/agent/tool-catalog-sync.test.ts` (-5 / +4 lines — remove exempt entries)
+- Modified: `tests/agent/ipc-tools.test.ts` (+26 lines — IPC payload tests, direct-mode test)
+- Modified: `tests/agent/mcp-server.test.ts` (+28 lines — direct/indirect mode tests)
+- Modified: `.claude/skills/ax-agent/SKILL.md` (+2 lines)
+**Outcome:** Success. 627/627 related tests green (agent + ipc-handlers + ipc + config). `tsc` clean. 29 host/server.test.ts failures confirmed pre-existing on main (macOS socket-path-too-long, unrelated).
+**Notes:**
+- **Why TOOL_CATALOG entries + factory functions both:** catalog entries handle real wiring through pi-session + mcp-server consistently. The factory functions exist because (a) the plan's test-signature snippet asked for `createDescribeToolsTool(ipc)` and (b) they become a natural hook point for Task 4.2 (projection) + 4.3 (spill), which need agent-side logic wrapping the IPC call.
+- **Default-indirect-when-missing:** host now always ships `tool_dispatch` (Task 3.1 made it non-optional), but inline-built `AgentConfig`s in tests frequently omit it. Agent-side default is `'indirect'` (matches host config default).
+- **Filterless call site:** `mcp-server.ts` default when `opts.filter` is undefined is still `null → include all`. That means describe_tools/call_tool appear whenever no filter is passed (e.g., in tool-catalog-sync.test.ts `createIPCMcpServer(client)`). Matches the catalog's no-filter behavior — consistent default.
+- **Direct mode coverage:** added explicit tests for the direct-mode "no meta tools" path in tool-catalog.test.ts (4 tests), ipc-tools.test.ts (1 test), and mcp-server.test.ts (1 test). Task 5.1 will later register individual catalog tools in direct mode; for now direct mode just hides the two meta-tools.
+
 ## [2026-03-31 10:00] — Add dedicated grep and glob tools to agent
 
 **Task:** Add structured `grep` and `glob` tools to pi-coding-agent, replacing raw bash `rg`/`find` usage with context-window-safe alternatives
@@ -137,3 +203,15 @@ Tool catalog consolidation, MCP server tools, tool definition generation, prompt
 - Modified tests: tests/agent/tool-catalog.test.ts, tests/agent/ipc-tools.test.ts, tests/agent/mcp-server.test.ts, tests/agent/runners/pi-session.test.ts, tests/sandbox-isolation.test.ts
 **Outcome:** Success — 151 test files, 1546 tests pass (1 skipped, pre-existing)
 **Notes:** Without heartbeat/skills/enterprise, tool count drops from 25 to 11 per LLM call. Filter context aligns with prompt module shouldInclude() logic — if HeartbeatModule is excluded, scheduler tools are too. All existing sync tests still pass since they test against the unfiltered catalog.
+
+## [2026-04-20 07:50] — Phase 5 direct-mode dispatch (Tasks 5.1 + 5.2)
+
+**Task:** Implement Phase 5 of the tool-dispatch unification plan. When `tool_dispatch.mode === 'direct'`, every catalog tool (mcp_linear_*, api_*) becomes a first-class AgentTool in the LLM's tools[] with its real JSON Schema, so constrained decoders enforce argument shapes. Execution still routes through `call_tool` internally so projection + spill semantics stay centralized.
+
+**What I did:** Extended `IPCToolsOptions` and `IPCToolDefsOptions` (pi-session's variant) with an optional `catalog: CatalogTool[]`. In direct mode, each catalog entry gets appended to the returned tool list with a thin wrapper that routes through ipcCall('call_tool', {tool, args}). Schema conversion: cast the raw JSON Schema to TSchema (structural superset). In indirect mode the option is silently ignored — describe_tools/call_tool meta-tools take the LLM-facing slot per filterTools.
+
+**Files touched:** src/agent/ipc-tools.ts, src/agent/runners/pi-session.ts, tests/agent/ipc-tools.test.ts (+5 tests).
+
+**Outcome:** Success. 25/25 focused (ipc-tools + agent-setup), full 2833/2891 (+5 from prior, 34 pre-existing unchanged).
+
+**Notes:** Tasks 5.1 and 5.2 are fused — once the tool is exposed with the real schema, the only sensible execute() routes through call_tool. Skipped Task 5.3 (weak-model smoke test) — the mock OpenRouter doesn't have "weak model" characteristics; real arg-shape accuracy comparison needs a live model. claude-code runner + mcp-server.ts (Zod path) aren't yet updated — those paths are used less often and can follow in a separate PR.

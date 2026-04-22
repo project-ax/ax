@@ -21,7 +21,7 @@ function routerConfig(model: string, fallbacks?: string[], extras?: Partial<Mode
       credentials: 'database', skills: 'database', audit: 'database',
       sandbox: 'docker', scheduler: 'none',
     },
-    sandbox: { timeout_sec: 30, memory_mb: 256 },
+    sandbox: { timeout_sec: 30, memory_mb: 256, cpus: 1 },
     scheduler: {
       active_hours: { start: '00:00', end: '23:59', timezone: 'UTC' },
       max_token_budget: 4096,

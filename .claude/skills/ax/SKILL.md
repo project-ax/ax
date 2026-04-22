@@ -55,14 +55,18 @@ Key files:
 
 There is no longer a legacy `install/uninstall/list_cowork` IPC surface or `ax plugin`/`ax mcp` CLI. Third-party provider plugins (for LLM/memory/channel etc.) are still managed with `ax provider add|remove|list|verify`.
 
-### Cap'n Web Tool Batching
+### Unified Tool Catalog + Indirect Dispatch
 
-Zero-dependency TypeScript tool stub generation with Proxy-based batching (`src/host/toolgen/`). Generates per-agent TypeScript stubs cached in DocumentStore with schema hash invalidation.
+Session-scoped catalog built from each agent's active skill snapshot at turn start, shipped to the agent as a compact one-liner listing in the system prompt. Agents dispatch via two meta-tools rather than having every MCP/OpenAPI tool wired up as a first-class SDK tool.
 
-- `src/host/toolgen/codegen.ts` — TypeScript stub generation (JSON Schema to TypeScript via `json-schema-to-typescript`)
-- `src/host/toolgen/generate-and-cache.ts` — DB caching with schema hash for generated stubs
-- `src/host/ipc-handlers/tool-batch.ts` — IPC handler for `tool_batch` with `__batchRef` pipelining
-- `src/providers/storage/tool-stubs.ts` — Schema hash computation and cache storage
+- `src/types/catalog.ts` — `CatalogTool` shape (discriminated union of `mcp` / `openapi` dispatch kinds) + Zod validator.
+- `src/host/tool-catalog/` — registry, MCP adapter, OpenAPI adapter, jq-based `_select` projection, per-session cache keyed on (agentId, HEAD-sha).
+- `src/host/skills/catalog-population.ts` — iterates `frontmatter.mcpServers[]` + `frontmatter.openapi[]` from the skill snapshot, builds the catalog. Emits `Diagnostic` entries for populate failures + wide-surface advisories.
+- `src/host/ipc-handlers/describe-tools.ts` — schema lookup by catalog name (`describe_tools([])` lists the whole directory).
+- `src/host/ipc-handlers/call-tool.ts` — single dispatcher: MCP via `callToolOnServer`, OpenAPI via `makeDefaultOpenApiDispatcher` (path/query/header/body routing, 4 auth schemes, URL rewrites, response parsing, `_select` projection, auto-spill on large responses).
+- `src/host/diagnostics.ts` — per-turn ring-buffered collector; emitted as named SSE events (`event: diagnostic`) at end-of-turn so chat UI renders a banner.
+
+Skills declare REST APIs via `openapi[]` frontmatter (spec URL or workspace path + baseUrl + optional auth + include/exclude globs); the adapter emits one `CatalogTool` per operation with inputSchema derived from params + requestBody. MCP servers remain the first-class integration for vendors that publish one. Previous codegen pipeline (`src/host/toolgen/`, `tool_batch` IPC, `execute_script` + `ax.callTool`) was fully removed in the Phase 6 migration; the catalog + meta-tools replace that surface.
 
 ### Provider Categories
 

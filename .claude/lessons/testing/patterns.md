@@ -1,5 +1,23 @@
 # Testing Patterns
 
+### To assert on structured log payloads from a module-scoped `logger`, use `vi.doMock` + `vi.resetModules` + dynamic import — NOT a pino stream swap
+**Date:** 2026-04-21
+**Context:** Task 7.4 security follow-up needed a test that captured what the OpenAPI dispatcher passes to `logger.warn(...)` on failure, to prove the URL is redacted. First attempt piped pino through an in-memory `Writable` via `initLogger({stream: ...})` after `resetLogger()`. The stream stayed empty because the dispatcher does `const logger = getLogger().child({component: '...'})` at module-load time — that wrapped pino instance captures a reference to the ORIGINAL singleton's destination. Later `resetLogger()` + `initLogger()` creates a NEW singleton, but the dispatcher's `logger` variable still points at the old one. No amount of re-init touches the dispatcher's already-constructed child.
+**Lesson:** When a module caches `logger = getLogger().child(...)` at top level (the standard pattern in this codebase), the only reliable way to intercept its log calls from a test is: (1) `vi.resetModules()`, (2) `vi.doMock('src/logger.js', () => ({...actual, getLogger: () => fakeLogger}))` where `fakeLogger` has a `.child()` that returns itself + `warn/info/debug` closures that push into an array, (3) dynamic-`import()` the module under test INSIDE the `beforeEach`/test body so it picks up the mock, (4) `vi.doUnmock` + `resetModules` in `afterEach`. Pino-destination swaps look cleaner but don't work against module-scoped cached children. Pattern also works for tracing `info`/`debug` calls on anything that uses `getLogger().child({...})` at import time.
+**Tags:** testing, logger, pino, vi.doMock, module-scoped-state, structured-logs
+
+### E2E scripted-turn patterns are global — keep match regexes narrow and unique
+**Date:** 2026-04-19
+**Context:** Adding a new `TOOL_DISPATCH_TURNS` pack for the Phase 3 indirect-dispatch smoke test. The mock OpenRouter (`tests/e2e/mock-server/openrouter.ts`) iterates `ALL_TURNS` from the current `turnIndex`, first-match-wins. Two wordings for the new test user message — "list Linear issues via call_tool" and "Run the indirect dispatch smoke test" — both collided with existing turns (`/list.*issues/` from `SKILL_TURNS`, `/run.*at/` from `SCHEDULER_TURNS`). Final message "Please exercise the indirect dispatch smoke path." + a narrow `/indirect dispatch smoke/i` pattern is the only combo with a single match.
+**Lesson:** When adding a new `ScriptedTurn` to `tests/e2e/scripts/`, (1) make the `match` regex a phrase no other turn keys on, (2) verify uniqueness with a standalone tsx snippet that iterates `ALL_TURNS` against your user-message string BEFORE running the full e2e suite. Common hazards: `list.*issues`, `run.*at`, `schedule`, `remember`. Sequential `turnIndex` hides collisions in the happy-path ordering — isolation tests (`vitest -t`) expose them immediately. A 2-line verification script saves a 5-minute kind-cluster round-trip.
+**Tags:** e2e, scripted-turns, mock-openrouter, tool-dispatch, regex
+
+### A bare repo with no commits is invisible to `git ls-tree refs/heads/main`
+**Date:** 2026-04-18
+**Context:** Writing `tests/host/server-admin-skills.test.ts` for skills-SSoT step 3. A helper created a bare repo per agent via `git init --bare` + wrote `HEAD → refs/heads/main` but seeded no files. Calling `GET /admin/api/skills/setup` returned 500 because `buildSnapshotFromBareRepo` runs `git ls-tree -r refs/heads/main` and that ref doesn't exist without a commit.
+**Lesson:** Any test that wires `agentSkillsDeps` (or anything else calling `buildSnapshotFromBareRepo`) must seed each per-agent bare repo with at least one real commit, even if the test expects an empty skills list. Pass `{ 'README.md': '# x\n' }` to your `seedRepo` helper as a default — don't skip the seed when the test case is "agent with no skills." The reconciler returns `[]` for a repo with a commit but no `.ax/skills/**`; it throws for a repo with no commit at all.
+**Tags:** git, bare-repo, testing, skills, reconciler
+
 ### Playwright route overrides need "last wins" ordering
 **Date:** 2026-04-17
 **Context:** Writing `ui/admin/tests/skills.spec.ts`. An empty-state test called `mockSkillsSetup(page, { agents: [] })` before `gotoAuthenticated`, but `gotoAuthenticated` internally runs `mockAllAPIs` which re-registers the default non-empty route. The page fetched the defaults, not the empty override.

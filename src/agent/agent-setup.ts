@@ -7,33 +7,12 @@
 import { getLogger } from '../logger.js';
 import { PromptBuilder } from './prompt/builder.js';
 import { loadIdentityFiles } from './identity-loader.js';
-import { loadSkillsMultiDir } from './stream-utils.js';
-import { join, resolve } from 'node:path';
-import { existsSync, readdirSync, statSync, accessSync, constants } from 'node:fs';
-import type { AgentConfig, IIPCClient } from './runner.js';
+import type { AgentConfig } from './runner.js';
 import type { ToolFilterContext } from './tool-catalog.js';
-import type { SkillSummary } from './prompt/types.js';
 
 const logger = getLogger().child({ component: 'agent-setup' });
 
 const DEFAULT_CONTEXT_WINDOW = 200000;
-
-/** Scan workspace/bin/ for MCP CLI executables. */
-function scanMcpCLIs(workspace: string): string[] | undefined {
-  if (!workspace) return undefined;
-  const binDir = resolve(workspace, 'bin');
-  if (!existsSync(binDir)) return undefined;
-  try {
-    const entries = readdirSync(binDir).filter(f => {
-      try {
-        const p = join(binDir, f);
-        return statSync(p).isFile() && (accessSync(p, constants.X_OK), true);
-      } catch { return false; }
-    });
-    return entries.length > 0 ? entries : undefined;
-  } catch { return undefined; }
-}
-
 
 export interface PromptBuildResult {
   systemPrompt: string;
@@ -51,22 +30,13 @@ export interface PromptBuildResult {
  * → no HeartbeatModule → no scheduler tools).
  */
 export function buildSystemPrompt(config: AgentConfig): PromptBuildResult {
-  // Prefer host-authoritative skills (fetched via skills_index IPC before prompt build).
-  // Falls back to filesystem scan of .ax/skills/ when the host-provided list is absent
-  // (e.g., tests or legacy paths that haven't wired skills_index).
-  const skills = config.skills ?? (() => {
-    const skillDirs: Array<{ dir: string; scope: 'agent' | 'user' }> = [
-      { dir: join(config.workspace, '.ax', 'skills'), scope: 'agent' as const },
-    ];
-    return loadSkillsMultiDir(skillDirs);
-  })();
+  // Skills are delivered authoritatively from the host via the stdin payload.
+  const skills = config.skills ?? [];
 
   // Identity is pre-loaded from host (via stdin payload from committed git state).
   const identityFiles = loadIdentityFiles(config.identity);
 
   const hasGovernance = false; // Governance removed — identity changes are validated at git commit time
-
-  const mcpCLIs = scanMcpCLIs(config.workspace);
 
   const promptBuilder = new PromptBuilder();
   const promptResult = promptBuilder.build({
@@ -85,13 +55,31 @@ export function buildSystemPrompt(config: AgentConfig): PromptBuildResult {
     agentId: config.agentId,
     hasGovernance,
     hasWorkspace: !!config.workspace,
-    mcpCLIs,
-    toolModuleIndex: config.toolModuleIndex,
+    catalog: config.catalog,
   });
 
   const toolFilter: ToolFilterContext = {
     hasHeartbeat: !!identityFiles.heartbeat?.trim(),
+    // Tool-dispatch mode comes from host Config via the stdin payload.
+    // Default to `indirect` when absent so older hosts / inline-built configs
+    // still expose describe_tools + call_tool.
+    toolDispatchMode: config.tool_dispatch?.mode ?? 'indirect',
   };
+
+  // Catalog visibility — helps diagnose "agent thrashed on tool names"
+  // bugs. If catalogSize is 0 but the session had active MCP skills, host
+  // discovery likely failed silently. If catalogSize > 0 but the agent
+  // still guessed names, the tool-catalog prompt module probably got
+  // budget-dropped — cross-reference `modules` in the metadata below.
+  const catalog = config.catalog ?? [];
+  const catalogBySkill: Record<string, number> = {};
+  for (const t of catalog) catalogBySkill[t.skill] = (catalogBySkill[t.skill] ?? 0) + 1;
+  logger.info('agent_catalog_received', {
+    agentId: config.agentId,
+    catalogSize: catalog.length,
+    catalogBySkill,
+    toolCatalogModuleIncluded: promptResult.metadata.modules.includes('tool-catalog'),
+  });
 
   logger.debug('prompt_built', { ...promptResult.metadata, toolFilter });
 
@@ -179,23 +167,4 @@ export function subscribeAgentEvents(
     eventCount: () => eventCount,
     getBuffered: () => buffer ? buffer.join('') : '',
   };
-}
-
-/**
- * Fetch the host-authoritative skills index via IPC.
- * Returns the skills array on success, or undefined on any error (transport
- * failure, malformed response, etc.). Callers should fall back to the
- * filesystem scan when undefined is returned.
- */
-export async function fetchSkillsIndex(client: IIPCClient): Promise<SkillSummary[] | undefined> {
-  try {
-    const res = await client.call({ action: 'skills_index' });
-    if (res && Array.isArray((res as { skills?: unknown }).skills)) {
-      return (res as { skills: SkillSummary[] }).skills;
-    }
-    return undefined;
-  } catch (err) {
-    logger.warn('skills_index_fetch_failed', { error: err instanceof Error ? err.message : String(err) });
-    return undefined;
-  }
 }

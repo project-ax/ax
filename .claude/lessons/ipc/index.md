@@ -4,6 +4,7 @@ IPC protocol lessons: Zod schema validation, handler registration, response shap
 
 ## Entries
 
+- Per-turn host state reaches IPC handlers via closure or a shared Map, not handler re-creation [entries.md](entries.md)
 - "catalog" grep matches both tool-catalog and catalog-store — different systems [entries.md](entries.md)
 - IPC client cannot handle concurrent calls without message ID correlation [entries.md](entries.md)
 - IPC schemas use z.strictObject — extra fields cause silent validation failures [entries.md](entries.md)

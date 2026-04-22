@@ -10,7 +10,7 @@ import { useChat } from '@ai-sdk/react';
 import { generateId } from 'ai';
 import { axThreadListAdapter } from './thread-list-adapter';
 import { createAxHistoryAdapter } from './history-adapter';
-import { AxChatTransport, type CredentialRequiredEvent, type StatusEvent } from './ax-chat-transport';
+import { AxChatTransport, type StatusEvent, type Diagnostic } from './ax-chat-transport';
 
 /**
  * Thread-specific runtime using AI SDK.
@@ -77,29 +77,28 @@ const useChatThreadRuntime = (transport: AxChatTransport, user = 'guest'): Assis
 
 /**
  * Custom hook that creates a chat runtime with AX-backed thread persistence.
- * Returns the runtime and a credential request handler for the modal.
  */
 export const useAxChatRuntime = (
-  onCredentialRequired?: (event: CredentialRequiredEvent) => void,
   onStatus?: (event: StatusEvent) => void,
   onRunStart?: () => void,
   user?: string,
+  onDiagnostic?: (d: Diagnostic) => void,
 ): AssistantRuntime => {
-  const callbackRef = useRef(onCredentialRequired);
-  callbackRef.current = onCredentialRequired;
   const statusRef = useRef(onStatus);
   statusRef.current = onStatus;
   const runStartRef = useRef(onRunStart);
   runStartRef.current = onRunStart;
+  const diagnosticRef = useRef(onDiagnostic);
+  diagnosticRef.current = onDiagnostic;
 
   const transport = useMemo(
     () =>
       new AxChatTransport({
         api: '/v1/chat/completions',
         user,
-        onCredentialRequired: (event) => callbackRef.current?.(event),
         onStatus: (event) => statusRef.current?.(event),
         onRunStart: () => runStartRef.current?.(),
+        onDiagnostic: (d) => diagnosticRef.current?.(d),
       }),
     [user],
   );

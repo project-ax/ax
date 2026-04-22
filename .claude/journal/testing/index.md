@@ -4,6 +4,9 @@ Test infrastructure, integration tests, E2E framework, migration tests.
 
 ## Entries
 
+- 2026-04-21 18:05 — Task 7.5: Petstore 2-call flow through OpenAPI indirect dispatch [e2e.md](e2e.md)
+- 2026-04-21 14:30 — Task 13: tool CLI shim regression for Linear 3-step pipeline [e2e.md](e2e.md)
+- 2026-04-19 19:50 — Task 3.6: indirect-dispatch e2e smoke test [e2e.md](e2e.md)
 - 2026-04-16 00:17 — Phase 2 Task 10: git-native skills e2e smoke [e2e.md](e2e.md)
 - 2026-04-15 23:20 — Fix 12 test files for simplified isBootstrapMode() [migrations.md](migrations.md)
 - 2026-04-12 10:30 — Fix failing tests for workspace-git-ssh branch merge [migrations.md](migrations.md)

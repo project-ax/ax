@@ -42,6 +42,12 @@ interface CommitResult {
   hash?: string;
   files?: number;
   error?: string;
+  /** If set, the .ax/ portion of the commit was rejected by the host's
+   *  validate_commit handler (path, size, or SKILL.md frontmatter schema).
+   *  The reason is propagated to the runner so it can be surfaced to the
+   *  LLM. The top-level `ok` can still be `true` — rejecting .ax/ files
+   *  only reverts those paths; any other staged files still commit. */
+  skillValidationError?: string;
 }
 
 /**
@@ -59,8 +65,15 @@ async function forcePull(workspaceDir: string, gitDir: string): Promise<void> {
 /**
  * Call the host's validate_commit endpoint to validate .ax/ diffs.
  * Returns { ok: true } if valid or host is unreachable, { ok: false, reason } if rejected.
+ *
+ * `files` carries full contents for files where the host needs to see more
+ * than just the diff hunks (SKILL.md frontmatter check can't rely on partial
+ * diffs — the `---` delimiters and full YAML block are required).
  */
-async function callHostValidateCommit(diff: string): Promise<{ ok: boolean; reason?: string }> {
+async function callHostValidateCommit(
+  diff: string,
+  files: Array<{ path: string; content: string }>,
+): Promise<{ ok: boolean; reason?: string }> {
   const hostUrl = process.env.AX_HOST_URL;
   if (!hostUrl) {
     logger.debug('validate_commit_skip', { reason: 'AX_HOST_URL not set' });
@@ -71,7 +84,7 @@ async function callHostValidateCommit(diff: string): Promise<{ ok: boolean; reas
     const resp = await fetch(`${hostUrl}/ipc`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'validate_commit', diff }),
+      body: JSON.stringify({ action: 'validate_commit', diff, files }),
     });
     if (!resp.ok) {
       logger.warn('validate_commit_http_error', { status: resp.status });
@@ -86,6 +99,56 @@ async function callHostValidateCommit(diff: string): Promise<{ ok: boolean; reas
   }
 }
 
+/**
+ * Collect full file contents for staged `.ax/skills/*​/SKILL.md` paths so the
+ * host can run the frontmatter schema check. We read from the INDEX (staged
+ * version) rather than the worktree because the commit hasn't happened yet
+ * and `git diff --cached` reflects what would land. `git show :path` emits
+ * the blob exactly as it would be committed.
+ */
+async function collectSkillMdStaged(
+  opts: { gitDir: string; workTree: string },
+): Promise<Array<{ path: string; content: string }>> {
+  const SKILL_MD_RE = /^\.ax\/skills\/[^/]+\/SKILL\.md$/;
+  const namesOut = await gitExec(
+    ['diff', '--cached', '--name-only', '--', AX_DIFF_PATHSPEC],
+    opts,
+  );
+  const paths = namesOut.split('\n').map(s => s.trim()).filter(p => SKILL_MD_RE.test(p));
+  const out: Array<{ path: string; content: string }> = [];
+  for (const path of paths) {
+    try {
+      const content = await gitExec(['show', `:${path}`], opts);
+      out.push({ path, content });
+    } catch (err) {
+      // Staged but unreadable — rare (permissions, corrupt index). Let the
+      // host see the missing file via the diff path+size checks; a schema
+      // check on missing content would produce a confusing error.
+      logger.debug('skill_md_read_failed', { path, error: (err as Error).message });
+    }
+  }
+  return out;
+}
+
+/**
+ * Revert every .ax/ change — both modifications to tracked files and
+ * brand-new untracked additions. Exported for tests; the inline use
+ * below is the only production caller.
+ *
+ * Why three commands instead of one:
+ *   - `git reset HEAD -- .ax/` unstages .ax/ entries from the index.
+ *   - `git checkout -- .ax/` restores TRACKED files to their HEAD content.
+ *     (No-op for files not in HEAD.)
+ *   - `git clean -fd -- .ax/` removes UNTRACKED files and directories
+ *     under .ax/. Without this, a rejected brand-new SKILL.md survives
+ *     the revert and the next `git add -A` silently re-stages it.
+ */
+export async function revertAxChanges(opts: { gitDir: string; workTree: string }): Promise<void> {
+  try { await gitExec(['reset', 'HEAD', '--', '.ax/'], opts); } catch { /* no .ax/ staged */ }
+  try { await gitExec(['checkout', '--', '.ax/'], opts); } catch { /* no tracked .ax/ to restore */ }
+  try { await gitExec(['clean', '-fd', '--', '.ax/'], opts); } catch { /* nothing untracked to remove */ }
+}
+
 async function commitAndPush(workspaceDir: string, gitDir: string): Promise<CommitResult> {
   const opts = { gitDir, workTree: workspaceDir };
 
@@ -93,16 +156,31 @@ async function commitAndPush(workspaceDir: string, gitDir: string): Promise<Comm
   await gitAdd(opts);
 
   // Validate .ax/ changes before committing
+  let skillValidationError: string | undefined;
   try {
     const axDiff = (await gitExec(['diff', '--cached', '--', AX_DIFF_PATHSPEC], opts)).trim();
 
     if (axDiff) {
-      const validation = await callHostValidateCommit(axDiff);
+      const skillMdFiles = await collectSkillMdStaged(opts);
+      const validation = await callHostValidateCommit(axDiff, skillMdFiles);
       if (!validation.ok) {
+        skillValidationError = validation.reason;
         logger.warn('ax_commit_rejected', { reason: validation.reason });
-        // Revert .ax/ changes — unstage and checkout
-        try { await gitExec(['reset', 'HEAD', '--', '.ax/'], opts); } catch { /* no .ax/ staged */ }
-        try { await gitExec(['checkout', '--', '.ax/'], opts); } catch { /* no .ax/ to restore */ }
+        // Dump a structured error block to stderr so pod-log consumers and
+        // any runner that tails sidecar stderr see the full rejection
+        // reason — Zod error messages are long and should not be truncated
+        // into a log line's `msg` field alone.
+        process.stderr.write([
+          '',
+          '─── AX commit rejected ───────────────────────────────────────────',
+          'Reason: ' + (validation.reason ?? '(unknown)'),
+          'Your .ax/ changes were reverted to prevent the skill from landing',
+          'in an invalid state. Non-.ax/ files will still commit. Fix the',
+          'frontmatter and retry.',
+          '──────────────────────────────────────────────────────────────────',
+          '',
+        ].join('\n'));
+        await revertAxChanges(opts);
         // Re-stage remaining (non-.ax/) changes
         await gitAdd(opts);
       }
@@ -114,7 +192,7 @@ async function commitAndPush(workspaceDir: string, gitDir: string): Promise<Comm
   const changed = await gitStatus(opts);
   if (changed.length === 0) {
     logger.debug('no_changes_to_commit');
-    return { ok: true, files: 0 };
+    return { ok: true, files: 0, skillValidationError };
   }
 
   const timestamp = new Date().toISOString();
@@ -138,7 +216,7 @@ async function commitAndPush(workspaceDir: string, gitDir: string): Promise<Comm
     }
   }
 
-  return { ok: true, hash, files: changed.length };
+  return { ok: true, hash, files: changed.length, skillValidationError };
 }
 
 export async function runGitSidecar(): Promise<void> {

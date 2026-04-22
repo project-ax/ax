@@ -14,12 +14,24 @@ import { spawn, spawnSync } from 'node:child_process';
 import { dirname, join, relative } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { minimatch } from 'minimatch';
+import { stringify as stringifyYaml } from 'yaml';
 import type { ProviderRegistry } from '../../types.js';
 import type { IPCContext } from '../ipc-server.js';
 import { safePath } from '../../utils/safe-path.js';
 import { getLogger } from '../../logger.js';
+import { parseSkillFile } from '../../skills/parser.js';
+import {
+  frontmattersEqual,
+  changedFrontmatterFields,
+  isInteractiveSession,
+} from '../../skills/frontmatter-diff.js';
 import type { GcsFileStorage } from '../gcs-file-storage.js';
 import type { FileStore } from '../../file-store.js';
+
+/** `.ax/skills/<name>/SKILL.md` — the only path shape where we run the
+ *  frontmatter schema on write. Matches `validate-commit.ts` so both layers
+ *  agree on which files are "skill definitions". */
+const SKILL_MD_RE = /^\.ax\/skills\/[^/]+\/SKILL\.md$/;
 
 /** Check once whether rg is available on this system. */
 let _rgAvailable: boolean | undefined;
@@ -263,6 +275,27 @@ export function createSandboxToolHandlers(providers: ProviderRegistry, opts: San
     sandbox_write_file: async (req: any, ctx: IPCContext) => {
       const workspace = resolveWorkspace(opts, ctx);
       try {
+        // Route SKILL.md authoring through the dedicated `skill_write`
+        // tool so the schema-aware validator fires on every attempt —
+        // including bash-heredoc writes that would otherwise slip past
+        // inline checks. One path, one validator, one actionable error.
+        if (SKILL_MD_RE.test(req.path)) {
+          await providers.audit.log({
+            action: 'sandbox_write_file',
+            sessionId: ctx.sessionId,
+            args: { path: req.path, redirected: 'skill_write' },
+            result: 'blocked',
+          });
+          return {
+            error:
+              `Refusing to write SKILL.md via write_file. Use the \`skill_write\` tool — ` +
+              `it takes structured frontmatter fields (name, description, credentials, ` +
+              `mcpServers, domains, body) and runs the host's Zod validator with ` +
+              `actionable errors. write_file / edit_file / bash can still read, ` +
+              `delete, or modify any other file under .ax/skills/.`,
+          };
+        }
+
         const abs = safeWorkspacePath(workspace, req.path);
         mkdirSync(dirname(abs), { recursive: true });
         writeFileSync(abs, req.content, 'utf-8');
@@ -291,12 +324,34 @@ export function createSandboxToolHandlers(providers: ProviderRegistry, opts: San
     sandbox_edit_file: async (req: any, ctx: IPCContext) => {
       const workspace = resolveWorkspace(opts, ctx);
       try {
+        // Route SKILL.md updates through `skill_write` for the same reason
+        // write_file does — structured args + single validator. The agent
+        // can still `read_file` the SKILL.md first, derive its new values,
+        // and call `skill_write` with the full updated spec.
+        if (SKILL_MD_RE.test(req.path)) {
+          await providers.audit.log({
+            action: 'sandbox_edit_file',
+            sessionId: ctx.sessionId,
+            args: { path: req.path, redirected: 'skill_write' },
+            result: 'blocked',
+          });
+          return {
+            error:
+              `Refusing to edit SKILL.md via edit_file. Use the \`skill_write\` tool ` +
+              `to replace the file with a structured spec — partial string-replace on ` +
+              `YAML frontmatter is a ridge of foot-guns. Read the current SKILL.md ` +
+              `with \`read_file\` if you need the old values.`,
+          };
+        }
+
         const abs = safeWorkspacePath(workspace, req.path);
         const content = readFileSync(abs, 'utf-8');
         if (!content.includes(req.old_string)) {
           return { error: 'old_string not found in file' };
         }
-        writeFileSync(abs, content.replace(req.old_string, req.new_string), 'utf-8');
+        const updated = content.replace(req.old_string, req.new_string);
+
+        writeFileSync(abs, updated, 'utf-8');
         await providers.audit.log({
           action: 'sandbox_edit_file',
           sessionId: ctx.sessionId,
@@ -312,6 +367,155 @@ export function createSandboxToolHandlers(providers: ProviderRegistry, opts: San
           result: 'error',
         });
         return { error: `Error editing file: ${(err as Error).message}` };
+      }
+    },
+
+    /**
+     * `skill_write` — the single authoring path for `.ax/skills/<name>/SKILL.md`.
+     *
+     * Takes structured args matching `SkillFrontmatterSchema` + a markdown body,
+     * serializes to YAML, re-parses through the host Zod validator (so the
+     * written bytes are proven to round-trip), and writes to the workspace.
+     * On failure returns the Zod error text — now including the received
+     * value for each mismatched field so the agent can diff its own output
+     * against the rule.
+     *
+     * The sandbox_write_file and sandbox_edit_file handlers both refuse
+     * SKILL.md paths and point the agent here. All other file operations
+     * under `.ax/skills/<name>/` (scripts/, reference docs, deletes) still
+     * go through the normal file tools.
+     */
+    skill_write: async (req: any, ctx: IPCContext) => {
+      const workspace = resolveWorkspace(opts, ctx);
+      const name: string | undefined = typeof req.name === 'string' ? req.name : undefined;
+      if (!name) {
+        return { error: 'skill_write requires a string `name` matching .ax/skills/<name>/' };
+      }
+
+      // Build the SKILL.md bytes from structured args. Keep the YAML block
+      // minimal — omit fields the caller didn't supply so the round-trip
+      // parse matches what the catalog reconciler will see. Default values
+      // live in the Zod schema, not here, so we don't accidentally diverge.
+      // Canonical key order: name → description → source → credentials →
+      // mcpServers → openapi → domains. Matches serializeFrontmatter in
+      // server-admin-skills-helpers.ts so agent-authored and admin-rewritten
+      // files produce identical YAML.
+      const frontmatter: Record<string, unknown> = { name };
+      if (typeof req.description === 'string') frontmatter.description = req.description;
+      if (req.source !== undefined) frontmatter.source = req.source;
+      if (Array.isArray(req.credentials) && req.credentials.length > 0) {
+        frontmatter.credentials = req.credentials;
+      }
+      if (Array.isArray(req.mcpServers) && req.mcpServers.length > 0) {
+        frontmatter.mcpServers = req.mcpServers;
+      }
+      if (Array.isArray(req.openapi) && req.openapi.length > 0) {
+        frontmatter.openapi = req.openapi;
+      }
+      if (Array.isArray(req.domains) && req.domains.length > 0) {
+        frontmatter.domains = req.domains;
+      }
+
+      const body: string = typeof req.body === 'string' ? req.body : '';
+      const yamlBlock = stringifyYaml(frontmatter, { lineWidth: 0 });
+      const content = `---\n${yamlBlock}---\n\n${body}`;
+
+      // Validate by round-tripping through the same parser used at commit
+      // time. This is the authoritative check — if it passes here, the
+      // sidecar and the admin reconciler will both accept the file.
+      const parsed = parseSkillFile(content);
+      if (!parsed.ok) {
+        await providers.audit.log({
+          action: 'skill_write',
+          sessionId: ctx.sessionId,
+          args: { name, error: parsed.error },
+          result: 'error',
+        });
+        return {
+          error:
+            `SKILL.md validation failed for \`${name}\`:\n  ${parsed.error}\n\n` +
+            `The file was NOT written. Reread the error, correct the ` +
+            `offending field(s) in your next skill_write call, and retry. ` +
+            `Common mistakes: authType must be exactly \`api_key\` or \`oauth\` ` +
+            `(snake_case), description must be a non-empty string, ` +
+            `mcpServers[].credential is a bare envName string (not a nested object).`,
+        };
+      }
+      if (parsed.frontmatter.name !== name) {
+        return {
+          error:
+            `Refusing to write: frontmatter.name "${parsed.frontmatter.name}" does not ` +
+            `match the \`name\` arg "${name}". These must be identical — the host ` +
+            `uses \`name\` as the directory segment.`,
+        };
+      }
+
+      let abs: string;
+      try {
+        abs = safeWorkspacePath(workspace, `.ax/skills/${name}/SKILL.md`);
+      } catch (err: unknown) {
+        return { error: `Invalid skill name: ${(err as Error).message}` };
+      }
+
+      // Non-interactive turn guard. Heartbeat / cron / channel sessions
+      // may call skill_write to "fix" a pending skill — commonly flipping
+      // an envName or credential ref and silently breaking admin-approved
+      // state. Policy: non-chat sessions CAN create a new skill or update
+      // the markdown body, but CAN'T mutate the frontmatter of an
+      // existing skill. User-initiated chat (`http:` sessions) is
+      // unchanged. Body-only edits pass through because frontmattersEqual
+      // ignores the body.
+      if (!isInteractiveSession(ctx.sessionId)) {
+        try {
+          const existing = readFileSync(abs, 'utf-8');
+          const existingParsed = parseSkillFile(existing);
+          if (existingParsed.ok && !frontmattersEqual(existingParsed.frontmatter, parsed.frontmatter)) {
+            const changed = changedFrontmatterFields(existingParsed.frontmatter, parsed.frontmatter);
+            await providers.audit.log({
+              action: 'skill_write',
+              sessionId: ctx.sessionId,
+              args: { name, blocked: 'non_interactive_frontmatter_mutation', changed },
+              result: 'blocked',
+            });
+            return {
+              error:
+                `Refusing to mutate SKILL.md frontmatter from a non-interactive session. ` +
+                `Heartbeat / cron / channel turns can update the body of a skill but ` +
+                `can't change its frontmatter — those fields are admin-approved and ` +
+                `rewriting them would flip the skill PENDING and break stored credentials. ` +
+                `Changed fields: ${changed.join(', ')}. ` +
+                `If you think this needs a real change, surface the problem in the ` +
+                `next user turn and let the admin re-approve via the dashboard.`,
+            };
+          }
+        } catch (err: unknown) {
+          // ENOENT on existing file = this is a creation (not a mutation),
+          // which IS allowed. Any other read error (permission, disk)
+          // surfaces as a write error below — not silenced, because the
+          // next writeFileSync would hit the same underlying cause.
+          const e = err as NodeJS.ErrnoException;
+          if (e.code !== 'ENOENT') throw err;
+        }
+      }
+
+      try {
+        mkdirSync(dirname(abs), { recursive: true });
+        writeFileSync(abs, content, 'utf-8');
+        await providers.audit.log({
+          action: 'skill_write',
+          sessionId: ctx.sessionId,
+          args: { name, bytes: content.length },
+          result: 'success',
+        });
+        return { written: true, path: `.ax/skills/${name}/SKILL.md`, bytes: content.length };
+      } catch (err: unknown) {
+        await providers.audit.log({
+          action: 'skill_write',
+          sessionId: ctx.sessionId,
+          args: { name },
+          result: 'error',
+        });
+        return { error: `Error writing SKILL.md: ${(err as Error).message}` };
       }
     },
 

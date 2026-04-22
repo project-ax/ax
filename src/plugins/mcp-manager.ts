@@ -9,12 +9,22 @@ export interface PluginMcpServer {
   type: string;
   /** MCP server endpoint URL. */
   url: string;
+  /** MCP wire protocol. Defaults to 'http'. Vendors like Linear
+   *  (mcp.linear.app/sse) require 'sse'. */
+  transport?: 'http' | 'sse';
 }
 
 interface ManagedServer extends PluginMcpServer {
   pluginName?: string;
   source?: string;
   headers?: Record<string, string>;
+  /** The skill that declared this server, when `source === 'skill'`.
+   *  Threaded through `authForServer` so the credential resolver can
+   *  filter `skill_credentials` rows by `(skillName, envName)` instead
+   *  of guessing from the serverName prefix alone (PR #185 review
+   *  issues #2/#3 — cross-skill credential isolation). Undefined for
+   *  admin-added (`source === 'database'`) and plugin-added entries. */
+  skillName?: string;
 }
 
 /** Options for addServer (new calling convention). */
@@ -22,6 +32,8 @@ export interface AddServerOpts {
   source?: string;
   pluginName?: string;
   headers?: Record<string, string>;
+  /** See `ManagedServer.skillName`. */
+  skillName?: string;
 }
 
 /**
@@ -29,7 +41,8 @@ export interface AddServerOpts {
  *
  * Tracks MCP server endpoints globally (shared across all agents). This is a
  * registry, not a connection pool. The actual MCP protocol connections happen
- * when prepareMcpCLIs() queries each server's tools at sandbox spin-up time.
+ * when `discoverAllTools` is called (e.g., by the skill-approval tool-module
+ * sync or the fast-path in-process discovery).
  *
  * Server registry is global — all agents see the same set of MCP servers.
  * Tool name → server URL mappings remain per-agent since each agent session
@@ -42,10 +55,19 @@ export class McpConnectionManager {
   /** agentId → (toolName → serverUrl) — per-agent tool routing */
   private readonly toolServerMap = new Map<string, Map<string, string>>();
 
+  /** agentId → last HEAD sha that had a successful discovery pass.
+   *  Drives `ensureToolsDiscoveredForHead` dedup so the turn path can
+   *  unconditionally ask for discovery without paying per-turn network
+   *  cost. In-memory + per-pod: a restart empties it, so the next turn
+   *  triggers a fresh discovery — exactly what we want, since the
+   *  `toolServerMap` also got wiped. */
+  private readonly discoveredHeads = new Map<string, string>();
+
   addServer(_agentId: string, server: PluginMcpServer, optsOrPluginName?: string | AddServerOpts): void {
     let pluginName: string | undefined;
     let source: string | undefined;
     let headers: Record<string, string> | undefined;
+    let skillName: string | undefined;
 
     if (typeof optsOrPluginName === 'string') {
       pluginName = optsOrPluginName;
@@ -54,9 +76,10 @@ export class McpConnectionManager {
       pluginName = optsOrPluginName.pluginName;
       source = optsOrPluginName.source ?? (pluginName ? `plugin:${pluginName}` : undefined);
       headers = optsOrPluginName.headers;
+      skillName = optsOrPluginName.skillName;
     }
 
-    this.servers.set(server.name, { ...server, pluginName, source, headers });
+    this.servers.set(server.name, { ...server, pluginName, source, headers, skillName });
   }
 
   removeServer(_agentId: string, serverName: string): boolean {
@@ -85,22 +108,27 @@ export class McpConnectionManager {
   }
 
   /**
-   * Get metadata (source, headers) for a specific server.
+   * Get metadata (url, source, headers, transport) for a specific server.
+   *
+   * The URL field is load-bearing for the unified `call_tool` dispatcher,
+   * which starts from the catalog's server *name* and needs the URL to
+   * actually reach the server. Pre-existing callers (that used this to
+   * read `source`/`headers`/`transport`) keep working unchanged.
    */
-  getServerMeta(_agentId: string, name: string): { source?: string; headers?: Record<string, string> } | undefined {
+  getServerMeta(_agentId: string, name: string): { url: string; source?: string; headers?: Record<string, string>; transport?: 'http' | 'sse'; skillName?: string } | undefined {
     const server = this.servers.get(name);
     if (!server) return undefined;
-    return { source: server.source, headers: server.headers };
+    return { url: server.url, source: server.source, headers: server.headers, transport: server.transport, skillName: server.skillName };
   }
 
   /**
-   * Get metadata (source, headers) for a server identified by its URL.
+   * Get metadata (source, headers, transport) for a server identified by its URL.
    * Used by the tool router which knows the server URL but not the server name.
    */
-  getServerMetaByUrl(_agentId: string, url: string): { name?: string; source?: string; headers?: Record<string, string> } | undefined {
+  getServerMetaByUrl(_agentId: string, url: string): { name?: string; source?: string; headers?: Record<string, string>; transport?: 'http' | 'sse'; skillName?: string } | undefined {
     for (const server of this.servers.values()) {
       if (server.url === url) {
-        return { name: server.name, source: server.source, headers: server.headers };
+        return { name: server.name, source: server.source, headers: server.headers, transport: server.transport, skillName: server.skillName };
       }
     }
     return undefined;
@@ -218,8 +246,13 @@ export class McpConnectionManager {
     opts?: {
       resolveHeaders?: (headers: Record<string, string>) => Promise<Record<string, string>>;
       /** Provide auth headers for servers that have no explicit headers configured.
-       *  Called with the server name and URL; should return headers or undefined. */
-      authForServer?: (server: { name: string; url: string }) => Promise<Record<string, string> | undefined>;
+       *  Called with the server name, URL, and declaring skill (when
+       *  the server was registered from a skill's frontmatter). The
+       *  skillName lets the resolver filter `skill_credentials` rows
+       *  by `(skillName, envName)` so two skills sharing a common
+       *  envName can't resolve to each other's rows. `skillName` is
+       *  undefined for admin-added / plugin-added servers. */
+      authForServer?: (server: { name: string; url: string; skillName?: string }) => Promise<Record<string, string> | undefined>;
       /** When set, only discover tools from servers whose name is in this set.
        *  Used to respect per-agent connector assignments (agent_mcp_servers). */
       serverFilter?: Set<string>;
@@ -234,12 +267,19 @@ export class McpConnectionManager {
         if (server.headers && opts?.resolveHeaders) {
           resolvedHeaders = await opts.resolveHeaders(server.headers);
         } else if (!server.headers && opts?.authForServer) {
-          resolvedHeaders = await opts.authForServer({ name: server.name, url: server.url });
+          resolvedHeaders = await opts.authForServer({
+            name: server.name,
+            url: server.url,
+            ...(server.skillName ? { skillName: server.skillName } : {}),
+          });
         } else {
           resolvedHeaders = server.headers;
         }
 
-        const tools = await listToolsFromServer(server.url, resolvedHeaders ? { headers: resolvedHeaders } : undefined);
+        const tools = await listToolsFromServer(server.url, {
+          ...(resolvedHeaders ? { headers: resolvedHeaders } : {}),
+          ...(server.transport ? { transport: server.transport } : {}),
+        });
         // Clear stale tool mappings for this server URL before registering new ones
         this.clearToolsForUrl(agentId, server.url);
         if (tools.length > 0) {
@@ -252,5 +292,32 @@ export class McpConnectionManager {
       }
     }
     return allTools;
+  }
+
+  /**
+   * Run tool discovery once per (agentId, headSha), skip otherwise.
+   *
+   * Motivation: subprocess-sandbox completions don't trigger `discoverAllTools`
+   * anywhere in their per-turn path (the inprocess fast-path does; subprocess
+   * does not). Wiring this into the turn path gives us auto-recovery without
+   * making discovery fire on every call.
+   *
+   * Pass `force: true` to bypass the cache — useful when callers know a
+   * credential/server change needs re-discovery even at the same HEAD.
+   *
+   * Discovery errors are swallowed by `discoverAllTools` (per-server), so
+   * this method's only failure mode is a thrown error from the underlying
+   * call — which callers should log and continue past, since a partial
+   * tool map is better than a refused turn.
+   */
+  async ensureToolsDiscoveredForHead(
+    agentId: string,
+    headSha: string,
+    opts: Parameters<McpConnectionManager['discoverAllTools']>[1] & { force?: boolean } = {},
+  ): Promise<void> {
+    const { force, ...discoverOpts } = opts;
+    if (!force && this.discoveredHeads.get(agentId) === headSha) return;
+    await this.discoverAllTools(agentId, discoverOpts);
+    this.discoveredHeads.set(agentId, headSha);
   }
 }

@@ -4,35 +4,40 @@
 // template seeding → IPC socket → CompletionDeps → delegation →
 // orchestrator → agent registry → createIPCHandler.
 
-import { existsSync, readFileSync, readdirSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { getLogger } from '../logger.js';
 import type { Config, ProviderRegistry } from '../types.js';
-import { dataDir } from '../paths.js';
+import { axHome, dataDir } from '../paths.js';
 import { createRouter, type Router } from './router.js';
 import { createIPCHandler, createIPCServer, type DelegateRequest, type IPCContext } from './ipc-server.js';
 import { TaintBudget, thresholdForProfile } from './taint-budget.js';
-import { processCompletion, type CompletionDeps } from './server-completions.js';
+import { processCompletion, resolveMcpAuthHeaders, type CompletionDeps } from './server-completions.js';
 import { createOrchestrator, type Orchestrator } from './orchestration/orchestrator.js';
 import { FileStore } from '../file-store.js';
-import { templatesDir as resolveTemplatesDir, seedSkillsDir } from '../utils/assets.js';
+import { templatesDir as resolveTemplatesDir } from '../utils/assets.js';
 import type { EventBus } from './event-bus.js';
 import type { MessageQueueStore, ConversationStoreProvider } from '../providers/storage/types.js';
 import { createAgentRegistry, type AgentRegistry } from './agent-registry.js';
 import { AgentProvisioner } from './agent-provisioner.js';
-import { ProxyDomainList } from './proxy-domain-list.js';
 import type { Server as NetServer } from 'node:net';
 import { callToolOnServer } from '../plugins/mcp-client.js';
+import { parseMcpTextResult } from './ipc-handlers/call-tool.js';
+import { makeDefaultOpenApiDispatcher } from './ipc-handlers/openapi-dispatcher.js';
+import { applyUrlRewrite } from '../plugins/url-rewrite.js';
 import { loadDatabaseMcpServers } from '../plugins/startup.js';
 import type { AdminContext } from './server-admin-helpers.js';
-import type { SkillStateStore } from './skills/state-store.js';
-import type { McpApplier } from './skills/mcp-applier.js';
-import type { ProxyApplier } from './skills/proxy-applier.js';
-import { createCredentialRequestQueue, type CredentialRequestQueue } from './credential-request-queue.js';
+import type { SkillCredStore } from './skills/skill-cred-store.js';
+import type { SkillDomainStore } from './skills/skill-domain-store.js';
 import type { AdminOAuthProviderStore } from './admin-oauth-providers.js';
 import { createAdminOAuthFlow, type AdminOAuthFlow } from './admin-oauth-flow.js';
+import { createSnapshotCache } from './skills/snapshot-cache.js';
+import type { SkillSnapshotEntry } from './skills/types.js';
+import type { GetAgentSkillsDeps } from './skills/get-agent-skills.js';
 
 const logger = getLogger();
 
@@ -69,31 +74,13 @@ export interface HostCore {
   adminCtx: AdminContext;
   sessionCanaries: Map<string, string>;
   workspaceMap: Map<string, string>;
-  requestedCredentials: Map<string, Set<string>>;
-  domainList: ProxyDomainList;
   defaultUserId: string;
   modelId: string;
   mcpManager?: import('../plugins/mcp-manager.js').McpConnectionManager;
-  /** Git-native skills state store — shared between the IPC handler
-   *  (skills_index action) and server.ts's reconcile-hook wiring.
-   *  Undefined when no database provider is available. */
-  stateStore?: SkillStateStore;
-  /** Phase 4: live MCP registration applier. Constructed only when the
-   *  state store is available — shared between the reconcile hook and
-   *  startup rehydration. */
-  mcpApplier?: McpApplier;
-  /** Phase 4: live proxy-allowlist applier. Constructed only when the
-   *  state store is available — shared with startup rehydration. */
-  proxyApplier?: ProxyApplier;
-  /** Phase 5 Task 5: in-memory queue of ad-hoc credential requests emitted
-   *  by the `request_credential` agent tool. Seeded by a subscriber on the
-   *  event bus. Surfaced via `GET /admin/api/credentials/requests` and
-   *  drained by `POST /admin/api/credentials/provide`. */
-  credentialRequestQueue: CredentialRequestQueue;
-  /** Detach the `credential.required` → queue subscription. Callers that
-   *  restart or dispose the host core should invoke this; otherwise the
-   *  subscription lives for the process lifetime. */
-  unsubscribeCredentialRequests: () => void;
+  /** Tuple-keyed skill credential store. */
+  skillCredStore?: SkillCredStore;
+  /** Tuple-keyed skill domain approval store. */
+  skillDomainStore?: SkillDomainStore;
   /** Phase 6 Task 1: symmetric key used to encrypt admin-registered OAuth
    *  client secrets at rest. Derived from `AX_OAUTH_SECRET_KEY` (preferred)
    *  or sha256(admin.token) as a fallback. Exposed so Task 2's CRUD endpoint
@@ -111,6 +98,13 @@ export interface HostCore {
    *  unconditionally (no DB deps) so the /admin/api/skills/oauth/start
    *  endpoint is available whenever the skill state store is wired. */
   adminOAuthFlow: AdminOAuthFlow;
+  /** Dependencies for live `getAgentSkills` computation — shared between the
+   *  per-turn skill-payload build (`processCompletion`) and the admin + hook
+   *  reconcile paths. */
+  agentSkillsDeps: GetAgentSkillsDeps;
+  /** Resolves (cloning + fetching as needed) the local bare-repo path for an
+   *  agent. Consumed by `agentSkillsDeps` for live snapshot walks. */
+  getBareRepoPath: (agentId: string) => Promise<string>;
 }
 
 /**
@@ -119,39 +113,6 @@ export interface HostCore {
  */
 export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
   const { config, providers, eventBus, verbose } = opts;
-
-  // ── Credential request queue (Phase 5 Task 5) ──
-  // Seed from credential.required events so the admin dashboard can surface
-  // ad-hoc requests from the `request_credential` agent tool at any time,
-  // not just while an SSE client is connected.
-  const credentialRequestQueue = createCredentialRequestQueue();
-  // Capture the unsubscribe fn so callers (tests / future shutdown paths) can
-  // detach the listener. Matches the pattern used in server-admin.ts and
-  // event-console.ts.
-  const unsubscribeCredentialRequests = eventBus.subscribe((event) => {
-    if (event.type !== 'credential.required') return;
-    const data = event.data ?? {};
-    const envName = typeof data.envName === 'string' ? data.envName : '';
-    const sessionId = typeof data.sessionId === 'string' ? data.sessionId : '';
-    if (!envName || !sessionId) return;
-    // The event emitted by skills.ts carries `agentId`/`userId` (not
-    // `agentName`). We accept either shape — pull whatever's there and fall
-    // back to '' for agentName if nothing resembles an agent identifier.
-    const agentName =
-      (typeof (data as Record<string, unknown>).agentName === 'string' && (data as Record<string, unknown>).agentName as string) ||
-      (typeof (data as Record<string, unknown>).agentId === 'string' && (data as Record<string, unknown>).agentId as string) ||
-      '';
-    const userId = typeof (data as Record<string, unknown>).userId === 'string'
-      ? ((data as Record<string, unknown>).userId as string)
-      : undefined;
-    credentialRequestQueue.enqueue({
-      sessionId,
-      envName,
-      agentName,
-      userId,
-      createdAt: event.timestamp ?? Date.now(),
-    });
-  });
 
   // Create McpConnectionManager if not provided — needed for plugin/database
   // MCP server discovery and tool stub generation.
@@ -206,62 +167,25 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
   const ipcSocketPath = join(ipcSocketDir, 'proxy.sock');
   const sessionCanaries = new Map<string, string>();
   const workspaceMap = new Map<string, string>();
-  const requestedCredentials = new Map<string, Set<string>>();
+  // Per-session catalog registry — populated in `processCompletion` after
+  // the per-turn `ToolCatalog` is built, consumed by the `describe_tools`
+  // and `call_tool` IPC handlers via the `resolveCatalog` closure below.
+  // Same lifetime as `workspaceMap` (register at turn-start, unregister in
+  // `finally`), so an uncaught error in the turn cannot leak a stale
+  // catalog into the next turn or another concurrent session.
+  const catalogMap = new Map<string, import('./ipc-handlers/describe-tools.js').CatalogReader>();
 
-  // ── Domain allowlist for proxy — populated from git-native seed skills ──
-  // Skills seeded into .ax/skills/ by seedAxDirectory() are the canonical
-  // source for git-native skills. Parse them here so their domains are in the
-  // proxy allowlist from the start. (Phase 3 introduced a state-store driven
-  // path for post-boot reconciliation; this block bootstraps from the seed
-  // directory so the allowlist isn't empty before the reconciler runs.)
-  const domainList = new ProxyDomainList();
-  try {
-    const sDir = seedSkillsDir();
-    if (existsSync(sDir)) {
-      const { parseAgentSkill } = await import('../utils/skill-format-parser.js');
-      const { generateManifest } = await import('../utils/manifest-generator.js');
-      const entries = readdirSync(sDir, { withFileTypes: true });
-      for (const entry of entries) {
-        try {
-          let skillContent: string | undefined;
-          let skillName: string;
-          if (entry.isFile() && entry.name.endsWith('.md')) {
-            // File-based skill: default.md
-            skillName = entry.name.replace(/\.md$/, '');
-            skillContent = readFileSync(join(sDir, entry.name), 'utf-8');
-          } else if (entry.isDirectory()) {
-            // Directory-based skill: deploy/SKILL.md
-            skillName = entry.name;
-            const skillPath = join(sDir, entry.name, 'SKILL.md');
-            if (existsSync(skillPath)) {
-              skillContent = readFileSync(skillPath, 'utf-8');
-            }
-          } else {
-            continue;
-          }
-          if (skillContent) {
-            const parsed = parseAgentSkill(skillContent);
-            const manifest = generateManifest(parsed);
-            if (manifest.capabilities.domains.length > 0) {
-              domainList.addSkillDomains(parsed.name || skillName, manifest.capabilities.domains);
-            }
-          }
-        } catch { /* skip unparseable skill */ }
-      }
-    }
-  } catch { /* seed skills dir not available */ }
-
-  // ── Git-native skills state store ──
-  // Phase 3: powers the skills_index IPC handler and the reconcile hook.
-  // Only created when a database provider is available; otherwise the
-  // skills_index handler silently returns an empty list (Task 3 behavior).
-  let stateStore: SkillStateStore | undefined;
+  // ── Git-native skills stores ──
+  // Only created when a database provider is available; power the admin
+  // skill-approval + setup endpoints.
+  let skillCredStore: SkillCredStore | undefined;
+  let skillDomainStore: SkillDomainStore | undefined;
   let adminOAuthKey: Buffer | undefined;
   let adminOAuthProviderStore: AdminOAuthProviderStore | undefined;
 
   // Phase 6 Task 3: admin-initiated OAuth pending-flow map. In-memory, no
   // DB deps — construct unconditionally so the endpoint is available
-  // whenever `skillStateStore` is.
+  // whenever a skill credential store is wired.
   const adminOAuthFlow = createAdminOAuthFlow();
 
   // Auto-generate admin.token if not configured — MUST happen before
@@ -282,27 +206,30 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
 
   if (providers.database) {
     const { runMigrations } = await import('../utils/migrator.js');
-    const { skillsMigrations } = await import('../migrations/skills.js');
-    const { createSkillStateStore } = await import('./skills/state-store.js');
+    const { buildSkillsMigrations } = await import('../migrations/skills.js');
     const migResult = await runMigrations(
       providers.database.db,
-      skillsMigrations,
+      buildSkillsMigrations(providers.database.type),
       'skills_migration',
     );
     if (migResult.error) throw migResult.error;
-    stateStore = createSkillStateStore(providers.database.db);
+
+    const { createSkillCredStore } = await import('./skills/skill-cred-store.js');
+    const { createSkillDomainStore } = await import('./skills/skill-domain-store.js');
+    skillCredStore = createSkillCredStore(providers.database.db, providers.database.type);
+    skillDomainStore = createSkillDomainStore(providers.database.db);
 
     // Phase 6 Task 1: admin-registered OAuth providers. Run the migration
     // alongside the skills one (same Kysely instance, distinct migration
     // table name so their histories don't collide), derive the encryption
     // key, and construct the store so Task 2's CRUD endpoints can wire to
     // it without another round of setup.
-    const { adminOAuthMigrations } = await import('../migrations/admin-oauth-providers.js');
+    const { buildAdminOAuthMigrations } = await import('../migrations/admin-oauth-providers.js');
     const { deriveOAuthKey, createAdminOAuthProviderStore } =
       await import('./admin-oauth-providers.js');
     const oauthMigResult = await runMigrations(
       providers.database.db,
-      adminOAuthMigrations,
+      buildAdminOAuthMigrations(providers.database.type),
       'admin_oauth_migration',
     );
     if (oauthMigResult.error) throw oauthMigResult.error;
@@ -334,17 +261,52 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     }
   }
 
-  // Phase 4: construct live-state appliers when the state store is available.
-  // These are shared between the reconcile-hook wiring (server.ts) and the
-  // startup-rehydrate pass so both paths push the same live-state contract.
-  let mcpApplier: McpApplier | undefined;
-  let proxyApplier: ProxyApplier | undefined;
-  if (stateStore) {
-    const { createMcpApplier } = await import('./skills/mcp-applier.js');
-    const { createProxyApplier } = await import('./skills/proxy-applier.js');
-    mcpApplier = createMcpApplier({ mcpManager, audit: providers.audit });
-    proxyApplier = createProxyApplier({ proxyDomainList: domainList, audit: providers.audit });
+  // ── Git-native skill snapshot plumbing ──
+  // Delegate local-mirror management to the workspace provider. Each
+  // provider owns its seeded-mirror set + clone configuration, so both
+  // this snapshot-walker path AND `workspace.commitFiles` share the same
+  // on-disk state. Previously there were two parallel paths — the one
+  // here only ran `git clone --mirror` without unsetting
+  // `remote.origin.mirror`, while `commitFiles` later expected a mirror
+  // configured for refspec-push. The clone-without-unset silently left
+  // the mirror in a state that broke pushes with "--mirror can't be
+  // combined with refspecs".
+  const execFileAsync = promisify(execFile);
+  const getBareRepoPath = async (agentIdArg: string): Promise<string> => {
+    if (providers.workspace) {
+      return providers.workspace.ensureLocalMirror(agentIdArg);
+    }
+    // Fallback for setups with no workspace provider (e.g. pre-workspace
+    // configs) — just return the expected local path.
+    return join(axHome(), 'repos', encodeURIComponent(agentIdArg));
+  };
+  const probeHead = async (agentIdArg: string): Promise<string> => {
+    const bareRepoPath = await getBareRepoPath(agentIdArg);
+    const { stdout } = await execFileAsync(
+      'git',
+      ['ls-remote', bareRepoPath, 'refs/heads/main'],
+      { encoding: 'utf-8', maxBuffer: 1024 * 1024 },
+    );
+    const line = stdout.split('\n').find((l) => l.trim().length > 0);
+    if (!line) return '<empty>';
+    const sha = line.split(/\s+/, 1)[0];
+    return sha || '<empty>';
+  };
+  if (!skillCredStore || !skillDomainStore) {
+    throw new Error(
+      'skills subsystem requires a database provider — set providers.database in ax.yaml.',
+    );
   }
+
+  const snapshotCache = createSnapshotCache<SkillSnapshotEntry[]>({ maxEntries: 1024 });
+  const agentSkillsDeps: GetAgentSkillsDeps = {
+    skillCredStore,
+    skillDomainStore,
+    getBareRepoPath,
+    probeHead,
+    snapshotCache,
+    mcpManager,
+  };
 
   // ── CompletionDeps ──
   const completionDeps: CompletionDeps = {
@@ -363,9 +325,11 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     gcsFileStorage,
     eventBus,
     workspaceMap,
-    requestedCredentials,
-    domainList,
+    catalogMap,
     mcpManager,
+    agentSkillsDeps,
+    skillCredStore,
+    skillDomainStore,
     // provisioner is set after agent registry creation below
   };
 
@@ -374,7 +338,7 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     const tier = req.resourceTier ?? 'default';
     const tierConfig = tier === 'heavy'
       ? { memory_mb: 2048, cpus: 4 }
-      : { memory_mb: config.sandbox.memory_mb, cpus: 1 };
+      : { memory_mb: config.sandbox.memory_mb, cpus: config.sandbox.cpus };
 
     const childConfig = {
       ...config,
@@ -433,46 +397,105 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     eventBus,
     orchestrator,
     workspaceMap,
-    requestedCredentials,
-    domainList,
     adminCtx,
-    stateStore,
-    // Legacy: providers.mcp (database MCP provider) is kept as fallback for
-    // tool batching. When all callers migrate to McpConnectionManager, remove
-    // providers.mcp and the legacy fallback paths in tool-router.ts,
-    // tool-batch.ts, inprocess.ts, and server-completions.ts.
-    toolBatchProvider: (providers.mcp || mcpManager)
+    // Per-turn catalog lookup for `describe_tools` and `call_tool`. The
+    // catalog is registered in `processCompletion` (keyed on sessionId)
+    // after it's been built from the active skills; this closure just
+    // reads that per-session state at IPC dispatch time.
+    resolveCatalog: (ctx) => catalogMap.get(ctx.sessionId),
+    // MCP dispatcher for `call_tool`. Adapts from the existing
+    // `mcpManager` server-name → URL + headers lookup and the
+    // `callToolOnServer` free function, matching the `{server, tool,
+    // args, ctx}` shape the handler threads.
+    //
+    // Per-request identity (agentId + userId) comes from `ctx` — the
+    // handler pulls it off the IPC context at dispatch time. This
+    // mirrors tool-batch's `ctx.userId ?? ''` pattern so skill
+    // credentials resolve against the caller's user, not a host-wide
+    // default. DO NOT reintroduce a captured `defaultUserId` here — on
+    // multi-user hosts it silently misattributes auth.
+    callToolMcpDispatcher: mcpManager
       ? {
-          getProvider: providers.mcp ? () => providers.mcp! : () => null,
-          resolveServer: mcpManager
-            ? (agentId: string, toolName: string) => mcpManager.getToolServerUrl(agentId, toolName)
-            : undefined,
-          mcpCallTool: mcpManager ? callToolOnServer : undefined,
-          getServerMetaByUrl: mcpManager
-            ? (agentId: string, serverUrl: string) => mcpManager.getServerMetaByUrl(agentId, serverUrl)
-            : undefined,
-          resolveHeaders: providers.credentials
-            ? async (h: Record<string, string>) => {
-                const { resolveHeaders: rh } = await import('../providers/mcp/database.js');
-                return rh(JSON.stringify(h), providers.credentials);
-              }
-            : undefined,
-          authForServer: providers.credentials
-            ? async (server: { name: string; url: string }) => {
-                const prefix = server.name.toUpperCase().replace(/-/g, '_');
-                const candidates = [
-                  `${prefix}_API_KEY`, `${prefix}_ACCESS_TOKEN`,
-                  `${prefix}_OAUTH_TOKEN`, `${prefix}_TOKEN`,
-                ];
-                for (const envName of candidates) {
-                  const value = await providers.credentials.get(envName);
-                  if (value) return { Authorization: `Bearer ${value}` };
-                }
-                return undefined;
-              }
-            : undefined,
+          callToolOnServer: async ({
+            server,
+            tool,
+            skillName,
+            args,
+            ctx,
+          }: {
+            server: string;
+            tool: string;
+            skillName: string;
+            args: Record<string, unknown>;
+            ctx: { agentId: string; userId: string };
+          }) => {
+            const meta = mcpManager.getServerMeta(ctx.agentId, server);
+            if (!meta) {
+              throw new Error(`MCP server not registered: ${server}`);
+            }
+            // Resolve headers: prefer explicit headers (with placeholder
+            // substitution), fall back to skill-credential auto-discovery
+            // against the caller's (skillName, agentId, userId). Filtering
+            // by skillName prevents cross-skill credential leakage when
+            // two skills share a common envName prefix (PR #185 review).
+            let headers: Record<string, string> | undefined;
+            if (meta.headers) {
+              headers = providers.credentials
+                ? await (async () => {
+                    const { resolveHeaders: rh } = await import(
+                      '../providers/mcp/database.js'
+                    );
+                    return rh(JSON.stringify(meta.headers), providers.credentials);
+                  })()
+                : meta.headers;
+            } else if (skillCredStore) {
+              headers = await resolveMcpAuthHeaders({
+                serverName: server,
+                skillName,
+                agentId: ctx.agentId,
+                userId: ctx.userId,
+                skillCredStore,
+              });
+            }
+            // Apply `config.url_rewrites` at host dispatch time. No-op
+            // in production (the map is unset); e2e uses it to redirect
+            // `https://mock-target.test/...` frontmatter URLs to the
+            // mock server's dynamic port.
+            const dispatchUrl = applyUrlRewrite(meta.url, config.url_rewrites);
+            const result = await callToolOnServer(dispatchUrl, tool, args, {
+              ...(headers ? { headers } : {}),
+              ...(meta.transport ? { transport: meta.transport } : {}),
+            });
+            if (result.isError) {
+              throw new Error(
+                typeof result.content === 'string'
+                  ? result.content
+                  : JSON.stringify(result.content),
+              );
+            }
+            return parseMcpTextResult(result.content);
+          },
         }
       : undefined,
+    // OpenAPI dispatcher for `call_tool` (Task 7.4). Parallel to the MCP
+    // dispatcher above: closes over `skillCredStore` for credential
+    // resolution and `config.url_rewrites` for e2e mock-server redirection.
+    //
+    // `skillCredStore` is always set at this point (CodeQL flagged the
+    // earlier `skillCredStore ? ... : undefined` as a useless conditional,
+    // and the analysis is correct — the store is wired unconditionally
+    // from the host boot path), so the dispatcher is built unconditionally.
+    // An openapi tool that needs a credential will surface a clear
+    // "Missing credential" error via `resolveCredentialValueByEnvName`
+    // rather than silently falling through to `unsupported_dispatch`.
+    callToolOpenApiDispatcher: makeDefaultOpenApiDispatcher({
+      skillCredStore,
+      urlRewrites: config.url_rewrites,
+    }),
+    // Auto-spill threshold for `call_tool` responses. `tool_dispatch`
+    // is non-optional on Config and the Zod schema fills the default —
+    // no optional chaining here (Task 4.3).
+    spillThresholdBytes: config.tool_dispatch.spill_threshold_bytes,
     gcsFileStorage,
     fileStore,
   });
@@ -512,18 +535,15 @@ export async function initHostCore(opts: HostCoreOptions): Promise<HostCore> {
     adminCtx,
     sessionCanaries,
     workspaceMap,
-    requestedCredentials,
-    domainList,
     defaultUserId,
     modelId,
     mcpManager,
-    stateStore,
-    mcpApplier,
-    proxyApplier,
-    credentialRequestQueue,
-    unsubscribeCredentialRequests,
+    skillCredStore,
+    skillDomainStore,
     adminOAuthKey,
     adminOAuthProviderStore,
     adminOAuthFlow,
+    agentSkillsDeps,
+    getBareRepoPath,
   };
 }

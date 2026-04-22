@@ -111,6 +111,7 @@ export interface Config {
     idle_timeout_sec?: number;
     clean_idle_timeout_sec?: number;
     memory_mb: number;
+    cpus: number;
   };
   scheduler: {
     active_hours: {
@@ -141,6 +142,16 @@ export interface Config {
     max_concurrent?: number;
     max_depth?: number;
   };
+  /**
+   * Tool dispatch mode. Controls whether the agent invokes tools directly via IPC
+   * (`indirect` — default, unified agent-side dispatch) or through existing per-tool
+   * code paths (`direct` — legacy).
+   */
+  tool_dispatch: {
+    mode: 'direct' | 'indirect';
+    /** Response size threshold above which the result is spilled to storage. */
+    spill_threshold_bytes: number;
+  };
   webhooks?: {
     enabled: boolean;
     token: string;
@@ -157,6 +168,7 @@ export interface Config {
   };
   auth?: {
     better_auth?: {
+      base_url?: string;
       google?: {
         client_id: string;
         client_secret: string;

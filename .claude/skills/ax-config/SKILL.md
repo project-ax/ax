@@ -44,7 +44,7 @@ Validated by `ConfigSchema` (Zod `strictObject` -- rejects unknown keys).
 | `providers.eventbus` | string | required | Event bus provider (e.g., `inprocess`, `postgres`) |
 | `channel_config` | `Record<string, ChannelAccessConfig>` | optional | Per-channel access policies |
 | `max_tokens` | number (256-200000) | 8192 | Max tokens for LLM calls |
-| `sandbox` | object | required | `timeout_sec` (1-3600), `memory_mb` (64-8192) |
+| `sandbox` | object | required | `timeout_sec` (1-3600), `memory_mb` (64-8192), `cpus` (0.1-16, default 1) |
 | `scheduler` | object | required | `active_hours`, `max_token_budget`, `heartbeat_interval_min`, optional `agent_dir` and `defaultDelivery` |
 | `history` | object | see below | Conversation retention and memory recall settings |
 | `history.max_turns` | number | 50 | Max conversation turns to retain |

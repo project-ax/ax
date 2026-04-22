@@ -4,6 +4,14 @@ Design patterns, provider contracts, import hygiene, event bus design, and works
 
 ## Entries
 
+- Shell out to `jq` rather than bundling node-jq or jq-wasm for `_select` projection [entries.md](entries.md)
+- Spill file responsibility split: host emits envelope, agent writes the file [entries.md](entries.md)
+- IPC-action module pattern: context-scoped resolver + injected dispatcher + structured error envelope [entries.md](entries.md)
+- SSE event ordering: emit turn-level side-band events AFTER the finish-reason chunk and BEFORE `[DONE]` [entries.md](entries.md)
+- Per-turn collectors: fresh instance per call, closure-captures-by-reference for cross-closure writes [entries.md](entries.md)
+- When a helper builds "value + shape" in one pass and a new caller needs a different shape, split out the value lookup — don't add a shape knob [entries.md](entries.md)
+- Per-turn caches keyed on agent state must also include caller `userId` when the build touches per-user credentials [entries.md](entries.md)
+- Push derived state at turn boundaries instead of having the sandbox pull it [entries.md](entries.md)
 - Multi-task deletion phases leave "dormant-caller" dead code that only a final sweep finds [entries.md](entries.md)
 - IPC-sourced config with filesystem fallback: use `config.X ?? scan()` in sync builders [entries.md](entries.md)
 - Shared outbound proxies need per-turn auth to preserve session identity [entries.md](entries.md)

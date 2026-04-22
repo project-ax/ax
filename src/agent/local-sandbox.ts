@@ -11,8 +11,15 @@ import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { minimatch } from 'minimatch';
+import { stringify as stringifyYaml } from 'yaml';
 import type { IIPCClient } from './runner.js';
 import { safePath } from '../utils/safe-path.js';
+import { parseSkillFile } from '../skills/parser.js';
+import {
+  frontmattersEqual,
+  changedFrontmatterFields,
+  isInteractiveSession,
+} from '../skills/frontmatter-diff.js';
 
 /** Check once whether rg is available on this system. */
 let _rgAvailable: boolean | undefined;
@@ -99,10 +106,16 @@ export interface LocalSandboxOptions {
   client: IIPCClient;
   workspace: string;
   timeoutMs?: number;
+  /** Inbound session ID for this turn. Used by `writeSkillFile` to gate
+   *  frontmatter mutations: only `http:`-prefixed (chat-UI-originated)
+   *  sessions can rewrite frontmatter of an existing skill; heartbeat /
+   *  cron / channel sessions can still create new skills or edit the
+   *  markdown body, but can't break admin-approved state. */
+  sessionId?: string;
 }
 
 export function createLocalSandbox(opts: LocalSandboxOptions) {
-  const { client, workspace, timeoutMs = 120_000 } = opts;
+  const { client, workspace, timeoutMs = 120_000, sessionId } = opts;
 
   function safeWorkspacePath(relativePath: string): string {
     // "." means workspace root — return it directly
@@ -214,6 +227,122 @@ export function createLocalSandbox(opts: LocalSandboxOptions) {
         return { written: true, path };
       } catch (err: unknown) {
         const error = `Error writing file: ${(err as Error).message}`;
+        report({ operation: 'write', path, success: false, error });
+        return { error };
+      }
+    },
+
+    /**
+     * Serialize structured skill args to YAML frontmatter + body, validate
+     * the round-trip against `SkillFrontmatterSchema`, and write to
+     * `.ax/skills/<name>/SKILL.md`. The validator lives in `src/skills/` so
+     * this can run inside the sandbox container — in k8s that matters
+     * because the git sidecar only sees files that the pod writes to its
+     * own /workspace mount, not files the host process writes to its own
+     * workspace copy.
+     */
+    async writeSkillFile(args: {
+      name: string;
+      description: string;
+      source?: { url: string; version?: string };
+      credentials?: Array<Record<string, unknown>>;
+      mcpServers?: Array<Record<string, unknown>>;
+      openapi?: Array<Record<string, unknown>>;
+      domains?: string[];
+      body: string;
+    }): Promise<{ written?: boolean; error?: string; path?: string; bytes?: number }> {
+      const path = `.ax/skills/${args.name}/SKILL.md`;
+
+      // Build frontmatter object — omit empty optional arrays so the YAML
+      // matches what the agent would hand-write and the reconciler sees a
+      // clean shape. Canonical key order matches serializeFrontmatter in
+      // server-admin-skills-helpers.ts so agent-authored and
+      // admin-rewritten files produce identical YAML.
+      const frontmatter: Record<string, unknown> = { name: args.name };
+      if (args.description) frontmatter.description = args.description;
+      if (args.source !== undefined) frontmatter.source = args.source;
+      if (Array.isArray(args.credentials) && args.credentials.length > 0) {
+        frontmatter.credentials = args.credentials;
+      }
+      if (Array.isArray(args.mcpServers) && args.mcpServers.length > 0) {
+        frontmatter.mcpServers = args.mcpServers;
+      }
+      if (Array.isArray(args.openapi) && args.openapi.length > 0) {
+        frontmatter.openapi = args.openapi;
+      }
+      if (Array.isArray(args.domains) && args.domains.length > 0) {
+        frontmatter.domains = args.domains;
+      }
+
+      const body = typeof args.body === 'string' ? args.body : '';
+      const yamlBlock = stringifyYaml(frontmatter, { lineWidth: 0 });
+      const content = `---\n${yamlBlock}---\n\n${body}`;
+
+      // Round-trip through the same parser the git sidecar uses at commit
+      // time. If it passes here, it will pass there — no split-brain.
+      const parsed = parseSkillFile(content);
+      if (!parsed.ok) {
+        return {
+          error:
+            `SKILL.md validation failed for \`${args.name}\`:\n  ${parsed.error}\n\n` +
+            `The file was NOT written. Reread the error, correct the ` +
+            `offending field(s) in your next skill_write call, and retry. ` +
+            `Common mistakes: authType must be exactly \`api_key\` or \`oauth\` ` +
+            `(snake_case), description must be a non-empty string, ` +
+            `mcpServers[].credential is a bare envName string (not a nested object).`,
+        };
+      }
+      if (parsed.frontmatter.name !== args.name) {
+        return {
+          error:
+            `Refusing to write: frontmatter.name "${parsed.frontmatter.name}" does not ` +
+            `match the \`name\` arg "${args.name}". These must be identical.`,
+        };
+      }
+
+      // Non-interactive turn guard. Heartbeat / cron / channel turns
+      // must NOT mutate the frontmatter of an existing skill — they
+      // commonly flip envName / credential / transport in an attempt to
+      // "fix" a pending skill, silently breaking admin-approved state.
+      // New skills (no existing file) and body-only edits (identical
+      // frontmatter) still pass through.
+      if (!isInteractiveSession(sessionId)) {
+        const abs = safeWorkspacePath(path);
+        try {
+          const existingContent = readFileSync(abs, 'utf-8');
+          const existingParsed = parseSkillFile(existingContent);
+          if (existingParsed.ok && !frontmattersEqual(existingParsed.frontmatter, parsed.frontmatter)) {
+            const changed = changedFrontmatterFields(existingParsed.frontmatter, parsed.frontmatter);
+            return {
+              error:
+                `Refusing to mutate SKILL.md frontmatter from a non-interactive session. ` +
+                `Heartbeat / cron / channel turns can update the body of a skill but ` +
+                `can't change its frontmatter — those fields are admin-approved and ` +
+                `rewriting them would flip the skill PENDING and break stored credentials. ` +
+                `Changed fields: ${changed.join(', ')}. ` +
+                `If you think this needs a real change, surface the problem in the ` +
+                `next user turn and let the admin re-approve via the dashboard.`,
+            };
+          }
+        } catch (err: unknown) {
+          // ENOENT = first write of a new skill; allowed. Other errors
+          // (permission, disk) fall through to the writeFileSync below.
+          const e = err as NodeJS.ErrnoException;
+          if (e.code !== 'ENOENT') throw err;
+        }
+      }
+
+      const approval = await approve({ operation: 'write', path, content });
+      if (!approval.approved) return { error: `Denied: ${approval.reason ?? 'denied by host policy'}` };
+
+      try {
+        const abs = safeWorkspacePath(path);
+        mkdirSync(dirname(abs), { recursive: true });
+        writeFileSync(abs, content, 'utf-8');
+        report({ operation: 'write', path, success: true });
+        return { written: true, path, bytes: content.length };
+      } catch (err: unknown) {
+        const error = `Error writing SKILL.md: ${(err as Error).message}`;
         report({ operation: 'write', path, success: false, error });
         return { error };
       }

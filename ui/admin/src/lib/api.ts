@@ -14,8 +14,8 @@ import type {
   SkillSetupResponse,
   SkillApproveBody,
   SkillApproveResponse,
-  CredentialRequestsResponse,
   StartOAuthResponse,
+  AgentSkillsResponse,
 } from './types';
 
 const BASE = '/admin/api';
@@ -67,23 +67,32 @@ export async function apiFetch<T>(
 
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    // Try to extract a human-readable message from the error JSON. If the
-    // envelope also carries a `details` string (approve endpoints surface
-    // things like the exact unexpected credential name there), hoist it
-    // onto the thrown Error so callers can render it.
+    // Try to extract a human-readable message from the error JSON. The
+    // approve endpoint also carries a structured `probeFailures` array
+    // when Test-&-Enable probes one or more MCP servers that didn't
+    // answer listTools; hoist that onto the thrown Error so the approval
+    // UI can render each failure inline next to the offending server.
     let message = res.statusText;
     let details: string | undefined;
+    let probeFailures: Array<{ name: string; error: string }> | undefined;
     try {
       const parsed = JSON.parse(body);
       message = parsed?.error?.message ?? parsed?.error ?? message;
       if (typeof parsed?.details === 'string') {
         details = parsed.details;
       }
+      if (Array.isArray(parsed?.probeFailures)) {
+        probeFailures = parsed.probeFailures;
+      }
     } catch {
       if (body) message = body;
     }
-    const err = new Error(message) as Error & { details?: string };
+    const err = new Error(message) as Error & {
+      details?: string;
+      probeFailures?: Array<{ name: string; error: string }>;
+    };
     if (details) err.details = details;
+    if (probeFailures) err.probeFailures = probeFailures;
     throw err;
   }
 
@@ -259,22 +268,11 @@ export const api = {
     );
   },
 
-  /** List pending ad-hoc credential requests from the request_credential agent tool. */
-  credentialRequests(): Promise<CredentialRequestsResponse> {
-    return apiFetch<CredentialRequestsResponse>('/credentials/requests');
+  /** List every skill (enabled, pending, invalid) the reconciler knows about for one agent. */
+  agentSkills(agentId: string): Promise<AgentSkillsResponse> {
+    return apiFetch<AgentSkillsResponse>(`/agents/${encodeURIComponent(agentId)}/skills`);
   },
 
-  /** Provide a credential value for a pending request (drains the queue on success). */
-  provideCredential(
-    envName: string,
-    value: string,
-    sessionId?: string
-  ): Promise<{ ok: boolean }> {
-    return apiFetch<{ ok: boolean }>('/credentials/provide', {
-      method: 'POST',
-      body: JSON.stringify({ envName, value, sessionId }),
-    });
-  },
 };
 
 /**

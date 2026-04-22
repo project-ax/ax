@@ -2,6 +2,36 @@
 
 ## Lessons
 
+### Shape-identical tool responses need a sentinel for scripted-turn disambiguation
+**Date:** 2026-04-21
+**Context:** Task 7.5 e2e petstore flow. Turn 2 dispatches `createPet({name:'Rex'})` → `{id:42, name:'Rex'}`. Turn 3 dispatches `getPetByID({id:42})` → `{id:42, name:'Rex'}` (identical shape). The mock OpenRouter's `matchToolResult` scanner iterates `ALL_TURNS` from index 0 on each pass and returns the FIRST match, so a regex like `/"id":42.*"name":"Rex"/` on Turn 2 would re-fire when Turn 3's tool result comes back — infinite-looping the create call. No payload-level discriminator exists if the real handler returns the same data shape on both calls.
+**Lesson:** When chaining scripted turns whose tool responses have overlapping shapes, attach a handler-side sentinel (e.g. `_readback: true`) to the second response and use it as the second turn's `matchToolResult` discriminator. It's a 1-line handler change + a tight regex, and it's more robust than trying to pin ordering differences in the JSON output that `JSON.stringify` could reorder. Keeps the scripted turns' `matchToolResult` patterns pairwise-disjoint across the full `ALL_TURNS` array.
+**Tags:** e2e, mock-server, matchToolResult, scripted-turns, sentinel, first-match-wins
+
+### execFileSync blocks the event loop — same-thread HTTP server can't answer the child
+**Date:** 2026-04-20
+**Context:** Task 6.1 fake `/internal/ipc` server for `executeScript()` tests. First draft created an `http.createServer()` on the main thread, then called `executeScript()` which uses `execFileSync('node', ...)`. Child's fetch hung for 30s and timed out (`spawnSync node ETIMEDOUT`) — the parent's event loop was frozen inside `execFileSync`, so the listening socket never accepted the child's connection even though `listen()` returned.
+**Lesson:** If your test spins up an HTTP server to answer a child subprocess spawned via `execFileSync`/`execSync`/`spawnSync`, the server MUST run on a different thread. Put it in a `node:worker_threads` Worker with `{ eval: true }`, post `{type:'listening', port}` back to the main thread, collect requests via `parentPort.postMessage`. Also: `execFileSync` returns synchronously but the worker's message back to the parent is async — after calling the sync executor, `await new Promise(r => setImmediate(r))` before asserting on captured requests, or they'll look empty.
+**Tags:** execFileSync, worker_threads, event-loop, http-server, fake-server, integration-tests
+
+### E2E tests with weak assertions hide real failures for years
+**Date:** 2026-04-19
+**Context:** Task 4.4 wrote a stricter e2e assertion (`expect(res.content).toMatch(/ISS-1/)`) against the indirect-dispatch chain. The test failed with "Internal processing error" — which turned out to be a pre-existing crash in `buildSnapshotFromBareRepo` that tests 1-17 had been hitting on EVERY request since the start of the e2e suite. They "passed" because they only check `status === 200` and `content.length > 0`, and "Internal processing error" satisfies both. The host was raising `completion.error` events for all of them; nobody noticed.
+**Lesson:** Weak e2e assertions (`length > 0`) make the suite complicit in hiding latent errors. When writing a new e2e, add at least ONE content assertion that would fail for "Internal processing error" — match on a known substring the SUT should emit. Better: also grep the pod/server logs for `level:50` (error) entries and fail if any appeared during the test. If you inherit a suite of weak-assertion tests, consider adding a global post-check that no `completion.error` events fired during the run.
+**Tags:** e2e, assertions, hidden-failures, error-masking, regression-test
+
+### K8s sandbox path skips host-side git seed — pre-seed via kubectl exec
+**Date:** 2026-04-19
+**Context:** Task 4.4 needed a fixture skill to land in the agent's bare repo so the per-turn catalog picks it up. The code path `seedAxDirectory` in `server-completions.ts` seeds `.ax/skills/` into the workspace on first turn for `file://` repos. But in k8s-sandbox mode the host never writes the workspace — the sandbox pod does — so `hostGitCommit` (which actually pushes to the bare repo) never fires. Bare repo stays empty forever. No skills → empty catalog → `call_tool` returns `unknown_tool`.
+**Lesson:** Don't rely on the host-side seed path for pre-populating test fixtures in k8s-sandbox mode. Pre-seed the bare repo directly via `kubectl exec` + git plumbing (`hash-object`/`mktree`/`commit-tree`/`update-ref`) during global-setup. It's idempotent, ~30 LOC, and avoids rewriting the k8s flow. Pattern: after helm deploy + rollout, run a script in the host pod that builds a single-file commit tree for the fixture and points `refs/heads/main` at it.
+**Tags:** e2e, k8s, git-local, bare-repo, seed, kubectl-exec
+
+### Catalog tool names enforce /^(mcp|api)_[a-z0-9_]+$/ — no hyphens
+**Date:** 2026-04-19
+**Context:** Wrote a fixture skill at `tests/e2e/fixtures/skills/linear-mcp/SKILL.md`. `buildMcpCatalogTools` synthesized `mcp_linear-mcp_get_team`, which the catalog registry REJECTED with a Zod format-mismatch warning. The reject path is silent (`logger.warn('catalog_register_failed')`, no throw), so the catalog ended up empty and every `call_tool` returned `unknown_tool`. Took one e2e run to diagnose because the reject log is at `warn` level, not `error`.
+**Lesson:** Skill directory names MUST use underscores, not hyphens — the catalog's Zod schema for `CatalogTool.name` is `/^(mcp|api)_[a-z0-9_]+$/`. The register failure is a silent warn, so if you see `unknown_tool` for a freshly-installed skill, the first thing to grep for is `catalog_register_failed` in the host logs. Either tighten the skill-snapshot parser to reject hyphenated dir names at snapshot time (with a clearer error) or slugify them in the adapter. (Task 4.4 just renamed the fixture dir — didn't touch prod behavior.)
+**Tags:** catalog, mcp, skill-naming, zod, silent-failure
+
 ### Playwright reuseExistingServer:true silently serves a stale bundle from another worktree
 **Date:** 2026-04-17
 **Context:** Phase 6 Task 5 UI tests — ran `npx playwright test skills.spec.ts` from `.worktrees/skills-phase6`; tests for the new "Connect with <provider>" button timed out with the error-context snapshot showing the OLD phase-5 "OAuth flow — coming in phase 6" stub. Typecheck was clean, code edits were saved, Vite was up on :5173. Culprit: `playwright.config.ts` has `webServer.reuseExistingServer: !process.env.CI`, and a sibling worktree (`skills-phase5`) had already left a Vite dev server listening on :5173 — so Playwright reused THAT server, which was serving `.worktrees/skills-phase5/ui/admin/src/**` not phase6's edits.

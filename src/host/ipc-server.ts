@@ -4,20 +4,20 @@ import type { TaintBudget } from './taint-budget.js';
 import { IPC_SCHEMAS, IPCEnvelopeSchema } from '../ipc-schemas.js';
 import { getLogger, truncate } from '../logger.js';
 import type { EventBus } from './event-bus.js';
-import type { SkillStateStore } from './skills/state-store.js';
 
 // Domain handler factories
 import { createLLMHandlers } from './ipc-handlers/llm.js';
 import { createMemoryHandlers } from './ipc-handlers/memory.js';
 import { createWebHandlers } from './ipc-handlers/web.js';
-import { createSkillsHandlers } from './ipc-handlers/skills.js';
+import { createAuditHandlers } from './ipc-handlers/audit.js';
 import { createDelegationHandlers } from './ipc-handlers/delegation.js';
 import { createSchedulerHandlers } from './ipc-handlers/scheduler.js';
 import { createArtifactHandlers } from './ipc-handlers/artifact.js';
 import { createPluginHandlers } from './ipc-handlers/plugin.js';
 import { createOrchestrationHandlers } from './ipc-handlers/orchestration.js';
 import { createSandboxToolHandlers } from './ipc-handlers/sandbox-tools.js';
-import { createToolBatchHandlers, type ToolBatchProvider, type ToolBatchOptions } from './ipc-handlers/tool-batch.js';
+import { createDescribeToolsHandler, type CatalogReader } from './ipc-handlers/describe-tools.js';
+import { createCallToolHandler, type CallToolMcpDispatcher, type CallToolOpenApiDispatcher } from './ipc-handlers/call-tool.js';
 import { validateCommit } from './validate-commit.js';
 import type { Orchestrator } from './orchestration/orchestrator.js';
 
@@ -79,13 +79,6 @@ export interface IPCHandlerOptions {
   orchestrator?: Orchestrator;
   /** Maps sessionId → workspace directory path. Populated by processCompletion(), consumed by sandbox tool handlers. */
   workspaceMap?: Map<string, string>;
-  /** Tracks credential_request IPC calls per session. Consumed by processCompletion post-agent loop. */
-  requestedCredentials?: Map<string, Set<string>>;
-  /** Proxy domain allowlist — populated from skill manifests during reconciliation. */
-  domainList?: import('../host/proxy-domain-list.js').ProxyDomainList;
-  /** Returns the MCP provider for tool batch execution (null = not configured).
-   *  Accepts either a simple callback or full ToolBatchOptions with plugin MCP routing. */
-  toolBatchProvider?: ((ctx: IPCContext) => ToolBatchProvider | null) | ToolBatchOptions;
   /** GCS file storage for persistent file access. */
   gcsFileStorage?: import('./gcs-file-storage.js').GcsFileStorage;
   /** File store for file metadata lookups. */
@@ -94,9 +87,28 @@ export interface IPCHandlerOptions {
   onArtifactWritten?: (fileId: string, mimeType: string, filename: string) => void;
   /** Unified session manager — used by fetch_work handler to return queued work. */
   sessionManager?: import('./session-manager.js').SessionManager;
-  /** Git-native skills state store — powers the skills_index IPC handler.
-   *  When omitted, skills_index returns an empty list. */
-  stateStore?: SkillStateStore;
+  /** Per-turn catalog lookup for `describe_tools` / `call_tool` handlers.
+   *  The host populates per-turn state in `processCompletion` (same
+   *  lifetime as `workspaceMap`); this closure reads that state by
+   *  context at IPC time. Returns `undefined` when no catalog has been
+   *  registered for this context — handler treats that as "every name
+   *  is unknown" instead of erroring. */
+  resolveCatalog?: (ctx: IPCContext) => CatalogReader | undefined;
+  /** MCP dispatcher for the `call_tool` handler. Absent → `call_tool` is
+   *  not registered, requests fall through to the default "No handler"
+   *  path (correct failure mode for hosts not in unified-dispatch mode). */
+  callToolMcpDispatcher?: CallToolMcpDispatcher;
+  /** OpenAPI dispatcher for the `call_tool` handler. Parallel to
+   *  `callToolMcpDispatcher` — both must be present for `call_tool` to be
+   *  registered so any openapi-kind catalog entry has a concrete dispatch
+   *  path. Production wires this via `makeDefaultOpenApiDispatcher`
+   *  (server-init.ts); tests pass a throwing stub or a mock. */
+  callToolOpenApiDispatcher?: CallToolOpenApiDispatcher;
+  /** Spill threshold (UTF-8 bytes) for `call_tool` responses. Sourced
+   *  from `config.tool_dispatch.spill_threshold_bytes`. When omitted, the
+   *  `call_tool` handler falls back to the default constant — keeps
+   *  unit-test harnesses that skip server-init wiring working. */
+  spillThresholdBytes?: number;
 }
 
 export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerOptions) {
@@ -109,11 +121,7 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
     ...createLLMHandlers(providers, opts?.configModel, agentId, opts?.eventBus, opts?.workspaceMap),
     ...createMemoryHandlers(providers),
     ...createWebHandlers(providers),
-    ...createSkillsHandlers(providers, {
-      requestedCredentials: opts?.requestedCredentials,
-      eventBus: opts?.eventBus,
-      stateStore: opts?.stateStore,
-    }),
+    ...createAuditHandlers(providers),
     ...createDelegationHandlers(providers, opts),
     ...createSchedulerHandlers(providers, agentId),
     ...createArtifactHandlers(providers, { agentId, gcsFileStorage: opts?.gcsFileStorage, fileStore: opts?.fileStore, onArtifactWritten: opts?.onArtifactWritten }),
@@ -126,7 +134,30 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
       agentId,
       onArtifactWritten: opts?.onArtifactWritten,
     }) : {}),
-    ...(opts?.toolBatchProvider ? createToolBatchHandlers(opts.toolBatchProvider) : {}),
+    // describe_tools — indirect-mode meta-tool, returns full inputSchemas
+    // for host-catalog entries the agent names. Schemas are augmented with
+    // an `_select` jq projection knob (paired with `applyJq` in
+    // `call-tool.ts`). Wired only when a catalog lookup is provided —
+    // absent, the action falls through to the generic "No handler" path,
+    // which is the right failure mode for a host that isn't in
+    // unified-dispatch mode yet.
+    ...(opts?.resolveCatalog ? { describe_tools: createDescribeToolsHandler({ resolveCatalog: opts.resolveCatalog }) } : {}),
+    // call_tool — single-tool dispatch by catalog lookup. Same catalog
+    // plumbing as describe_tools; also needs concrete dispatchers for
+    // every supported `dispatch.kind`. Absent any of the three required
+    // wires (catalog / MCP / OpenAPI) → action falls through to the
+    // generic "No handler" path, which is the right failure mode for a
+    // host that isn't in unified-dispatch mode yet.
+    ...(opts?.resolveCatalog && opts?.callToolMcpDispatcher && opts?.callToolOpenApiDispatcher
+      ? {
+          call_tool: createCallToolHandler({
+            resolveCatalog: opts.resolveCatalog,
+            mcpProvider: opts.callToolMcpDispatcher,
+            openApiProvider: opts.callToolOpenApiDispatcher,
+            spillThresholdBytes: opts.spillThresholdBytes,
+          }),
+        }
+      : {}),
     // Session work loop — agent polls for queued work
     ...(opts?.sessionManager ? {
       fetch_work: async (_req: unknown, ctx: IPCContext) => {
@@ -134,9 +165,10 @@ export function createIPCHandler(providers: ProviderRegistry, opts?: IPCHandlerO
         return { ok: true, payload: payload ?? null };
       },
     } : {}),
-    // Commit validation — git sidecar sends diff for .ax/ file validation
+    // Commit validation — git sidecar sends diff + optional full files for
+    // .ax/ file validation (size + path + SKILL.md frontmatter schema).
     validate_commit: async (req: any) => {
-      return validateCommit(req.diff);
+      return validateCommit(req.diff, req.files);
     },
   };
 

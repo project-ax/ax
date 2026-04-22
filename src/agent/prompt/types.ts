@@ -1,5 +1,6 @@
 // src/agent/prompt/types.ts
 import type { AgentType } from '../../types.js';
+import type { CatalogTool } from '../../types/catalog.js';
 
 /**
  * Skill metadata for system prompt injection.
@@ -51,13 +52,17 @@ export interface PromptContext {
   hasGovernance?: boolean;
   /** Whether the workspace is available. */
   hasWorkspace?: boolean;
-  /** MCP CLI tool names available in PATH (e.g. ['linear', 'github']). */
-  mcpCLIs?: string[];
-  /** Tool module compact index for system prompt (replaces mcpCLIs). */
-  toolModuleIndex?: string;
 
   /** Plugin slash commands surfaced in the system prompt. */
   commands?: Array<{ name: string; pluginName: string; content: string }>;
+
+  /**
+   * Host-authoritative tool catalog delivered via the stdin payload
+   * (tool-dispatch-unification Task 2.3). When present, the agent prompt
+   * renders a "## Available tools" one-liner block from it. Absent/empty
+   * means no skill-declared tools are wired for this session.
+   */
+  catalog?: CatalogTool[];
 }
 
 export interface IdentityFiles {

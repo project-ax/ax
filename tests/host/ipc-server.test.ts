@@ -9,6 +9,8 @@ import { IPCClient } from '../../src/agent/ipc-client.js';
 import { TaintBudget } from '../../src/host/taint-budget.js';
 import type { ProviderRegistry } from '../../src/types.js';
 import type { DocumentStore } from '../../src/providers/storage/types.js';
+import { catalogReaderFromTools } from '../../src/host/ipc-handlers/describe-tools.js';
+import type { CatalogTool } from '../../src/types/catalog.js';
 
 const ctx: IPCContext = { sessionId: 'test-session', agentId: 'test-agent' };
 
@@ -810,4 +812,97 @@ describe('connectIPCBridge (reverse IPC for Apple containers)', () => {
     bridge.close();
     rmSync(tmpDir, { recursive: true, force: true });
   }, 10000);
+});
+
+// ── Task 4.3: end-to-end spill-threshold plumbing ─────────────────────
+//
+// Individual unit tests verify that (a) the call-tool handler honours
+// `spillThresholdBytes` in `CallToolDeps` and (b) `IPCHandlerOptions`
+// carries a matching field. This test spans the boundary so a rename on
+// one side without the other (drift) fails loudly instead of silently
+// falling back to the default.
+describe('IPC Handler spill threshold plumbing (Task 4.3)', () => {
+  test('createIPCHandler threads spillThresholdBytes through to call_tool', async () => {
+    const catalogTool: CatalogTool = {
+      name: 'mcp_test_big',
+      skill: 'test',
+      summary: 's',
+      schema: { type: 'object' },
+      dispatch: { kind: 'mcp', server: 'test', toolName: 'big' },
+    } as CatalogTool;
+
+    const reader = catalogReaderFromTools([catalogTool]);
+    // ~200-byte payload — comfortably over threshold=100 but well under the
+    // 20 KiB default. If the wiring drops the option, the default kicks in,
+    // the response flows through as `{result}`, and the truncated assertion
+    // fails with a clear diff.
+    const payload = { data: 'x'.repeat(200) };
+    const mcpDispatcher = {
+      callToolOnServer: async () => payload,
+    };
+
+    const handle = createIPCHandler(mockRegistry(), {
+      agentId: 'test-agent',
+      resolveCatalog: () => reader,
+      callToolMcpDispatcher: mcpDispatcher,
+      callToolOpenApiDispatcher: {
+        dispatchOperation: async () => {
+          throw new Error('openapi dispatcher should not fire in MCP-only plumbing test');
+        },
+      },
+      spillThresholdBytes: 100,
+    });
+
+    const result = JSON.parse(
+      await handle(
+        JSON.stringify({ action: 'call_tool', tool: 'mcp_test_big', args: {} }),
+        ctx,
+      ),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.truncated).toBe(true);
+    expect(result.full).toEqual(payload);
+    expect(typeof result.preview).toBe('string');
+    expect(result.result).toBeUndefined();
+  });
+
+  test('createIPCHandler falls back to default threshold when option omitted', async () => {
+    const catalogTool: CatalogTool = {
+      name: 'mcp_test_small',
+      skill: 'test',
+      summary: 's',
+      schema: { type: 'object' },
+      dispatch: { kind: 'mcp', server: 'test', toolName: 'small' },
+    } as CatalogTool;
+
+    const reader = catalogReaderFromTools([catalogTool]);
+    const payload = { data: 'x'.repeat(500) }; // ~500 bytes, well under default 20480
+    const mcpDispatcher = {
+      callToolOnServer: async () => payload,
+    };
+
+    const handle = createIPCHandler(mockRegistry(), {
+      agentId: 'test-agent',
+      resolveCatalog: () => reader,
+      callToolMcpDispatcher: mcpDispatcher,
+      callToolOpenApiDispatcher: {
+        dispatchOperation: async () => {
+          throw new Error('openapi dispatcher should not fire in MCP-only plumbing test');
+        },
+      },
+      // spillThresholdBytes intentionally omitted — handler must apply the default
+    });
+
+    const result = JSON.parse(
+      await handle(
+        JSON.stringify({ action: 'call_tool', tool: 'mcp_test_small', args: {} }),
+        ctx,
+      ),
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.result).toEqual(payload);
+    expect(result.truncated).toBeUndefined();
+  });
 });

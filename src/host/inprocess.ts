@@ -20,6 +20,7 @@ import type { Logger } from '../logger.js';
 import { deserializeContent } from '../utils/content-serialization.js';
 import type { McpConnectionManager } from '../plugins/mcp-manager.js';
 import { callToolOnServer } from '../plugins/mcp-client.js';
+import { resolveMcpAuthHeaders } from './server-completions.js';
 
 // ---------------------------------------------------------------------------
 // Per-turn context (AsyncLocalStorage for cross-session isolation)
@@ -51,6 +52,10 @@ export interface FastPathDeps {
   workspaceBasePath: string;
   /** Per-agent plugin MCP server registry. */
   mcpManager?: McpConnectionManager;
+  /** Tuple-keyed skill credential store. Used by the call-time
+   *  `authForServer` resolver to look up Bearer tokens for skill-declared
+   *  MCP servers. Absent in test/legacy wiring — falls back to no auth. */
+  skillCredStore?: import('./skills/skill-cred-store.js').SkillCredStore;
 }
 
 export interface FastPathRequest {
@@ -183,12 +188,37 @@ export async function runFastPath(
             return rh(JSON.stringify(h), providers.credentials);
           }
         : undefined;
-      const authForServer = providers.credentials
-        ? async (server: { name: string; url: string }) => {
-            const prefix = server.name.toUpperCase().replace(/-/g, '_');
-            for (const suffix of ['_API_KEY', '_ACCESS_TOKEN', '_OAUTH_TOKEN', '_TOKEN']) {
-              const value = await providers.credentials.get(`${prefix}${suffix}`);
-              if (value) return { Authorization: `Bearer ${value}` };
+      // Discovery-time auth: resolve from skill_credentials when available,
+      // else fall back to the legacy providers.credentials lookup. Same
+      // rationale as the call-time path in this file — skill credentials
+      // live in the tuple-keyed store after the SSoT migration.
+      const authForServer = deps.skillCredStore
+        ? async (server: { name: string; url: string; skillName?: string }) => {
+            // Only consult the tuple-keyed skill_credentials store when we
+            // know the declaring skill — otherwise we can't filter by
+            // (skillName, envName) and the cross-skill isolation guarantee
+            // the resolver enforces would be undermined. Admin-added /
+            // plugin-added servers (no skillName) fall through to the
+            // legacy providers.credentials path below.
+            if (server.skillName) {
+              const headers = await resolveMcpAuthHeaders({
+                serverName: server.name,
+                skillName: server.skillName,
+                agentId: request.agentId,
+                userId: request.userId,
+                skillCredStore: deps.skillCredStore!,
+              });
+              if (headers) return headers;
+            }
+            // Fallback for admin-added servers whose credentials still live
+            // in providers.credentials (legacy path — untouched by the
+            // skills SSoT migration).
+            if (providers.credentials) {
+              const prefix = server.name.toUpperCase().replace(/-/g, '_');
+              for (const suffix of ['_API_KEY', '_ACCESS_TOKEN', '_OAUTH_TOKEN', '_TOKEN']) {
+                const value = await providers.credentials.get(`${prefix}${suffix}`);
+                if (value) return { Authorization: `Bearer ${value}` };
+              }
             }
             return undefined;
           }
@@ -261,14 +291,27 @@ export async function runFastPath(
             return rh(JSON.stringify(h), providers.credentials);
           }
         : undefined,
-      authForServer: providers.credentials
-        ? async (server: { name: string; url: string }) => {
-            const prefix = server.name.toUpperCase().replace(/-/g, '_');
-            for (const suffix of ['_API_KEY', '_ACCESS_TOKEN', '_OAUTH_TOKEN', '_TOKEN']) {
-              const value = await providers.credentials.get(`${prefix}${suffix}`);
-              if (value) return { Authorization: `Bearer ${value}` };
-            }
-            return undefined;
+      // Resolve Bearer auth for skill-declared MCP servers from the
+      // tuple-keyed `skill_credentials` store (not the legacy
+      // `providers.credentials`). Skill credentials live in
+      // `skill_credentials` after the SSoT migration.
+      authForServer: deps.skillCredStore
+        ? async (server: { name: string; url: string; agentId: string; userId: string; skillName?: string }) => {
+            // Without the declaring skill we can't scope the lookup to
+            // `(skillName, envName)` — return undefined and let the tool
+            // router's call land without auth rather than guess the
+            // wrong cross-skill row. Skill-declared servers carry
+            // `skillName` via `mcp-registry-sync.ts`; admin/plugin
+            // registrations don't, and historically never used this
+            // resolver anyway.
+            if (!server.skillName) return undefined;
+            return resolveMcpAuthHeaders({
+              serverName: server.name,
+              skillName: server.skillName,
+              agentId: server.agentId,
+              userId: server.userId,
+              skillCredStore: deps.skillCredStore!,
+            });
           }
         : undefined,
       mcp: providers.mcp, // @deprecated — legacy fallback; remove when McpConnectionManager replaces all callers

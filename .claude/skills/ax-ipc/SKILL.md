@@ -86,7 +86,6 @@ This interface enables transport-agnostic IPC usage in runners and tools (e.g. `
 | Scheduler   | `scheduler_run_at`     | `datetime`, `prompt`, `maxTokenBudget?`, `delivery?`      | `jobId`                       |
 | Scheduler   | `scheduler_remove_cron`| `id`                                                      | `removed`                     |
 | Scheduler   | `scheduler_list_jobs`  | (none)                                                    | `jobs`                        |
-| Skills      | `skills_index`         | (none)                                                    | `skills` (list of installed skills with state) |
 | Skills      | `skill_propose`        | `skill`, `content`, `reason?`                             | `proposalId`, `decision`      |
 | Sandbox     | `sandbox_bash`         | `command`                                                 | (exec result)                 |
 | Sandbox     | `sandbox_read_file`    | `path`                                                    | `content`                     |
@@ -96,7 +95,8 @@ This interface enables transport-agnostic IPC usage in runners and tools (e.g. `
 | Sandbox Audit | `sandbox_result`     | `operation` (bash/read/write/edit), `command?`, `path?`, `success?`, `output?`, `error?`, `exitCode?` | `ok` |
 | Plugin      | `plugin_list`          | (none)                                                    | `plugins`                     |
 | Plugin      | `plugin_status`        | `packageName`                                             | (status result)               |
-| Tool Batch  | `tool_batch`           | `calls` (array with `__batchRef` pipelining)              | `results`                     |
+| Tool Dispatch | `describe_tools`     | `names` (string[], empty = full directory)                | `tools` (schemas)             |
+| Tool Dispatch | `call_tool`          | `tool` (catalog name), `args` (incl. optional `_select` jq)| `result` or truncated envelope |
 | Session     | `session_expiring`     | `sessionId`, `remainingSec`                               | `ok`                          |
 
 All responses are wrapped: `{ "ok": true, ...fields }` on success, `{ "ok": false, "error": "..." }` on failure.

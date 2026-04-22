@@ -22,7 +22,6 @@ import { createAdminHandler, _rateLimits, type AdminDeps } from '../../src/host/
 import type { Config } from '../../src/types.js';
 import { createSqliteRegistry } from '../../src/host/agent-registry-db.js';
 import { createEventBus } from '../../src/host/event-bus.js';
-import { ProxyDomainList } from '../../src/host/proxy-domain-list.js';
 import { runMigrations } from '../../src/utils/migrator.js';
 import { adminOAuthMigrations } from '../../src/migrations/admin-oauth-providers.js';
 import {
@@ -55,7 +54,7 @@ function makeConfig(): Config {
       sandbox: 'docker',
       scheduler: 'none',
     },
-    sandbox: { timeout_sec: 120, memory_mb: 512 },
+    sandbox: { timeout_sec: 120, memory_mb: 512, cpus: 1 },
     scheduler: {
       active_hours: { start: '07:00', end: '23:00', timezone: 'UTC' },
       max_token_budget: 4096,
@@ -115,7 +114,6 @@ async function mockDeps(opts: MockDepsOpts = {}): Promise<MockDepsResult> {
       set: vi.fn().mockResolvedValue(undefined),
       delete: vi.fn().mockResolvedValue(undefined),
       list: vi.fn().mockResolvedValue([]),
-      listScopePrefix: vi.fn().mockResolvedValue([]),
     },
   };
 
@@ -126,7 +124,6 @@ async function mockDeps(opts: MockDepsOpts = {}): Promise<MockDepsResult> {
     agentRegistry: registry,
     startTime: Date.now() - 60_000,
   };
-  deps.domainList = new ProxyDomainList();
 
   let oauthStore: AdminOAuthProviderStore | undefined;
   let close: (() => Promise<void>) | undefined;

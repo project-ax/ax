@@ -17,25 +17,33 @@ import { HttpChatTransport, type UIMessage, type UIMessageChunk } from 'ai';
 
 const DEFAULT_USER = 'guest';
 
-export interface CredentialRequiredEvent {
-  envName: string;
-  sessionId: string;
-  requestId: string;
-}
-
 export interface StatusEvent {
   operation: string;
   phase: string;
   message: string;
 }
 
+/**
+ * Shape matches `src/host/diagnostics.ts` exactly — host is the wire
+ * authority. Keep `context` primitives-only and `timestamp` required so a
+ * future drift on either side shows up as a TypeScript error instead of
+ * silently rendering an undefined-shaped row.
+ */
+export interface Diagnostic {
+  severity: 'info' | 'warn' | 'error';
+  kind: string;
+  message: string;
+  context?: Record<string, string | number | boolean>;
+  timestamp: string;
+}
+
 interface AxChatTransportOptions {
   api?: string;
   user?: string;
   model?: string;
-  onCredentialRequired?: (event: CredentialRequiredEvent) => void;
   onStatus?: (event: StatusEvent) => void;
   onRunStart?: () => void;
+  onDiagnostic?: (d: Diagnostic) => void;
 }
 
 /**
@@ -50,9 +58,9 @@ function extractText(msg: UIMessage): string {
 }
 
 export class AxChatTransport extends HttpChatTransport<UIMessage> {
-  private onCredentialRequired?: (event: CredentialRequiredEvent) => void;
   private onStatus?: (event: StatusEvent) => void;
   private onRunStart?: () => void;
+  private onDiagnostic?: (d: Diagnostic) => void;
 
   constructor(opts: AxChatTransportOptions = {}) {
     const user = opts.user ?? DEFAULT_USER;
@@ -92,9 +100,9 @@ export class AxChatTransport extends HttpChatTransport<UIMessage> {
         },
       }),
     });
-    this.onCredentialRequired = opts.onCredentialRequired;
     this.onStatus = opts.onStatus;
     this.onRunStart = opts.onRunStart;
+    this.onDiagnostic = opts.onDiagnostic;
   }
 
   /**
@@ -109,8 +117,8 @@ export class AxChatTransport extends HttpChatTransport<UIMessage> {
     let started = false;
     // Track named SSE events (event: line precedes data: line)
     let pendingEventName: string | null = null;
-    const credentialCallback = this.onCredentialRequired;
     const statusCallback = this.onStatus;
+    const diagnosticCallback = this.onDiagnostic;
 
     // Buffer for incomplete SSE lines split across TextDecoderStream chunks
     let carry = '';
@@ -159,18 +167,18 @@ export class AxChatTransport extends HttpChatTransport<UIMessage> {
               if (!trimmed.startsWith('data: ')) continue;
 
               // Handle named events
-              if (pendingEventName === 'credential_required' && credentialCallback) {
-                try {
-                  const payload = JSON.parse(trimmed.slice(6));
-                  credentialCallback(payload);
-                } catch { /* malformed event, skip */ }
-                pendingEventName = null;
-                continue;
-              }
               if (pendingEventName === 'status') {
                 try {
                   const payload = JSON.parse(trimmed.slice(6));
                   statusCallback?.(payload);
+                } catch { /* malformed event, skip */ }
+                pendingEventName = null;
+                continue;
+              }
+              if (pendingEventName === 'diagnostic') {
+                try {
+                  const payload = JSON.parse(trimmed.slice(6));
+                  diagnosticCallback?.(payload);
                 } catch { /* malformed event, skip */ }
                 pendingEventName = null;
                 continue;

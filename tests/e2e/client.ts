@@ -67,7 +67,16 @@ export class AcceptanceClient {
         };
       }
 
-      return await this.parseSSEStream(response.body, response.status);
+      const parsed = await this.parseSSEStream(response.body, response.status);
+      // Defense-in-depth: "Internal processing error" is what server-request-handlers
+      // sends on an unhandled host-side crash. It's returned as HTTP 200 with the
+      // phrase in the content stream, so assertions like `content.length > 0` pass
+      // right through it. Throwing here forces every test to surface the crash as a
+      // failure instead of a silent pass. (Task 4.4 follow-up.)
+      if (/Internal processing error/i.test(parsed.content)) {
+        throw new Error(`host returned "Internal processing error" — check ax-host pod logs. Full content: ${parsed.content.slice(0, 500)}`);
+      }
+      return parsed;
     } finally {
       clearTimeout(timeout);
     }

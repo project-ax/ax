@@ -44,7 +44,7 @@ function powerUserConfig(): Config {
       credentials: 'database', audit: 'database',
       sandbox: 'docker', scheduler: 'plainjob',
     },
-    sandbox: { timeout_sec: 60, memory_mb: 512 },
+    sandbox: { timeout_sec: 60, memory_mb: 512, cpus: 1 },
     scheduler: {
       active_hours: { start: '00:00', end: '23:59', timezone: 'UTC' },
       max_token_budget: 8192,

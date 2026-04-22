@@ -2,6 +2,14 @@
 
 Sandbox providers, canonical paths, workspace tiers.
 
+## [2026-04-21 08:46] — Make sandbox CPU configurable via `config.sandbox.cpus`
+
+**Task:** Expose sandbox CPU as a first-class config field. Previously only `memory_mb` was user-configurable; CPU was hardcoded to `"1"` in the k8s provider (`DEFAULT_CPU_LIMIT`) and to `cpus: 1` at the spawn site in `server-completions.ts`.
+**What I did:** Added `cpus` (0.1–16, default 1) to `ConfigSchema` and `Config.sandbox`. Plumbed it through `server-completions.ts` spawn site and `server-init.ts` heavy-tier fallback. Replaced `DEFAULT_CPU_LIMIT` constant with `DEFAULT_CPUS` and made k8s pod spec read `config.cpus`. Docker/Apple providers already read `config.cpus`, so they now receive the user value instead of the hardcoded 1. Heavy-tier override (`cpus: 4`) still takes precedence when `resourceTier: 'heavy'` is requested via delegate.
+**Files touched:** `src/config.ts`, `src/types.ts`, `src/providers/sandbox/k8s.ts`, `src/host/server-completions.ts`, `src/host/server-init.ts`, `tests/config.test.ts` (+3 new cases), `tests/providers/sandbox/{k8s,docker,apple}.test.ts`, `tests/providers/llm/router.test.ts`, `tests/providers/channel/slack.test.ts`, `tests/providers/scheduler/plainjob.test.ts`, `tests/host/{server-admin,server-admin-skills,server-admin-oauth-start,server-admin-oauth-providers,scheduler-timeout,registry}.test.ts`, `tests/sandbox-isolation.test.ts`, `tests/integration/{phase1,phase2}.test.ts`, `.claude/skills/ax-config/SKILL.md`
+**Outcome:** Success — clean `npm run build`; 54 targeted tests pass.
+**Notes:** Made `cpus` required in the TS `Config.sandbox` type (matches the Zod-parsed output) even though the Zod input has `.default(1)`. This forced updates to ~15 inline `Config` fixtures in tests. The heavy-tier `cpus: 4` in `server-init.ts:339` was previously dead (spread into config but spawn site hardcoded 1) — it now takes effect.
+
 ## [2026-03-18 08:25] — Fix terminal sandbox pod accumulation in k8s
 
 **Task:** Cold-started k8s sandbox pods were accumulating in Error/Failed state because nothing cleaned them up after exit.

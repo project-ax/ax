@@ -4,6 +4,7 @@ Configuration, paths, environment, onboarding wizard, model routing.
 
 ## Entries
 
+- 2026-04-19 18:33 — Add tool_dispatch config shape (Task 3.1) [tool-dispatch.md](tool-dispatch.md)
 - 2026-04-05 — Add auth config defaults to ConfigSchema [plugins.md](plugins.md)
 - 2026-03-29 11:50 — Add per-agent plugins config field to ax.yaml [plugins.md](plugins.md)
 - 2026-03-06 22:10 — Refactor k8s init: replace --llm-provider/--embeddings-provider with --model/--embeddings-model [onboarding.md](onboarding.md)

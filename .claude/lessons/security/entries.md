@@ -1,5 +1,11 @@
 # Security
 
+### Credential resolvers MUST filter by (skillName, envName, userId) — never fall back to `matching[0]`
+**Date:** 2026-04-21
+**Context:** PR #185 code review flagged four related credential-isolation bugs. The resolvers (`resolveMcpAuthHeaders`, `resolveMcpAuthHeadersByCredential`, `resolveCredentialValueByEnvName`, `resolveValue`) all filtered `skill_credentials` rows by envName alone and used `const selected = user ?? agent ?? matching[0]` as the final fallback. That `matching[0]` was silently borrowing another user's or another skill's row whenever the caller's tuple wasn't present. `loadAgentProjection` had the same shape: it added `${skillName}/${envName}@user` for ANY non-empty `row.userId`, flipping the skill to "enabled" for Bob as soon as Alice stored her credential.
+**Lesson:** Any credential lookup keyed on envName MUST also filter by the declaring skillName AND the calling userId. The shape is `user ?? agent` — no `matching[0]`. Make skillName REQUIRED (not optional `skillName?: string`) on the resolver signature — required prevents the silent-fallback pattern this closes. The `process.env[envName]` dev fallback is fine because it's pre-skill-credentials infra and doesn't have the cross-user problem. When state-derivation structures need a viewer perspective (e.g. "is this skill enabled for Bob?"), thread `userId` through and only attribute `@user` rows where `row.userId === viewer`. Admin aggregate views stay the old "any user satisfies" shape by passing `userId: undefined`.
+**Tags:** security, credentials, skill-credentials, isolation, cross-user, cross-skill, resolver, pr-185
+
 ### Always pin GCM auth tag length to 16 — Node accepts 4-16 byte tags by default
 **Date:** 2026-04-17
 **Context:** Semgrep's `javascript.node-crypto.security.gcm-no-tag-length.gcm-no-tag-length` rule flagged `createDecipheriv('aes-256-gcm', key, iv)` in `admin-oauth-providers.ts`. Node's GCM mode accepts any auth tag length from 4 to 16 bytes unless you pass `{ authTagLength: 16 }` as the 4th arg. That means a tamperer could replace our 16-byte tag with a shorter forged one and dramatically lower the work factor for a successful forgery — even if your application logic only ever generates 16-byte tags.

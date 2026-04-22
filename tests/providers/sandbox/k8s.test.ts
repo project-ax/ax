@@ -75,7 +75,7 @@ function mockConfig(): Config {
       credentials: 'database', skills: 'database', audit: 'database',
       sandbox: 'k8s', scheduler: 'none',
     },
-    sandbox: { timeout_sec: 30, memory_mb: 256 },
+    sandbox: { timeout_sec: 30, memory_mb: 256, cpus: 1 },
     scheduler: {
       active_hours: { start: '08:00', end: '22:00', timezone: 'UTC' },
       max_token_budget: 1000,

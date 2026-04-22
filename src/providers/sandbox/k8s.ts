@@ -28,7 +28,7 @@ const logger = getLogger().child({ component: 'sandbox-k8s' });
 const DEFAULT_IMAGE = 'ax/agent:latest';
 const DEFAULT_NAMESPACE = 'ax';
 const DEFAULT_RUNTIME_CLASS = 'gvisor';
-const DEFAULT_CPU_LIMIT = '1';
+const DEFAULT_CPUS = 1;
 const DEFAULT_MEMORY_LIMIT = '1Gi';
 
 /** Synthetic PID counter — k8s pods don't have local PIDs. */
@@ -141,11 +141,11 @@ function buildPodSpec(
           workingDir: '/workspace',
           resources: {
             requests: {
-              cpu: DEFAULT_CPU_LIMIT,
+              cpu: String(config.cpus ?? DEFAULT_CPUS),
               memory: config.memoryMB ? `${config.memoryMB}Mi` : DEFAULT_MEMORY_LIMIT,
             },
             limits: {
-              cpu: DEFAULT_CPU_LIMIT,
+              cpu: String(config.cpus ?? DEFAULT_CPUS),
               memory: config.memoryMB ? `${config.memoryMB}Mi` : DEFAULT_MEMORY_LIMIT,
             },
           },

@@ -36,7 +36,7 @@ import { convertPiMessages, emitStreamEvents, injectFileBlocks } from '../stream
 import { createProxyStreamFn } from '../proxy-stream.js';
 import { makeProxyErrorMessage } from '../proxy-stream.js';
 import type { ContentBlock } from '../../types.js';
-import { buildSystemPrompt, fetchSkillsIndex, subscribeAgentEvents } from '../agent-setup.js';
+import { buildSystemPrompt, subscribeAgentEvents } from '../agent-setup.js';
 import { GitWorkspace } from '../git-workspace.js';
 import { getLogger, truncate } from '../../logger.js';
 
@@ -239,7 +239,6 @@ function makeErrorMessage(errorText: string, api = 'ax-ipc'): AssistantMessage {
 import { TOOL_CATALOG, filterTools } from '../tool-catalog.js';
 import type { ToolFilterContext } from '../tool-catalog.js';
 import { createLocalSandbox } from '../local-sandbox.js';
-import { executeScript } from '../execute-script.js';
 
 function text(t: string) {
   return { content: [{ type: 'text' as const, text: t }], details: undefined };
@@ -278,7 +277,7 @@ interface IPCToolDefsOptions {
   /** Tool filter context — excludes tools irrelevant to the current session. */
   filter?: ToolFilterContext;
   /** When set, sandbox tools execute locally with host audit gate. */
-  localSandbox?: { client: IIPCClient; workspace: string };
+  localSandbox?: { client: IIPCClient; workspace: string; sessionId?: string };
 }
 
 function createIPCToolDefinitions(client: IIPCClient, opts?: IPCToolDefsOptions): ToolDefinition[] {
@@ -295,7 +294,7 @@ function createIPCToolDefinitions(client: IIPCClient, opts?: IPCToolDefsOptions)
 
   // Lazily create local sandbox executor if configured
   const sandbox = opts?.localSandbox
-    ? createLocalSandbox({ client: opts.localSandbox.client, workspace: opts.localSandbox.workspace })
+    ? createLocalSandbox({ client: opts.localSandbox.client, workspace: opts.localSandbox.workspace, sessionId: opts.localSandbox.sessionId })
     : null;
 
   // Cast params to Record<string, unknown> since TypeBox Static types
@@ -308,7 +307,7 @@ function createIPCToolDefinitions(client: IIPCClient, opts?: IPCToolDefsOptions)
   // Per-action failure tracking for circuit-breaking retry loops
   const actionFailures = new Map<string, number>();
 
-  return catalog.map(spec => ({
+  const tools = catalog.map(spec => ({
     name: spec.name,
     label: spec.label,
     description: spec.description,
@@ -346,13 +345,12 @@ function createIPCToolDefinitions(client: IIPCClient, opts?: IPCToolDefsOptions)
         );
       }
 
-      // execute_script always runs locally — it only needs Node.js and the filesystem
-      if (action === 'execute_script') {
-        const result = executeScript(
-          { code: callParams.code as string, timeoutMs: callParams.timeoutMs as number | undefined },
-          opts?.localSandbox?.workspace ?? process.cwd(),
-        );
-        return text(JSON.stringify(result));
+      // skill_write — validator + FS write in the sandbox container so the
+      // git sidecar (which shares /workspace) commits the bytes that
+      // actually validated. The host-side handler is a dead fallback in
+      // k8s mode because the host workspace ≠ the pod workspace.
+      if (sandbox && action === 'skill_write') {
+        return text(JSON.stringify(await sandbox.writeSkillFile(callParams as never)));
       }
 
       // Route sandbox tools to local executor when in container
@@ -403,6 +401,8 @@ function createIPCToolDefinitions(client: IIPCClient, opts?: IPCToolDefsOptions)
       return result;
     },
   })) as ToolDefinition[];
+
+  return tools;
 }
 
 // ── Main runner ─────────────────────────────────────────────────────
@@ -533,15 +533,6 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
   const client = config.ipcClient ?? new IPCClient({ socketPath: config.ipcSocket, listen: config.ipcListen, sessionId: config.sessionId, requestId: config.requestId, userId: config.userId, sessionScope: config.sessionScope });
   if (!config.ipcClient) await client.connect();
 
-  // Fetch host-authoritative skills index before building the prompt. Guard on
-  // `skills === undefined` so injected skills (e.g., tests) take precedence.
-  // fetchSkillsIndex returns undefined on transport errors — buildSystemPrompt
-  // then falls back to the workspace filesystem scan.
-  if (config.skills === undefined) {
-    const fetched = await fetchSkillsIndex(client);
-    if (fetched) config.skills = fetched;
-  }
-
   // Register LLM provider (replaces built-in providers — no network in sandbox)
   clearApiProviders();
   if (useProxy) {
@@ -570,10 +561,11 @@ export async function runPiSession(config: AgentConfig): Promise<void> {
   const CONTAINER_SANDBOXES = new Set(['docker', 'apple', 'k8s']);
   const useLocalSandbox = CONTAINER_SANDBOXES.has(config.sandboxType ?? '');
   logger.info('sandbox_type_check', { sandboxType: config.sandboxType, useLocalSandbox });
+
   const ipcToolDefs = createIPCToolDefinitions(client, {
     userId: config.userId,
     filter: toolFilter,
-    ...(useLocalSandbox ? { localSandbox: { client, workspace: config.workspace } } : {}),
+    ...(useLocalSandbox ? { localSandbox: { client, workspace: config.workspace, sessionId: config.sessionId } } : {}),
   });
 
   logger.debug('session_config', {

@@ -147,6 +147,65 @@ describe('/internal/ipc route', () => {
     expect(body).toEqual({ ok: true, data: [1, 2, 3] });
   });
 
+  // Regression: some script-side callers post plain `{action, tool, args}`
+  // without stamping `_sessionId` on the body. The handler therefore falls
+  // back to `entry.ctx.sessionId`. If the turn rewrote the `:_:` placeholder
+  // in sessionId AFTER registering the token (see `rewriteSessionPlaceholder`
+  // in server-completions.ts), the token's ctx still held the pre-rewrite form
+  // and `catalogMap.get(sessionId)` returned undefined → "unknown tool"
+  // despite the catalog being populated. Fix: wire `updateTurnCtx` from
+  // server.ts through CompletionDeps and call it right after the rewrite so
+  // entry.ctx stays in sync.
+  test('mutating entry.ctx is visible to subsequent unstamped requests', async () => {
+    const captured: IPCContext[] = [];
+    const handleIPC = vi.fn().mockImplementation(async (_raw: string, ctx: IPCContext) => {
+      captured.push({ ...ctx });
+      return '{"ok":true}';
+    });
+
+    // Simulate server.ts at turn-start: register token with ORIGINAL sessionId
+    // (still contains `:_:` placeholder — agentId not yet resolved).
+    const entry: ActiveTokenEntry = {
+      handleIPC,
+      ctx: { sessionId: 'http:dm:_:alice:t1', agentId: 'main', userId: 'alice' },
+    };
+    activeTokens.set('tok', entry);
+
+    // Request 1 — pre-rewrite. Handler sees the ORIGINAL sessionId.
+    await fetch(`http://127.0.0.1:${port}/internal/ipc`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer tok', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'call_tool', tool: 'mcp_linear_get_team', args: {} }),
+    });
+    expect(captured[0].sessionId).toBe('http:dm:_:alice:t1');
+
+    // Simulate processCompletion: rewrite placeholder then invoke the
+    // updateTurnCtx callback that server.ts wires. This is the exact
+    // mutation server.ts performs — if this pattern ever drifts, the
+    // integration breaks silently.
+    const updateTurnCtx = (updates: { sessionId?: string; agentId?: string }) => {
+      const e = activeTokens.get('tok');
+      if (!e) return;
+      e.ctx = {
+        ...e.ctx,
+        ...(updates.sessionId !== undefined ? { sessionId: updates.sessionId } : {}),
+        ...(updates.agentId !== undefined ? { agentId: updates.agentId } : {}),
+      };
+    };
+    updateTurnCtx({ sessionId: 'http:dm:agent-abc:alice:t1', agentId: 'agent-abc' });
+
+    // Request 2 — post-rewrite, same token, still no `_sessionId` stamp.
+    // Handler MUST see the REWRITTEN sessionId so per-turn map lookups
+    // (catalogMap, workspaceMap) resolve.
+    await fetch(`http://127.0.0.1:${port}/internal/ipc`, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer tok', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'call_tool', tool: 'mcp_linear_get_team', args: {} }),
+    });
+    expect(captured[1].sessionId).toBe('http:dm:agent-abc:alice:t1');
+    expect(captured[1].agentId).toBe('agent-abc');
+  });
+
   test('cleans up token on turn completion', async () => {
     activeTokens.set('temp-tok', {
       handleIPC: async () => '{"ok":true}',

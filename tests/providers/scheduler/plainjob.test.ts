@@ -24,7 +24,7 @@ const mockConfig = {
   agent_name: AGENT,
   profile: 'paranoid',
   providers: { memory: 'cortex', security: 'patterns', channels: ['cli'], web: { extract: 'none', search: 'none' }, credentials: 'database', skills: 'database', audit: 'database', sandbox: 'docker', scheduler: 'plainjob' },
-  sandbox: { timeout_sec: 120, memory_mb: 512 },
+  sandbox: { timeout_sec: 120, memory_mb: 512, cpus: 1 },
   scheduler: {
     active_hours: { start: '00:00', end: '23:59', timezone: 'UTC' },
     max_token_budget: 4096,
@@ -349,6 +349,8 @@ describe('scheduler-plainjob', () => {
   test('heartbeat message includes HEARTBEAT.md content from git workspace', async () => {
     const mockWorkspace = {
       async getRepoUrl() { return { url: 'file:///mock-repo', created: false }; },
+      async ensureLocalMirror() { return '/mock-repo'; },
+      async commitFiles() { return { commit: null, changed: false }; },
       async close() {},
     };
 
